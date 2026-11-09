@@ -24,7 +24,7 @@ export function cloudRoutes(kit: ChannelRouteKit) {
   const routes = new Hono();
   const { base, canRead, canManage, writeLimit, validId } = kit;
 
-  /** Módulo fora de `CHANNEL_PROVIDERS`: as rotas dele não existem. */
+  /** Módulo fora de `CHANNEL_PROVIDERS`: as rotas dele não existem (depois da permissão). */
   const active = createMiddleware(async (c, next) => {
     if (!isProviderEnabled("whatsapp_cloud")) return c.json({ error: "Não encontrado." }, 404);
 
@@ -37,8 +37,8 @@ export function cloudRoutes(kit: ChannelRouteKit) {
 
   routes.post(
     `${base}/whatsapp-cloud`,
-    active,
     canManage,
+    active,
     kit.limit("channel-cloud-create", 10),
     zValidator("json", createCloudChannelSchema, validationError),
     async (c) =>
@@ -49,22 +49,22 @@ export function cloudRoutes(kit: ChannelRouteKit) {
       ),
   );
 
-  routes.get(`${base}/:id/webhook`, active, canManage, validId, async (c) =>
+  routes.get(`${base}/:id/webhook`, canManage, active, validId, async (c) =>
     c.json(await webhookOf(kit.scopeOf(c), id(c)), 200, noStore),
   );
 
-  routes.post(`${base}/:id/webhook/rotate`, active, canManage, writeLimit, validId, async (c) =>
+  routes.post(`${base}/:id/webhook/rotate`, canManage, active, writeLimit, validId, async (c) =>
     c.json(await rotateWebhook(kit.scopeOf(c), id(c), kit.actorOf(c)), 200, noStore),
   );
 
-  routes.post(`${base}/:id/test`, active, canManage, writeLimit, validId, async (c) =>
+  routes.post(`${base}/:id/test`, canManage, active, writeLimit, validId, async (c) =>
     c.json(await diagnoseCloudChannel(kit.scopeOf(c), id(c))),
   );
 
   routes.get(
     `${base}/:id/templates`,
-    active,
     canRead,
+    active,
     validId,
     zValidator("query", listTemplatesQuerySchema, validationError),
     async (c) =>
@@ -73,8 +73,8 @@ export function cloudRoutes(kit: ChannelRouteKit) {
 
   routes.post(
     `${base}/:id/templates/sync`,
-    active,
     canManage,
+    active,
     kit.limit("channel-cloud-templates-sync", 5),
     validId,
     async (c) => c.json(await syncChannelTemplates(kit.scopeOf(c), id(c))),

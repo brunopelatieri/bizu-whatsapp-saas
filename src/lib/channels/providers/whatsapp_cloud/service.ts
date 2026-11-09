@@ -148,9 +148,10 @@ export async function createCloudChannel(
     throw phoneInUse();
   }
 
-  const registered = input.pin
+  const { pin } = input;
+  const registered = pin
     ? await callMeta(() =>
-        registerPhoneNumber({ ...credentials, phoneNumberId: input.phoneNumberId, pin: input.pin! }),
+        registerPhoneNumber({ ...credentials, phoneNumberId: input.phoneNumberId, pin }),
       )
     : null;
   await callMeta(() => subscribeWabaToApp({ ...credentials, wabaId: input.wabaId }));
@@ -287,9 +288,10 @@ export async function updateCloudChannel(
     info = await callMeta(() =>
       verifyPhoneNumber({ ...credentials, phoneNumberId: cloud.phoneNumberId }),
     );
-    if (input.pin) {
+    const { pin } = input;
+    if (pin) {
       await callMeta(() =>
-        registerPhoneNumber({ ...credentials, phoneNumberId: cloud.phoneNumberId, pin: input.pin! }),
+        registerPhoneNumber({ ...credentials, phoneNumberId: cloud.phoneNumberId, pin }),
       );
       registered = true;
     }
