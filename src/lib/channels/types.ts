@@ -190,6 +190,49 @@ export type WebhookContext = {
 
 export type VerifyResult = { ok: true; dedupeKey: string } | { ok: false; reason: string };
 
+/** Referência de uma mídia já gravada no `StorageProvider`: é o que fica no `raw` do aviso. */
+export type StoredMedia = { storageKey: string; mime: string | null; size: number };
+
+/** Grava os bytes sob `inbound/<chave aleatória>` e devolve a referência. */
+export type StoreInboundMedia = (body: Buffer, mime: string | null) => Promise<StoredMedia>;
+
+/** Mídia citada por endereço no aviso: baixada e gravada, ou o motivo de ter sido recusada. */
+export type ResolvedInboundMedia =
+  | { outcome: "unchanged" }
+  | { outcome: "stored"; raw: unknown }
+  | { outcome: "ignored"; reason: string };
+
+export type PairingQr =
+  | { alreadyConnected: true }
+  | { alreadyConnected: false; qrcode: string | null; code: string | null; expiresInSeconds: number };
+
+/**
+ * Operações de canal com pareamento (capacidade `pairing`): QR Code e código digitado no
+ * celular. O núcleo grava o canal e o estado; o módulo só fala com o servidor do provedor.
+ */
+export interface PairingOperations {
+  /** Quantas instâncias o servidor do provedor tem (todos os escopos) e o teto configurado. */
+  capacity(): Promise<{ used: number; max: number }>;
+  /** Cria a instância no servidor. `scopeKey` é o tenant, ou um texto estável da plataforma. */
+  createInstance(input: {
+    scopeKey: string;
+    label: string;
+    instanceToken: string;
+  }): Promise<{ remoteInstanceId: string | null; remoteInstanceName: string }>;
+  /** Registra o webhook e as famílias de evento. Reexecutável. */
+  connect(ctx: ChannelContext): Promise<void>;
+  qr(ctx: ChannelContext): Promise<PairingQr>;
+  pairingCode(ctx: ChannelContext, phone: string): Promise<{ pairingCode: string }>;
+  disconnect(ctx: ChannelContext): Promise<void>;
+  logout(ctx: ChannelContext): Promise<void>;
+  reconnect(ctx: ChannelContext): Promise<void>;
+  /** Devolve os ajustes como o servidor os gravou. */
+  updateSettings(
+    ctx: ChannelContext,
+    settings: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+}
+
 export interface ChannelProvider {
   type: ChannelType;
   capabilities: ChannelCapabilities;
@@ -211,4 +254,16 @@ export interface ChannelProvider {
    * Evolution). "Já não existe" é sucesso. Ausente: não há nada a apagar (Cloud API).
    */
   destroy?(ctx: ChannelContext): Promise<void>;
+  /** Só com a capacidade `pairing`. */
+  pairing?: PairingOperations;
+  /**
+   * Tira do aviso a mídia embutida (base64), grava com `store` e devolve o aviso com a
+   * referência no lugar. Roda no webhook, antes de o aviso ir para `channel_event.raw`.
+   */
+  externalizeInboundMedia?(raw: unknown, store: StoreInboundMedia): Promise<unknown>;
+  /**
+   * Mídia citada por endereço (`mediaUrl`): confere a origem, baixa e grava. Roda no job.
+   * Lança `PermanentEventError` quando o endereço responde 403 ou 404.
+   */
+  resolveInboundMedia?(raw: unknown, store: StoreInboundMedia): Promise<ResolvedInboundMedia>;
 }

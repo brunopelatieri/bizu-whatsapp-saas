@@ -100,6 +100,22 @@ export function evolutionCredentials(row: EvolutionRow): Record<string, string> 
   return credentials;
 }
 
+/**
+ * Segredos de uma instância recifrados para outro canal (readoção: o mesmo número volta ao
+ * canal antigo). O `aad` leva o id do canal, então copiar a cifra não serviria.
+ */
+export function transferPairingSecrets(from: EvolutionRow, toChannelId: string) {
+  const ring = currentKeyRing();
+  const move = (field: ChannelSecretField, token: string | null) =>
+    token ? sealSecret(toChannelId, field, openSecret(from.channelId, field, token), ring) : null;
+
+  return {
+    instanceTokenEnc: move("instanceToken", from.instanceTokenEnc),
+    webhookSecretEnc: move("webhookSecret", from.webhookSecretEnc),
+    keyVersion: ring.version,
+  };
+}
+
 /** Texto que não é segredo e que o ChannelContext/WebhookContext leva em `config`. */
 export const evolutionConfigOf = (
   row: Pick<EvolutionRow, "remoteInstanceId">,
