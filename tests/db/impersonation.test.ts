@@ -404,6 +404,20 @@ describe("personificação", () => {
       expect(await response.json()).toMatchObject({ code: "PLATFORM_FORBIDDEN" });
     });
 
+    it("sessão personificada não escreve no catálogo nem na anotação da plataforma", async () => {
+      await grant();
+      const cookie = await enterAs(tenantOwner);
+
+      for (const [method, path, body] of [
+        ["POST", "/api/admin/crm/tags", { name: "x" }],
+        ["PUT", `/api/admin/tenants/${tenantId}/profile`, { tagIds: [] }],
+      ] as const) {
+        const response = await call(method, path, { cookie, body });
+
+        expect(response.status, `${method} ${path}`).toBe(403);
+      }
+    });
+
     it("sem sessão responde 401", async () => {
       const response = await call("POST", "/api/admin/impersonate", {
         body: { userId: member.id, tenantId },

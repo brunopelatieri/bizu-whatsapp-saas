@@ -45,43 +45,57 @@ export function TenantAnnotationCard({
     setValues(annotation.customFields);
   }, [initialTagIds, annotation.customFields]);
 
+  const tagsChanged =
+    JSON.stringify([...tagIds].sort()) !== JSON.stringify([...initialTagIds].sort());
+
+  // Vazio vira `null` (remove), como no cliente; só os campos ativos que mudaram vão no corpo.
+  const normalized = (value: unknown) =>
+    value === undefined ||
+    value === null ||
+    value === "" ||
+    (Array.isArray(value) && value.length === 0)
+      ? null
+      : value;
+  const changedFields = Object.fromEntries(
+    defs
+      .filter(
+        ({ id }) =>
+          JSON.stringify(normalized(values[id])) !==
+          JSON.stringify(normalized(annotation.customFields[id])),
+      )
+      .map(({ id }) => [id, normalized(values[id])]),
+  );
+  const fieldsChanged = Object.keys(changedFields).length > 0;
+  const dirty = tagsChanged || fieldsChanged;
+
   function submit() {
     setError(null);
 
-    // Valores só dos campos ativos; vazio vira `null` (remove), como no cliente.
-    const customFields = Object.fromEntries(
-      defs.map(({ id }) => {
-        const value = values[id];
-        const empty =
-          value === undefined ||
-          value === null ||
-          value === "" ||
-          (Array.isArray(value) && value.length === 0);
-        return [id, empty ? null : value];
-      }),
-    );
-
-    const missing = missingRequired(
-      defs,
-      Object.fromEntries(
-        Object.entries(customFields).filter(([, value]) => value !== null),
-      ) as CustomFieldValues,
-    );
-    if (missing.length > 0) {
-      setError(`Preencha os campos obrigatórios: ${missing.join(", ")}.`);
-      return;
+    // O `required` vale sobre o estado final, e só quando o corpo traz `customFields`: trocar só
+    // etiquetas não depende de campo obrigatório vazio nem de as definições terem carregado.
+    if (fieldsChanged) {
+      const final = Object.fromEntries(
+        defs.flatMap(({ id }) => {
+          const value = normalized(values[id]);
+          return value === null ? [] : [[id, value]];
+        }),
+      ) as CustomFieldValues;
+      const missing = missingRequired(defs, final);
+      if (missing.length > 0) {
+        setError(`Preencha os campos obrigatórios: ${missing.join(", ")}.`);
+        return;
+      }
     }
 
     save.mutate({
       path: `/api/admin/tenants/${tenantId}/profile`,
       method: "PUT",
-      body: { tagIds, customFields },
+      body: {
+        ...(tagsChanged ? { tagIds } : {}),
+        ...(fieldsChanged ? { customFields: changedFields } : {}),
+      },
     });
   }
-
-  const dirty =
-    JSON.stringify([...tagIds].sort()) !== JSON.stringify([...initialTagIds].sort()) ||
-    defs.some(({ id }) => JSON.stringify(values[id] ?? null) !== JSON.stringify(annotation.customFields[id] ?? null));
 
   return (
     <Card>

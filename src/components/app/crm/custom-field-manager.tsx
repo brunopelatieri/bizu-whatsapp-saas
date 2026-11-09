@@ -291,7 +291,8 @@ function FieldRow({
           {field.usage === 1 ? `1 ${api.subject.one}` : `${field.usage} ${api.subject.many}`}
         </p>
       </div>
-      <div className={readOnly ? "hidden" : "flex gap-1"}>
+      {readOnly ? null : (
+      <div className="flex gap-1">
         {archived ? null : (
           <>
             <Button
@@ -335,6 +336,7 @@ function FieldRow({
           <Trash2 className="size-4" />
         </Button>
       </div>
+      )}
     </li>
   );
 }

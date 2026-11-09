@@ -153,24 +153,26 @@ export function TagManager({
                         {usageLabel(tag.usage)}
                       </span>
                     </div>
-                    <div className={readOnly ? "hidden" : "flex gap-1"}>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Editar ${tag.name}`}
-                        onClick={() => startEdit(tag)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Excluir ${tag.name}`}
-                        onClick={() => setDeleting(tag)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
+                    {readOnly ? null : (
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Editar ${tag.name}`}
+                          onClick={() => startEdit(tag)}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Excluir ${tag.name}`}
+                          onClick={() => setDeleting(tag)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
