@@ -74,6 +74,9 @@ export default [
       route("auditoria", "routes/admin/audit.tsx"),
       route("configuracoes", "routes/admin/settings.tsx"),
       route("configuracoes/seguranca", "routes/admin/security.tsx"),
+      // crm-cadastro A4: etiquetas e campos que a plataforma usa nas organizações.
+      route("configuracoes/etiquetas", "routes/admin/crm-tags.tsx"),
+      route("configuracoes/campos", "routes/admin/crm-fields.tsx"),
     ]),
   ]),
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Tags } from "lucide-react";
 import { Link, useSearchParams } from "react-router";
 import {
   type AdminPlan,
@@ -12,9 +13,17 @@ import {
 } from "@/components/admin/billing-state-badge";
 import { Pager } from "@/components/admin/pager";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
+import { TagChip } from "@/components/crm/tag-chip";
+import { platformTagsApi, useTags } from "@/components/crm/tags-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -61,11 +70,17 @@ export function AdminTenantsPage() {
     planId !== undefined,
   );
   const planName = plans.data?.plans.find(({ id }) => id === planId)?.name;
+  // crm-cadastro A4: filtro por etiqueta da plataforma (`?tags=<id>,<id>`, qualquer uma).
+  const platformTags = useTags(true, platformTagsApi);
+  const tagFilter = (params.get("tags") ?? "")
+    .split(",")
+    .filter((id) => z.uuid().safeParse(id).success);
 
   const query = useAdminQuery<Page<AdminTenant>>("/api/admin/tenants", {
     q,
     status: status === ALL ? undefined : status,
     plan: planId,
+    tags: tagFilter.length > 0 ? tagFilter.join(",") : undefined,
     page,
   });
 
@@ -134,6 +149,55 @@ export function AdminTenantsPage() {
         </Select>
       </div>
 
+      {platformTags.data && platformTags.data.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+              <Tags className="size-3.5" />
+              Etiquetas{tagFilter.length > 0 ? ` (${tagFilter.length})` : ""}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 min-w-52 overflow-y-auto">
+              {platformTags.data.map((tag) => (
+                <DropdownMenuCheckboxItem
+                  key={tag.id}
+                  checked={tagFilter.includes(tag.id)}
+                  closeOnClick={false}
+                  onCheckedChange={(checked) =>
+                    update({
+                      tags:
+                        (checked
+                          ? [...tagFilter, tag.id]
+                          : tagFilter.filter((id) => id !== tag.id)
+                        ).join(",") || null,
+                      page: null,
+                    })
+                  }
+                >
+                  <TagChip name={tag.name} color={tag.color} />
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {platformTags.data
+            .filter(({ id }) => tagFilter.includes(id))
+            .map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                aria-label={`Tirar o filtro ${tag.name}`}
+                onClick={() =>
+                  update({
+                    tags: tagFilter.filter((id) => id !== tag.id).join(",") || null,
+                    page: null,
+                  })
+                }
+              >
+                <TagChip name={`${tag.name} ×`} color={tag.color} />
+              </button>
+            ))}
+        </div>
+      ) : null}
+
       <QueryState {...query}>
         {query.data ? (
           <Card>
@@ -166,6 +230,18 @@ export function AdminTenantsPage() {
                           <p className="text-xs text-muted-foreground">
                             {tenant.slug}
                           </p>
+                          {tenant.tags.length > 0 ? (
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              {tenant.tags.slice(0, 3).map((tag) => (
+                                <TagChip key={tag.id} name={tag.name} color={tag.color} />
+                              ))}
+                              {tenant.tags.length > 3 ? (
+                                <span className="text-xs text-muted-foreground">
+                                  +{tenant.tags.length - 3}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </TableCell>
                         <TableCell>
                           <BillingStateBadge state={tenant.state} />

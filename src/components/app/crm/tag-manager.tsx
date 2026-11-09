@@ -4,7 +4,13 @@ import { QueryState } from "@/components/admin/query-state";
 import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { TagChip } from "@/components/crm/tag-chip";
 import { TagColorPicker } from "@/components/crm/tag-color-picker";
-import { type Tag, useTagMutation, useTags } from "@/components/crm/tags-api";
+import {
+  type Tag,
+  type TagsApi,
+  tenantTagsApi,
+  useTagMutation,
+  useTags,
+} from "@/components/crm/tags-api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -54,13 +60,22 @@ function TagFields({
 }
 
 /**
- * Catálogo de etiquetas (`/app/configuracoes/etiquetas`): criar em linha, editar em diálogo
- * e excluir com a contagem de clientes afetados. A API confere `tag:manage`.
+ * Catálogo de etiquetas (`/app/configuracoes/etiquetas` e `/admin/configuracoes/etiquetas`): criar
+ * em linha, editar em diálogo e excluir com a contagem de afetados. A API do escopo vem por
+ * `api` (tenant por padrão) e é quem confere a permissão; `readOnly` só esconde os botões.
  */
-export function TagManager() {
-  const tags = useTags();
-  const save = useTagMutation();
-  const remove = useTagMutation("Etiqueta excluída.");
+export function TagManager({
+  api = tenantTagsApi,
+  readOnly = false,
+}: {
+  api?: TagsApi;
+  readOnly?: boolean;
+}) {
+  const tags = useTags(true, api);
+  const save = useTagMutation(undefined, api);
+  const remove = useTagMutation("Etiqueta excluída.", api);
+  const usageLabel = (usage: number) =>
+    `${usage} ${usage === 1 ? api.subject.one : api.subject.many}`;
   const [name, setName] = useState("");
   const [color, setColor] = useState(DEFAULT_TAG_COLOR);
   const [editing, setEditing] = useState<Tag | null>(null);
@@ -76,7 +91,7 @@ export function TagManager() {
 
   async function create() {
     const done = await save
-      .mutateAsync({ path: "/api/tags", method: "POST", body: { name, color } })
+      .mutateAsync({ path: api.path, method: "POST", body: { name, color } })
       .then(() => true)
       .catch(() => false);
     if (done) {
@@ -89,7 +104,7 @@ export function TagManager() {
     if (!editing) return;
     await save
       .mutateAsync({
-        path: `/api/tags/${editing.id}`,
+        path: `${api.path}/${editing.id}`,
         method: "PATCH",
         body: { name: editName, color: editColor },
       })
@@ -99,20 +114,22 @@ export function TagManager() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Nova etiqueta</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <TagFields name={name} color={color} onName={setName} onColor={setColor} />
-          <Button
-            disabled={save.isPending || name.trim().length === 0}
-            onClick={create}
-          >
-            Criar etiqueta
-          </Button>
-        </CardContent>
-      </Card>
+      {readOnly ? null : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Nova etiqueta</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <TagFields name={name} color={color} onName={setName} onColor={setColor} />
+            <Button
+              disabled={save.isPending || name.trim().length === 0}
+              onClick={create}
+            >
+              Criar etiqueta
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>
@@ -133,10 +150,10 @@ export function TagManager() {
                     <div className="flex min-w-0 items-center gap-3">
                       <TagChip name={tag.name} color={tag.color} />
                       <span className="text-xs text-muted-foreground">
-                        {tag.usage === 1 ? "1 cliente" : `${tag.usage} clientes`}
+                        {usageLabel(tag.usage)}
                       </span>
                     </div>
-                    <div className="flex gap-1">
+                    <div className={readOnly ? "hidden" : "flex gap-1"}>
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -167,7 +184,7 @@ export function TagManager() {
           <DialogHeader>
             <DialogTitle>Editar etiqueta</DialogTitle>
             <DialogDescription>
-              Renomear ou trocar a cor vale para todos os clientes que a usam.
+              Renomear ou trocar a cor vale para todos os que a usam.
             </DialogDescription>
           </DialogHeader>
           <TagFields
@@ -192,8 +209,8 @@ export function TagManager() {
         title={`Excluir “${deleting?.name ?? ""}”?`}
         description={
           deleting && deleting.usage > 0
-            ? `Ela será tirada de ${deleting.usage} ${deleting.usage === 1 ? "cliente" : "clientes"}. Isso não pode ser desfeito.`
-            : "Nenhum cliente usa esta etiqueta. Isso não pode ser desfeito."
+            ? `Ela será tirada de ${usageLabel(deleting.usage)}. Isso não pode ser desfeito.`
+            : `Nenhum ${api.subject.one} usa esta etiqueta. Isso não pode ser desfeito.`
         }
         confirmLabel="Excluir"
         pending={remove.isPending}
@@ -201,7 +218,7 @@ export function TagManager() {
         onConfirm={() => {
           if (!deleting) return;
           remove
-            .mutateAsync({ path: `/api/tags/${deleting.id}`, method: "DELETE" })
+            .mutateAsync({ path: `${api.path}/${deleting.id}`, method: "DELETE" })
             .then(() => setDeleting(null))
             .catch(() => undefined);
         }}

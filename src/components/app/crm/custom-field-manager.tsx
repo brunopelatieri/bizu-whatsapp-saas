@@ -4,6 +4,8 @@ import { QueryState } from "@/components/admin/query-state";
 import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import {
   type CustomField,
+  type CustomFieldsApi,
+  tenantFieldsApi,
   useCustomFieldMutation,
   useCustomFields,
 } from "@/components/crm/custom-fields-api";
@@ -78,6 +80,7 @@ const draftOf = (field: CustomField): Draft => ({
 });
 
 function FieldDialog({
+  api,
   draft,
   onChange,
   onClose,
@@ -85,6 +88,7 @@ function FieldDialog({
   onSave,
   error,
 }: {
+  api: CustomFieldsApi;
   draft: Draft | null;
   onChange: (draft: Draft) => void;
   onClose: () => void;
@@ -113,7 +117,7 @@ function FieldDialog({
           <DialogDescription>
             {editing
               ? "O tipo e a chave não mudam depois de criados."
-              : "Aparece no cadastro de todos os clientes."}
+              : `Aparece no cadastro de todos os ${api.subject.many}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -226,7 +230,7 @@ function FieldDialog({
               checked={draft.required}
               onChange={(event) => onChange({ ...draft, required: event.target.checked })}
             />
-            Obrigatório no formulário do cliente
+            Obrigatório no {api.subject.form}
           </label>
 
           {error ? (
@@ -250,6 +254,8 @@ function FieldDialog({
 }
 
 function FieldRow({
+  api,
+  readOnly,
   field,
   index,
   total,
@@ -259,6 +265,8 @@ function FieldRow({
   onArchive,
   onDelete,
 }: {
+  api: CustomFieldsApi;
+  readOnly: boolean;
   field: CustomField;
   index: number;
   total: number;
@@ -279,10 +287,11 @@ function FieldRow({
           {field.required ? <Badge variant="outline">Obrigatório</Badge> : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          <code>{field.key}</code> · {field.usage === 1 ? "1 cliente" : `${field.usage} clientes`}
+          <code>{field.key}</code> ·{" "}
+          {field.usage === 1 ? `1 ${api.subject.one}` : `${field.usage} ${api.subject.many}`}
         </p>
       </div>
-      <div className="flex gap-1">
+      <div className={readOnly ? "hidden" : "flex gap-1"}>
         {archived ? null : (
           <>
             <Button
@@ -331,16 +340,23 @@ function FieldRow({
 }
 
 /**
- * Catálogo de campos adicionais do cliente (`/app/configuracoes/campos`): lista ordenável,
- * diálogo de criar e editar, arquivar (reversível) e excluir digitando a `key` (apaga o valor
- * de todos os clientes). A API confere `custom_field:manage`.
+ * Catálogo de campos adicionais (`/app/configuracoes/campos` e `/admin/configuracoes/campos`):
+ * lista ordenável, diálogo de criar e editar, arquivar (reversível) e excluir digitando a `key`
+ * (apaga o valor de todos os cadastros). A API do escopo vem por `api` (cliente do tenant por
+ * padrão) e é quem confere a permissão; `readOnly` só esconde os botões.
  */
-export function CustomFieldManager() {
-  const fields = useCustomFields("all");
-  const save = useCustomFieldMutation();
-  const order = useCustomFieldMutation();
-  const archive = useCustomFieldMutation();
-  const remove = useCustomFieldMutation("Campo excluído.");
+export function CustomFieldManager({
+  api = tenantFieldsApi,
+  readOnly = false,
+}: {
+  api?: CustomFieldsApi;
+  readOnly?: boolean;
+}) {
+  const fields = useCustomFields("all", true, api);
+  const save = useCustomFieldMutation(undefined, api);
+  const order = useCustomFieldMutation(undefined, api);
+  const archive = useCustomFieldMutation(undefined, api);
+  const remove = useCustomFieldMutation("Campo excluído.", api);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<CustomField | null>(null);
@@ -365,7 +381,7 @@ export function CustomFieldManager() {
     if (draft.id) {
       // Tipo e chave não vão: o servidor não os aceita no PATCH.
       const parsed = customFieldSchema.safeParse({
-        entity: "customer",
+        entity: api.entity,
         label: draft.label,
         type: draft.type,
         options,
@@ -375,7 +391,7 @@ export function CustomFieldManager() {
 
       await save
         .mutateAsync({
-          path: `/api/custom-fields/${draft.id}`,
+          path: `${api.path}/${draft.id}`,
           method: "PATCH",
           body: {
             label: parsed.data.label,
@@ -389,7 +405,7 @@ export function CustomFieldManager() {
     }
 
     const parsed = customFieldSchema.safeParse({
-      entity: "customer",
+      entity: api.entity,
       label: draft.label,
       ...(draft.key ? { key: draft.key } : {}),
       type: draft.type,
@@ -399,7 +415,7 @@ export function CustomFieldManager() {
     if (!parsed.success) return setFormError(parsed.error.issues[0]?.message ?? "Dados inválidos.");
 
     await save
-      .mutateAsync({ path: "/api/custom-fields", method: "POST", body: parsed.data })
+      .mutateAsync({ path: api.path, method: "POST", body: parsed.data })
       .then(() => openDraft(null))
       .catch((error: Error) => setFormError(error.message));
   }
@@ -411,15 +427,15 @@ export function CustomFieldManager() {
     [ids[index], ids[target]] = [ids[target] as string, ids[index] as string];
 
     order.mutate({
-      path: "/api/custom-fields/order",
+      path: `${api.path}/order`,
       method: "PUT",
-      body: { entity: "customer", ids },
+      body: { entity: api.entity, ids },
     });
   }
 
   function toggleArchive(field: CustomField) {
     archive.mutate({
-      path: `/api/custom-fields/${field.id}`,
+      path: `${api.path}/${field.id}`,
       method: "PATCH",
       body: { archived: !field.archived },
     });
@@ -432,10 +448,12 @@ export function CustomFieldManager() {
           <CardTitle className="text-base">
             Campos ativos{fields.data ? ` (${active.length}/${CUSTOM_FIELD_LIMIT})` : ""}
           </CardTitle>
-          <Button size="sm" disabled={full} onClick={() => openDraft(emptyDraft())}>
-            <Plus className="size-3.5" />
-            Novo campo
-          </Button>
+          {readOnly ? null : (
+            <Button size="sm" disabled={full} onClick={() => openDraft(emptyDraft())}>
+              <Plus className="size-3.5" />
+              Novo campo
+            </Button>
+          )}
         </CardHeader>
         <CardContent>
           <QueryState {...fields}>
@@ -453,6 +471,8 @@ export function CustomFieldManager() {
                 {active.map((field, index) => (
                   <FieldRow
                     key={field.id}
+                    api={api}
+                    readOnly={readOnly}
                     field={field}
                     index={index}
                     total={active.length}
@@ -485,6 +505,8 @@ export function CustomFieldManager() {
               {archivedFields.map((field, index) => (
                 <FieldRow
                   key={field.id}
+                  api={api}
+                  readOnly={readOnly}
                   field={field}
                   index={index}
                   total={archivedFields.length}
@@ -504,6 +526,7 @@ export function CustomFieldManager() {
       ) : null}
 
       <FieldDialog
+        api={api}
         draft={draft}
         onChange={setDraft}
         onClose={() => openDraft(null)}
@@ -520,8 +543,8 @@ export function CustomFieldManager() {
             <span className="grid gap-3">
               <span>
                 {deleting.usage > 0
-                  ? `O valor será apagado de ${deleting.usage} ${deleting.usage === 1 ? "cliente" : "clientes"}.`
-                  : "Nenhum cliente tem valor neste campo."}{" "}
+                  ? `O valor será apagado de ${deleting.usage} ${deleting.usage === 1 ? api.subject.one : api.subject.many}.`
+                  : `Nenhum ${api.subject.one} tem valor neste campo.`}{" "}
                 Isso não pode ser desfeito. Para apenas esconder o campo, arquive.
               </span>
               <span className="grid gap-1.5">
@@ -545,7 +568,7 @@ export function CustomFieldManager() {
           if (!deleting) return;
           remove
             .mutateAsync({
-              path: `/api/custom-fields/${deleting.id}`,
+              path: `${api.path}/${deleting.id}`,
               method: "DELETE",
               body: { confirm: confirmKey },
             })

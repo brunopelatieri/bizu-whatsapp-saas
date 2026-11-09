@@ -37,6 +37,8 @@ const adminTitles: Record<string, string> = {
   "/admin/auditoria": "Auditoria",
   "/admin/configuracoes": "Configurações da plataforma",
   "/admin/configuracoes/seguranca": "Segurança",
+  "/admin/configuracoes/etiquetas": "Etiquetas das organizações",
+  "/admin/configuracoes/campos": "Campos das organizações",
 };
 
 export function adminTitleFromPath(pathname: string): string {

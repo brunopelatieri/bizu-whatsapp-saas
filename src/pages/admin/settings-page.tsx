@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
 import {
   type AdminPlan,
@@ -219,6 +220,36 @@ export function AdminSettingsPage() {
         title="Configurações da plataforma"
         description="Valem para as próximas organizações criadas."
       />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Organizações: etiquetas e campos</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">
+            Anotações da plataforma sobre cada organização. Só a plataforma vê; o
+            proprietário e a equipe da organização nunca as recebem.
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <Link
+                to="/admin/configuracoes/etiquetas"
+                className="font-medium text-primary hover:underline"
+              >
+                Etiquetas das organizações
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/admin/configuracoes/campos"
+                className="font-medium text-primary hover:underline"
+              >
+                Campos das organizações
+              </Link>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
 
       <QueryState
         isPending={settings.isPending || plans.isPending}

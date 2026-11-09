@@ -2,7 +2,13 @@ import { Tags } from "lucide-react";
 import { useState } from "react";
 import { useCan } from "@/components/auth/can";
 import { TagChip } from "@/components/crm/tag-chip";
-import { type Tag, useTagMutation, useTags } from "@/components/crm/tags-api";
+import {
+  type Tag,
+  type TagsApi,
+  tenantTagsApi,
+  useTagMutation,
+  useTags,
+} from "@/components/crm/tags-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CUSTOMER_TAG_LIMIT, DEFAULT_TAG_COLOR } from "@/lib/crm/constants";
@@ -17,23 +23,30 @@ export function TagPicker({
   value,
   onChange,
   disabled = false,
+  api = tenantTagsApi,
+  canCreate: canCreateTags,
 }: {
   value: string[];
   onChange: (ids: string[]) => void;
   disabled?: boolean;
+  /** Catálogo de onde vêm as etiquetas (tenant por padrão). */
+  api?: TagsApi;
+  /** Sem isto, vale `tag:manage` do tenant; a plataforma passa a própria regra. */
+  canCreate?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const tags = useTags();
-  const create = useTagMutation();
+  const tags = useTags(true, api);
+  const create = useTagMutation(undefined, api);
   const can = useCan();
+  const mayCreate = canCreateTags ?? can("tag", "manage");
 
   const all = tags.data ?? [];
   const selected = all.filter(({ id }) => value.includes(id));
   const term = search.trim().toLowerCase();
   const visible = term ? all.filter(({ name }) => name.toLowerCase().includes(term)) : all;
   const canCreate =
-    can("tag", "manage") && term.length > 0 && !all.some(({ name }) => name.toLowerCase() === term);
+    mayCreate && term.length > 0 && !all.some(({ name }) => name.toLowerCase() === term);
 
   function toggle(tag: Tag) {
     if (value.includes(tag.id)) {
@@ -46,7 +59,7 @@ export function TagPicker({
   async function createAndSelect() {
     const created = await create
       .mutateAsync({
-        path: "/api/tags",
+        path: api.path,
         method: "POST",
         body: { name: search.trim(), color: DEFAULT_TAG_COLOR },
       })
@@ -130,7 +143,7 @@ export function TagPicker({
             </Button>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            Até {CUSTOMER_TAG_LIMIT} etiquetas por cliente.
+            Até {CUSTOMER_TAG_LIMIT} etiquetas por {api.subject.one}.
           </p>
         </div>
       ) : null}

@@ -66,6 +66,8 @@ export type AdminTenant = {
   trialEndsAt: string | null;
   members: number;
   createdAt: string;
+  /** Etiquetas que a plataforma aplicou (só `/api/admin/*` as devolve). */
+  tags: Array<{ id: string; name: string; color: string }>;
 };
 
 export type AdminPlanPrice = {

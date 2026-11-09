@@ -18,6 +18,10 @@ import {
 } from "@/components/admin/manual-billing-card";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
+import {
+  type OrganizationAnnotation,
+  TenantAnnotationCard,
+} from "@/components/admin/tenant-annotation-card";
 import { TenantDeletionCard } from "@/components/admin/tenant-deletion-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +54,9 @@ type TenantDetail = {
     state: BillingState;
     createdAt: string;
   };
+  /** Anotação da plataforma (etiquetas e campos): só `/admin` a recebe. */
+  tags: OrganizationAnnotation["tags"];
+  customFields: OrganizationAnnotation["customFields"];
   subscription: ManualSubscription | null;
   plan: { id: string; name: string; isFree: boolean } | null;
   invoices: ManualInvoice[];
@@ -229,6 +236,12 @@ export function AdminTenantDetailPage() {
 
             {/* admin-crud C: excluir e cancelar a exclusão */}
             <TenantDeletionCard tenant={detail.tenant} />
+
+            <TenantAnnotationCard
+              tenantId={id}
+              annotation={{ tags: detail.tags, customFields: detail.customFields }}
+              canWrite={owner && detail.tenant.status !== "deleting" && detail.tenant.status !== "deleted"}
+            />
 
             <Card>
               <CardHeader>

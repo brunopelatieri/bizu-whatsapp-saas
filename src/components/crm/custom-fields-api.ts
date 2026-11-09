@@ -16,20 +16,54 @@ export type CustomField = CustomFieldDef & {
 };
 
 /**
- * Definições de campo do tenant, por posição. Sem `archived`, só as ativas (o formulário e o
- * detalhe do cliente); o gestor pede `all`.
+ * Qual API e qual entidade servem as definições: o cliente do tenant (`/api/custom-fields`) ou a
+ * organização da plataforma (`/api/admin/crm/custom-fields`). Os componentes de campo recebem
+ * isto por props.
  */
-export function useCustomFields(archived: "false" | "all" = "false", enabled = true) {
+export type CustomFieldsApi = {
+  scope: "tenant" | "platform";
+  path: string;
+  entity: CustomFieldEntity;
+  /** Substantivo de quem tem o valor, para a contagem de uso ("3 clientes"). */
+  subject: { one: string; many: string; form: string };
+};
+
+export const tenantFieldsApi: CustomFieldsApi = {
+  scope: "tenant",
+  path: "/api/custom-fields",
+  entity: "customer",
+  subject: { one: "cliente", many: "clientes", form: "formulário do cliente" },
+};
+
+export const platformFieldsApi: CustomFieldsApi = {
+  scope: "platform",
+  path: "/api/admin/crm/custom-fields",
+  entity: "organization",
+  subject: { one: "organização", many: "organizações", form: "cartão da organização" },
+};
+
+/**
+ * Definições de campo do escopo, por posição. Sem `archived`, só as ativas (o formulário e o
+ * detalhe); o gestor pede `all`. Padrão: o cliente do tenant.
+ */
+export function useCustomFields(
+  archived: "false" | "all" = "false",
+  enabled = true,
+  api: CustomFieldsApi = tenantFieldsApi,
+) {
   const { tenant } = useAuth();
 
   return useQuery({
-    queryKey: ["custom-fields", tenant?.id, "customer", archived],
+    queryKey:
+      api.scope === "tenant"
+        ? ["custom-fields", tenant?.id, "customer", archived]
+        : ["admin", "crm-custom-fields", archived],
     queryFn: () =>
       apiFetch<{ fields: CustomField[] }>(
         // Só o gestor (`all`) precisa da contagem de uso.
-        `/api/custom-fields?entity=customer&archived=${archived}${archived === "all" ? "&usage=true" : ""}`,
+        `${api.path}?entity=${api.entity}&archived=${archived}${archived === "all" ? "&usage=true" : ""}`,
       ).then(({ fields }) => fields),
-    enabled: enabled && Boolean(tenant),
+    enabled: enabled && (api.scope === "platform" || Boolean(tenant)),
     retry: false,
   });
 }
@@ -40,8 +74,11 @@ type FieldRequest = {
   body?: unknown;
 };
 
-/** Escrita de definição: avisa, recarrega as definições e os clientes (que levam os valores). */
-export function useCustomFieldMutation(successMessage?: string) {
+/** Escrita de definição: avisa, recarrega as definições e quem leva os valores. */
+export function useCustomFieldMutation(
+  successMessage?: string,
+  api: CustomFieldsApi = tenantFieldsApi,
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -52,10 +89,11 @@ export function useCustomFieldMutation(successMessage?: string) {
       }),
     onSuccess: async () => {
       if (successMessage) toast.success(successMessage);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["custom-fields"] }),
-        queryClient.invalidateQueries({ queryKey: ["customers"] }),
-      ]);
+      await Promise.all(
+        (api.scope === "tenant" ? [["custom-fields"], ["customers"]] : [["admin"]]).map(
+          (queryKey) => queryClient.invalidateQueries({ queryKey }),
+        ),
+      );
     },
     onError: (error) => toast.error(error.message),
   });
