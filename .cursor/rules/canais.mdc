@@ -1,6 +1,6 @@
 ---
 description: Canais de WhatsApp (módulos, caixa de avisos e segredos)
-globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts
+globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/api/admin-channel-events.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts
 alwaysApply: false
 ---
 

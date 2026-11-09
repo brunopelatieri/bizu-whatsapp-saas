@@ -34,6 +34,9 @@
   (tabelas com RLS, serviço, caixa de avisos, filas `channel.inbound`/`channel.health`, rotas comuns
   `/api/channels`; `tech/29-canais-whatsapp.md`); as fixtures de `tests/fixtures/channels/` são
   **simuladas** (a medição B0 real falta); B2 (rotas e webhook da Cloud) é a próxima etapa.
+  **B4 parcial:** avisos de canal de todos os escopos em `/api/admin/channel-events` (listar sem
+  `raw`, reprocessar só pelo proprietário) e aba "Canais" em `/admin/webhooks`; faltam
+  `/api/admin/channels/*` e `/admin/configuracoes/canais`.
   **Fases A1, A2 e A3 do `crm-cadastro` implementadas** (telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant; `tech/28-crm-cadastro.md`); A4 segue pendente. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
   válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se

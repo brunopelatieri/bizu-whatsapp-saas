@@ -37,6 +37,8 @@ só o caminho da interface. Sem `loader` de servidor. Em produção, sem 2FA, to
 | `POST /api/admin/subscriptions/:id/sync` | owner | busca do provedor, corrige e alerta; conferido e igual, o alerta sai; 409 `NO_PROVIDER_SUBSCRIPTION` |
 | `GET /api/admin/webhooks?status&page` | plataforma | `payment_event` sem `raw`, que tem dado pessoal |
 | `POST /api/admin/webhooks/:id/reprocess` | owner | só `failed` ou `ignored` e verificado; 409 `NOT_REPROCESSABLE` |
+| `GET /api/admin/channel-events?status&page` | plataforma | `channel_event` de todos os escopos, sem `raw` nem `dedupe_key`; rotas em `src/api/admin-channel-events.ts`, sub-router com a própria cadeia de guardas, montado antes de `adminRoutes` (`tech/29-canais-whatsapp.md`) |
+| `POST /api/admin/channel-events/:id/reprocess` | owner | só `failed` ou `ignored`; 409 `NOT_REPROCESSABLE`; `blockWhileImpersonating`; reenfileira `channel.inbound`; audita `admin.channel_event_reprocessed` |
 | `GET`, `POST /api/admin/plans` | leitura plataforma; escrita owner | 409 `SLUG_TAKEN` |
 | `PATCH /api/admin/plans/:id` | owner | parcial, o `slug` não muda; 409 `PLAN_HAS_PRICES` ao marcar gratuito com preço ativo; reativar preço de plano gratuito é 409 `FREE_PLAN_NO_PRICE`; audita `admin.plan_updated` com `fields`. `active: false` é "arquivar" (botão na lista e no detalhe) |
 | `DELETE /api/admin/plans/:id` | owner | só plano que nunca chegou a um tenant, em transação com o plano travado: 409 `PLAN_IN_USE` `{ tenants: [{ id, name }] }` (qualquer assinatura, `plan_id` ou `pending_plan_id`; a FK `restrict` cobre a corrida), `PLAN_IS_TRIAL_DEFAULT`, `LAST_FREE_PLAN` (sem `trialPlanId` e único gratuito ativo); os preços saem em cascata; responde `{ ok, providerRefs }` (o que existe no provedor não é apagado; a tela avisa); audita `admin.plan_deleted` |
@@ -60,7 +62,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | `/admin/usuarios/:id`, `/admin/usuarios/portal/:id` | `user-detail-page.tsx`, `portal-user-detail-page.tsx` (rotas `routes/admin/user.tsx`, `portal-user.tsx`) |
 | `/admin/planos`, `/admin/planos/:id` | `plans-page.tsx`, `plan-detail-page.tsx`: arquivar/reativar em botão, "Excluir plano" (desabilitado com uso, pede arquivar) e excluir preço, ambos com `confirm-dialog.tsx` |
 | `/admin/assinaturas` | `subscriptions-page.tsx`; menu por linha em `components/admin/subscription-actions.tsx`: editar datas e status (só os destinos de `allowedTargets`, motivo obrigatório), trocar plano, marcar pago/não pago (o mesmo `manual-billing-card`, com os dados de `GET /api/admin/tenants/:id`), buscar do provedor e cancelar |
-| `/admin/webhooks` | `webhooks-page.tsx` |
+| `/admin/webhooks` | `webhooks-page.tsx`: abas "Pagamentos" e "Canais" (`?tab=canais`, em `channel-events-tab.tsx`, que abre nos avisos de canal com falha) |
 | `/admin/auditoria` | `routes/admin/audit.tsx`: log global, por ação, nome da organização (`tenantQ`, `ilike` em `organization.name`) e pessoa |
 | `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte |
 | `/admin/configuracoes/seguranca` | `routes/admin/security.tsx`: 2FA de quem administra |
