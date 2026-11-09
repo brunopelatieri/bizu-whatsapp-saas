@@ -10,7 +10,6 @@ import {
   useCustomers,
 } from "@/components/app/customers/customers-api";
 import { Can } from "@/components/auth/can";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -35,6 +34,15 @@ import {
   type CustomerStatus,
   customerStatuses,
 } from "@/lib/tenant/customer-constants";
+import { Tags } from "lucide-react";
+import { TagChip } from "@/components/crm/tag-chip";
+import { useTags } from "@/components/crm/tags-api";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const ALL = "all";
 const STATUS_ITEMS = [
@@ -51,7 +59,9 @@ export function CustomersPage() {
   const [status, setStatus] = useState<CustomerStatus | undefined>();
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const query = useCustomers({ q, status, page });
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const tags = useTags();
+  const query = useCustomers({ q, status, tags: tagFilter, page });
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -105,6 +115,49 @@ export function CustomersPage() {
         </Select>
       </div>
 
+      {tags.data && tags.data.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+              <Tags className="size-3.5" />
+              Etiquetas{tagFilter.length > 0 ? ` (${tagFilter.length})` : ""}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 min-w-52 overflow-y-auto">
+              {tags.data.map((tag) => (
+                <DropdownMenuCheckboxItem
+                  key={tag.id}
+                  checked={tagFilter.includes(tag.id)}
+                  closeOnClick={false}
+                  onCheckedChange={(checked) => {
+                    setTagFilter((current) =>
+                      checked ? [...current, tag.id] : current.filter((id) => id !== tag.id),
+                    );
+                    setPage(1);
+                  }}
+                >
+                  <TagChip name={tag.name} color={tag.color} />
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {tags.data
+            .filter(({ id }) => tagFilter.includes(id))
+            .map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                aria-label={`Tirar o filtro ${tag.name}`}
+                onClick={() => {
+                  setTagFilter((current) => current.filter((id) => id !== tag.id));
+                  setPage(1);
+                }}
+              >
+                <TagChip name={`${tag.name} ×`} color={tag.color} />
+              </button>
+            ))}
+        </div>
+      ) : null}
+
       <QueryState {...query}>
         {query.data ? (
           <Card>
@@ -149,11 +202,14 @@ export function CustomersPage() {
                         <TableCell>
                           {customer.tags.length > 0 ? (
                             <span className="flex flex-wrap gap-1">
-                              {customer.tags.map((tag) => (
-                                <Badge key={tag} variant="secondary">
-                                  {tag}
-                                </Badge>
+                              {customer.tags.slice(0, 3).map((tag) => (
+                                <TagChip key={tag.id} name={tag.name} color={tag.color} />
                               ))}
+                              {customer.tags.length > 3 ? (
+                                <span className="text-xs text-muted-foreground">
+                                  +{customer.tags.length - 3}
+                                </span>
+                              ) : null}
                             </span>
                           ) : (
                             <span className="text-muted-foreground">—</span>

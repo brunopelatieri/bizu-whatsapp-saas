@@ -42,6 +42,8 @@ invitation                email, role, status, expires_at, inviter_id
 organization_role         papéis personalizados; permission em texto, como o plugin grava
 audit_log                 tenant_id nulo = fora de tenant; ip_hash; RLS forçado
 customer                  unique (tenant_id, email); portal_user_id nulo até o envio; status lead|active|blocked; RLS forçado
+tag                       tenant_id nulo = plataforma (scopedPolicy); nome único por escopo em lower(name); cor #rrggbb
+customer_tag              PK (customer_id, tag_id); tenant_id não nulo; RLS forçado
 portal_user               identidade do cliente, global, sem role nem ban (sem RLS)
 portal_session            active_tenant_id: o tenant em uso no portal (sem RLS)
 portal_account, portal_verification, portal_rate_limit   instância portalAuth (sem RLS)

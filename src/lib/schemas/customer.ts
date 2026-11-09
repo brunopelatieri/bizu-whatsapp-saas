@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tagFilterSchema, tagIdsSchema } from "@/lib/schemas/crm";
 import { phoneSchema } from "@/lib/schemas/phone";
 import { customerStatuses } from "@/lib/tenant/customer-constants";
 
@@ -33,11 +34,8 @@ export const customerSchema = z.object({
   phone: phoneSchema,
   document: optionalText(z.string().trim().max(30, "Documento muito longo.")),
   status: z.enum(customerStatuses).optional(),
-  tags: z
-    .array(z.string().trim().min(1).max(30, "Etiqueta muito longa."))
-    .max(20, "Muitas etiquetas.")
-    .transform((list) => [...new Set(list)])
-    .optional(),
+  /** Substitui o conjunto de etiquetas do cliente. */
+  tagIds: tagIdsSchema.optional(),
   notes: optionalText(z.string().trim().max(2000, "Observação muito longa.")),
 });
 export type CustomerInput = z.infer<typeof customerSchema>;
@@ -53,6 +51,8 @@ export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
 export const customersQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
   status: z.enum(customerStatuses).optional(),
+  /** `tags=<id>,<id>`: clientes com qualquer uma delas. */
+  tags: tagFilterSchema.optional(),
   page: z.coerce.number().int().min(1).max(100_000).default(1),
 });
 export type CustomersQuery = z.infer<typeof customersQuerySchema>;

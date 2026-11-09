@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { apiFetch } from "@/lib/api/client";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 import { useAuth } from "@/providers/auth-provider";
+import type { TagRef } from "@/components/crm/tags-api";
 
 export type Customer = {
   id: string;
@@ -13,7 +14,7 @@ export type Customer = {
   phoneNormalized: string | null;
   document: string | null;
   status: CustomerStatus;
-  tags: string[];
+  tags: TagRef[];
   notes: string | null;
   invitedAt: string | null;
   lastLoginAt: string | null;
@@ -26,6 +27,8 @@ type CustomerPage = { items: Customer[]; total: number; pageSize: number };
 export type CustomerFilters = {
   q?: string;
   status?: CustomerStatus;
+  /** Ids de etiqueta: clientes com qualquer uma delas. */
+  tags?: string[];
   page: number;
 };
 
@@ -35,6 +38,7 @@ export function useCustomers(filters: CustomerFilters, enabled = true) {
 
   if (filters.q) search.set("q", filters.q);
   if (filters.status) search.set("status", filters.status);
+  if (filters.tags && filters.tags.length > 0) search.set("tags", filters.tags.join(","));
 
   return useQuery({
     queryKey: ["customers", tenant?.id, filters],

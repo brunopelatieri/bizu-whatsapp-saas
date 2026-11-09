@@ -70,7 +70,6 @@ describe("clientes", () => {
           email: email.toUpperCase(),
           phone: "(11) 99999-0000",
           document: "123.456.789-09",
-          tags: ["vip", "vip", "retorno"],
           notes: "Prefere contato à tarde.",
         },
       });
@@ -83,7 +82,7 @@ describe("clientes", () => {
         name: "Júlia Lima",
         email,
         status: "lead",
-        tags: ["vip", "retorno"],
+        tags: [],
         hasPortalAccess: false,
         invitedAt: null,
         lastLoginAt: null,
@@ -98,14 +97,14 @@ describe("clientes", () => {
 
       const patched = await call("PATCH", `/api/customers/${customer.id}`, {
         cookie: tenantOwner.cookie,
-        body: { phone: "", notes: null, tags: [] },
+        body: { phone: "", notes: null, tagIds: [] },
       });
       // O telefone se troca, mas nunca se apaga.
       expect(patched.status).toBe(400);
 
       const kept = await call("PATCH", `/api/customers/${customer.id}`, {
         cookie: tenantOwner.cookie,
-        body: { notes: null, tags: [] },
+        body: { notes: null, tagIds: [] },
       });
       expect(kept.status).toBe(200);
       expect(await kept.json()).toMatchObject({

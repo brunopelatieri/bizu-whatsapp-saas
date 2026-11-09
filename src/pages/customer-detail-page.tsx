@@ -12,10 +12,45 @@ import {
 } from "@/components/app/customers/customers-api";
 import { Can } from "@/components/auth/can";
 import { DetailRow } from "@/components/detail-row";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPhoneForDisplay } from "@/lib/phone/br";
+import { TagChip } from "@/components/crm/tag-chip";
+import { TagPicker } from "@/components/crm/tag-picker";
+
+/** Etiquetas do cliente: chips para quem lê, seletor para quem edita (`customer:update`). */
+function CustomerTags({ customer }: { customer: Customer }) {
+  const update = useCustomerMutation("Etiquetas atualizadas.");
+  const ids = customer.tags.map(({ id }) => id);
+
+  return (
+    <Can
+      resource="customer"
+      action="update"
+      fallback={
+        customer.tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {customer.tags.map((tag) => (
+              <TagChip key={tag.id} name={tag.name} color={tag.color} />
+            ))}
+          </div>
+        ) : null
+      }
+    >
+      <TagPicker
+        value={ids}
+        disabled={update.isPending}
+        onChange={(next) =>
+          update.mutate({
+            path: `/api/customers/${customer.id}`,
+            method: "PATCH",
+            body: { tagIds: next },
+          })
+        }
+      />
+    </Can>
+  );
+}
 
 function PortalAccessCard({ customer }: { customer: Customer }) {
   const invite = useCustomerMutation("Acesso enviado por e-mail.");
@@ -138,15 +173,7 @@ export function CustomerDetailPage() {
                   />
                   <DetailRow label="Documento" value={customer.document} />
                 </dl>
-                {customer.tags.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {customer.tags.map((tag) => (
-                      <Badge key={tag} variant="secondary">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : null}
+                <CustomerTags customer={customer} />
                 {customer.notes ? (
                   <p className="whitespace-pre-wrap text-sm text-muted-foreground">
                     {customer.notes}

@@ -28,6 +28,11 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   país, colunas `phone_normalized` e `phone_key` com `CHECK` no banco e telefone **único por tenant**
   no cliente (409 `PHONE_IN_USE`). O e-mail do cliente passa a ser opcional (sem e-mail, sem convite
   nem conta acessível).
+- **Etiquetas do cliente** (`docs/specs/crm-cadastro/spec.md`, fase A2): catálogo por tenant com
+  cor (`#rrggbb`), nome único sem diferenciar maiúsculas, até 100 por organização e 20 por cliente.
+  Tela em `/app/configuracoes/etiquetas`, seletor no cliente, filtro e chips em `/app/clientes`,
+  permissão `tag:manage` (owner e admin; colaborador aplica). A coluna de texto `customer.tags`
+  sai, sem migração de dados (projeto novo).
 
 ### Alterado
 
@@ -72,6 +77,8 @@ Telefone obrigatório (migration `0024_telefone_email_opcional`):
    `db:seed`. Em base com dados, preencha o telefone antes (decisão do projeto derivado).
 2. `POST /api/auth/sign-up/email`, `/api/portal/auth-ext/sign-up` e `POST /api/customers` passam a
    exigir `phone`; o seed já traz telefone em todas as contas e clientes.
+3. `customer.tags` (texto) foi removido (`0025_etiquetas`); `POST` e `PATCH /api/customers` trocam
+   `tags: string[]` por `tagIds: uuid[]`.
 
 Node e dependências (sem migration nem variável nova). Para projetos derivados:
 

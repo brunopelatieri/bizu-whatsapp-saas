@@ -181,9 +181,14 @@ describe("portal: isolamento", () => {
     });
 
     it("o cliente não vê notas nem etiquetas da equipe", async () => {
+      const tag = await call("POST", "/api/tags", {
+        cookie: ownerA.cookie,
+        body: { name: "risco" },
+      });
+      const { tag: created } = (await tag.json()) as { tag: { id: string } };
       await call("PATCH", `/api/customers/${customerId}`, {
         cookie: ownerA.cookie,
-        body: { notes: "Interno: inadimplente", tags: ["risco"] },
+        body: { notes: "Interno: inadimplente", tagIds: [created.id] },
       });
 
       const response = await call("GET", "/api/portal/customer", {

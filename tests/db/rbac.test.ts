@@ -78,6 +78,12 @@ const endpoints = [
   ["PATCH", `/api/channels/${anyId}`, "channel:manage"],
   ["POST", `/api/channels/${anyId}/default`, "channel:manage"],
   ["DELETE", `/api/channels/${anyId}`, "channel:manage"],
+  ["GET", "/api/tags", "customer:read"],
+  ["POST", "/api/tags", "tag:manage"],
+  ["PATCH", `/api/tags/${anyId}`, "tag:manage"],
+  ["DELETE", `/api/tags/${anyId}`, "tag:manage"],
+  ["PUT", `/api/customers/${anyId}/tags/${anyId}`, "customer:update"],
+  ["DELETE", `/api/customers/${anyId}/tags/${anyId}`, "customer:update"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

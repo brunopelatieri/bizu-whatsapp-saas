@@ -176,6 +176,20 @@
       "when": 1794260545720,
       "tag": "0024_telefone_email_opcional",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794261137671,
+      "tag": "0025_etiquetas",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794261145310,
+      "tag": "0026_rls_etiquetas",
+      "breakpoints": true
     }
   ]
 }

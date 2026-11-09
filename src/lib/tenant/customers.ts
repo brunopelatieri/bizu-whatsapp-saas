@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, ne, or, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ilike, ne, or, type SQL, sql } from "drizzle-orm";
 import { type Tx, withTenant } from "@/db/rls";
 import { customer } from "@/db/schema";
 import { isUniqueViolation, violatedConstraint } from "@/db/errors";
@@ -18,6 +18,7 @@ import {
   type CustomersQuery,
   type UpdateCustomerInput,
 } from "@/lib/schemas/customer";
+import { replaceCustomerTags, tagsOfCustomers, type CustomerTagView } from "@/lib/crm/tags";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
@@ -96,8 +97,8 @@ function toCustomer({
   tenantId: _tenantId,
   phoneKey: _phoneKey,
   ...row
-}: CustomerRow) {
-  return { ...row, hasPortalAccess: portalUserId !== null };
+}: CustomerRow, tags: CustomerTagView[] = []) {
+  return { ...row, tags, hasPortalAccess: portalUserId !== null };
 }
 
 function byId(tenantId: string, customerId: string) {
@@ -120,6 +121,14 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
     );
   }
 
+  // Qualquer uma das etiquetas pedidas (as do filtro são do tenant por causa do RLS).
+  if (query.tags && query.tags.length > 0) {
+    const ids = sql.join(query.tags.map((id) => sql`${id}`), sql`, `);
+    filters.push(
+      sql`exists (select 1 from customer_tag where customer_tag.customer_id = "customer"."id" and customer_tag.tag_id in (${ids}))`,
+    );
+  }
+
   const where = and(...filters);
 
   return withTenant(tenantId, async (tx) => {
@@ -132,8 +141,10 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
       .limit(CUSTOMER_PAGE_SIZE)
       .offset((query.page - 1) * CUSTOMER_PAGE_SIZE);
 
+    const tags = await tagsOfCustomers(tx, rows.map(({ id }) => id));
+
     return {
-      items: rows.map(toCustomer),
+      items: rows.map((row) => toCustomer(row, tags.get(row.id))),
       total: total?.total ?? 0,
       pageSize: CUSTOMER_PAGE_SIZE,
     };
@@ -141,13 +152,16 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
 }
 
 export async function getCustomer(tenantId: string, customerId: string) {
-  const [row] = await withTenant(tenantId, (tx) =>
-    tx.select().from(customer).where(byId(tenantId, customerId)),
-  );
+  const found = await withTenant(tenantId, async (tx) => {
+    const [row] = await tx.select().from(customer).where(byId(tenantId, customerId));
+    if (!row) return null;
 
-  if (!row) throw notFound(NOT_FOUND);
+    return { row, tags: await tagsOfCustomers(tx, [row.id]) };
+  });
 
-  return toCustomer(row);
+  if (!found) throw notFound(NOT_FOUND);
+
+  return toCustomer(found.row, found.tags.get(found.row.id));
 }
 
 export async function createCustomer(
@@ -162,11 +176,14 @@ export async function createCustomer(
     return await withTenant(tenantId, async (tx) => {
       await assertPhoneFree(tx, tenantId, phone.phoneKey, actor);
 
+      const { tagIds, ...fields } = input;
       const [created] = await tx
         .insert(customer)
-        .values({ ...input, ...phone, tenantId })
+        .values({ ...fields, ...phone, tenantId })
         .returning();
       if (!created) throw new Error("cliente não criado");
+
+      if (tagIds) await replaceCustomerTags(tx, tenantId, created.id, tagIds);
 
       await auditInTransaction(tx, "customer.created", {
         actor: { id: actor.userId },
@@ -176,7 +193,10 @@ export async function createCustomer(
         ip: actor.ip,
       });
 
-      return toCustomer(created);
+      return toCustomer(
+        created,
+        (await tagsOfCustomers(tx, [created.id])).get(created.id),
+      );
     });
   } catch (error) {
     return translateUnique(error);
@@ -220,10 +240,11 @@ export async function updateCustomer(
       const status =
         patch.status ?? (emailChanged ? fallbackStatus : current.status);
 
+      const { tagIds, ...fields } = patch;
       const [row] = await tx
         .update(customer)
         .set({
-          ...patch,
+          ...fields,
           ...(phone ?? {}),
           status,
           ...(emailChanged
@@ -233,6 +254,8 @@ export async function updateCustomer(
         .where(byId(tenantId, customerId))
         .returning();
       if (!row) throw notFound(NOT_FOUND);
+
+      if (tagIds) await replaceCustomerTags(tx, tenantId, customerId, tagIds);
 
       if (current.portalUserId && (emailChanged || status !== "active")) {
         await leavePortalTenant(tx, current.portalUserId, tenantId);
@@ -247,7 +270,7 @@ export async function updateCustomer(
         ip: actor.ip,
       });
 
-      return toCustomer(row);
+      return toCustomer(row, (await tagsOfCustomers(tx, [row.id])).get(row.id));
     });
 
     if (unlinkedUserId) await dropOrphanPortalUser(unlinkedUserId);

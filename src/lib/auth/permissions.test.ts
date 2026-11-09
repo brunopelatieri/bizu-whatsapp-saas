@@ -42,6 +42,8 @@ const specMatrix: Record<string, [owner: boolean, admin: boolean, member: boolea
   // docs/specs/whatsapp-canais/spec.md, "Permissões".
   "channel:read": [true, true, true],
   "channel:manage": [true, true, false],
+  // docs/specs/crm-cadastro/spec.md, "Permissões": aplicar etiqueta é `customer:update`.
+  "tag:manage": [true, true, false],
 };
 
 describe("catálogo de permissões", () => {

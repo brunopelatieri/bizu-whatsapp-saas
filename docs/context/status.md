@@ -34,8 +34,8 @@
   (tabelas com RLS, serviço, caixa de avisos, filas `channel.inbound`/`channel.health`, rotas comuns
   `/api/channels`; `tech/29-canais-whatsapp.md`); as fixtures de `tests/fixtures/channels/` são
   **simuladas** (a medição B0 real falta); B2 (rotas e webhook da Cloud) é a próxima etapa.
-  **Fase A1 do `crm-cadastro` implementada** (telefone obrigatório e e-mail opcional do cliente;
-  `tech/28-crm-cadastro.md`); A2 a A4 seguem pendentes. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
+  **Fases A1 e A2 do `crm-cadastro` implementadas** (telefone obrigatório, e-mail opcional do
+  cliente e etiquetas do tenant; `tech/28-crm-cadastro.md`); A3 e A4 seguem pendentes. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
   válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se
   validado; regra do Brasil só para DDI 55; máscara; único por tenant no cliente) e e-mail
   obrigatório para conta acessível. Projeto novo: sem cadastro anterior, sem backfill nem

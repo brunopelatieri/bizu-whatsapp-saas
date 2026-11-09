@@ -23,6 +23,7 @@ import { createZip, type ZipEntry } from "@/lib/lgpd/zip";
 import { EXPORT_LINK_TTL_MS, signExportLink } from "@/lib/lgpd/link";
 import { getStorage, newStorageKey } from "@/lib/storage";
 import { TenantRuleError } from "@/lib/tenant/errors";
+import { tagsOfCustomers } from "@/lib/crm/tags";
 
 export type ExportSubject = { type: ConsentSubjectType; id: string };
 
@@ -209,7 +210,6 @@ const customerColumns = {
   phone: customer.phone,
   document: customer.document,
   status: customer.status,
-  tags: customer.tags,
   notes: customer.notes,
   createdAt: customer.createdAt,
 };
@@ -262,9 +262,13 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
 
   // Quem é owner é também controlador dos dados dos clientes da organização.
   for (const owned of base.memberships.filter(({ roles }) => isOwner(roles))) {
-    const customers = await withTenant(owned.tenantId, (tx) =>
-      tx.select(customerColumns).from(customer).orderBy(customer.createdAt),
-    );
+    const customers = await withTenant(owned.tenantId, async (tx) => {
+      const rows = await tx.select(customerColumns).from(customer).orderBy(customer.createdAt);
+      const tags = await tagsOfCustomers(tx, rows.map(({ id }) => id));
+
+      // Rótulo (nome) das etiquetas: o id não diz nada a quem lê o arquivo.
+      return rows.map((row) => ({ ...row, etiquetas: (tags.get(row.id) ?? []).map(({ name }) => name) }));
+    });
 
     entries.push({
       name: `clientes-${owned.tenantSlug}.json`,

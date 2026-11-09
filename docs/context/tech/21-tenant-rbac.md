@@ -106,7 +106,8 @@ acontecer em outro aparelho, e assim o convite não se perde.
 Eventos: `auth.email_verified`, `auth.password_reset`, `tenant.created`, `tenant.updated`,
 `member.invited`, `member.invitation_canceled`, `member.joined`, `member.role_changed`,
 `member.removed`, `role.created`, `role.updated`, `role.deleted`, `customer.created`,
-`customer.updated`, `customer.deleted`, `customer.invited`. Ações do próprio cliente gravam
+`customer.updated`, `customer.deleted`, `customer.invited`, `tag.created`, `tag.updated`,
+`tag.deleted`. Ações do próprio cliente gravam
 `actor_type = portal_user`: `portal.signed_up`, `portal.profile_updated`, `portal.password_set`.
 
 Evento sem tenant só aparece com `withPlatformScope`. Ainda não há tela de leitura.

@@ -46,7 +46,6 @@ export const customer = pgTable(
     status: text("status", { enum: customerStatuses })
       .notNull()
       .default("lead"),
-    tags: text("tags").array().notNull().default([]),
     notes: text("notes"),
     invitedAt: timestamptz("invited_at"),
     lastLoginAt: timestamptz("last_login_at"),

@@ -30,6 +30,7 @@ paths:
 - Migrations rodam fora do container da aplicação. O `bizu_app` lê `drizzle.__drizzle_migrations` (migration `0019`) para conferir o build na subida.
 - `consent_log` (sem tenant), `deletion_request` e `data_export` (RLS; linha sem tenant só com `withPlatformScope`) e `file` (tenant) são da fase 10; pedido pendente é um por assunto (índice único parcial).
 - `customer`, `user` e `portal_user` têm `CHECK` de telefone obrigatório (`src/db/phone-check.ts`; só a linha anonimizada fica sem) e `phone_key` (sem o 9º dígito); no cliente, único por tenant. Nunca grave só `phone`: use `phoneValues` (`src/lib/phone/columns.ts`).
+- Etiqueta é `tag` (escopo de tenant ou plataforma, `scopedPolicy()`) e `customer_tag`; use `src/lib/crm/tags.ts`, que recebe `Scope`. Nunca volte a guardar etiqueta como texto no cliente.
 - Dado pessoal novo entra na exportação (`src/lib/lgpd/export.ts`) e na anonimização (`src/lib/lgpd/deletion.ts`) no mesmo trabalho, e na tabela de retenção de `docs/context/lgpd.md`.
 
 Para entender este domínio, leia: docs/context/tech/07-banco-drizzle.md, docs/context/tech/27-lgpd-arquivos.md

@@ -27,20 +27,15 @@ import { Input } from "@/components/ui/input";
 import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { Textarea } from "@/components/ui/textarea";
 import { customerSchema } from "@/lib/schemas/customer";
+import { TagPicker } from "@/components/crm/tag-picker";
+import { ApiError } from "@/lib/api/client";
 
-/** O formulário edita etiquetas como texto; `splitTags` as devolve em lista à API. */
-const formSchema = customerSchema.omit({ status: true, tags: true }).extend({
-  tagsText: z.string().max(400, "Etiquetas demais."),
+/** As etiquetas do cliente são ids, escolhidos no `TagPicker`. */
+const formSchema = customerSchema.omit({ status: true, tagIds: true }).extend({
+  tagIds: z.array(z.string()),
 });
 type FormInput = z.input<typeof formSchema>;
 type FormOutput = z.output<typeof formSchema>;
-
-function splitTags(text: string) {
-  return text
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-}
 
 function toFormValues(customer?: Customer): FormInput {
   return {
@@ -49,7 +44,7 @@ function toFormValues(customer?: Customer): FormInput {
     phone: toPhoneFieldValue(customer?.phoneNormalized),
     document: customer?.document ?? "",
     notes: customer?.notes ?? "",
-    tagsText: customer?.tags.join(", ") ?? "",
+    tagIds: customer?.tags.map(({ id }) => id) ?? [],
   };
 }
 
@@ -79,15 +74,20 @@ export function CustomerFormDialog({
     if (open) reset(toFormValues(customer));
   }, [open, customer, reset]);
 
-  async function onSubmit({ tagsText, ...values }: FormOutput) {
+  async function onSubmit(values: FormOutput) {
     await save
       .mutateAsync({
         path: customer ? `/api/customers/${customer.id}` : "/api/customers",
         method: customer ? "PATCH" : "POST",
-        body: { ...values, tags: splitTags(tagsText) },
+        body: values,
       })
       .then(onClose)
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        // Número de outro cliente: o erro vai para o campo, onde a pessoa corrige.
+        if (error instanceof ApiError && error.code === "PHONE_IN_USE") {
+          form.setError("phone", { message: error.message });
+        }
+      });
   }
 
   const emailChanging =
@@ -170,12 +170,12 @@ export function CustomerFormDialog({
             </div>
             <FormField
               control={form.control}
-              name="tagsText"
+              name="tagIds"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Etiquetas</FormLabel>
                   <FormControl>
-                    <Input {...field} placeholder="vip, retorno" />
+                    <TagPicker value={field.value ?? []} onChange={field.onChange} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

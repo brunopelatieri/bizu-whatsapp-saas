@@ -773,7 +773,6 @@ const anonymizedCustomer = {
   phoneKey: null,
   document: null,
   notes: null,
-  tags: sql`'{}'::text[]`,
   status: "blocked" as const,
   portalUserId: null,
 };

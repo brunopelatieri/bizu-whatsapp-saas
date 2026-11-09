@@ -12,6 +12,7 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
   file: "Arquivos",
   support: "Suporte",
   channel: "Canais de WhatsApp",
+  tag: "Etiquetas",
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -41,4 +42,5 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "support:grant": "Autorizar acesso do suporte",
   "channel:read": "Ver números de WhatsApp",
   "channel:manage": "Conectar e gerir números de WhatsApp",
+  "tag:manage": "Criar, editar e excluir etiquetas",
 };

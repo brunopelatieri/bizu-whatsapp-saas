@@ -13,7 +13,7 @@
 | Fase | Entrega | Estado |
 |---|---|---|
 | A1 | Telefone obrigatório (biblioteca, schema, `PhoneField`, banco, cadastros) e e-mail do cliente opcional | implementada |
-| A2 | Etiquetas do tenant (`tag`, `customer_tag`) | pendente (depende da F0, `scopedPolicy()`) |
+| A2 | Etiquetas do tenant (`tag`, `customer_tag`) | implementada |
 | A3 | Campos adicionais do tenant (`custom_field`, `customer.custom_fields`) | pendente (depende da F0) |
 | A4 | Etiquetas e campos da plataforma (`organization_tag`, `organization_profile`) | pendente (A2 e A3) |
 
@@ -68,8 +68,38 @@ Só tem conta acessível quem tem e-mail. `customer.email` é anulável (índice
 e-mail de quem já tinha acesso corta o acesso (mesma regra de trocar o e-mail). O código de erro
 de e-mail repetido segue `CUSTOMER_EMAIL_TAKEN`.
 
+## Etiquetas do tenant (A2)
+
+- **Tabelas** (`src/db/schema/crm.ts`, migrations `0025_etiquetas` e `0026_rls_etiquetas`): `tag`
+  (`tenant_id` anulável, `scopedPolicy()`; nome único por escopo em `lower(name)`, com dois
+  índices, um por `tenant_id` e um parcial para `tenant_id IS NULL`; `CHECK` de `#rrggbb` e de 1 a
+  40 caracteres) e `customer_tag` (PK `(customer_id, tag_id)`, `tenant_id` não nulo,
+  `tenantPolicy()`). `customer.tags` (texto) saiu na mesma migration, sem backfill.
+- **Serviço** `src/lib/crm/tags.ts`, genérico por `Scope` (`createTag`, `updateTag`, `deleteTag`,
+  `listTags`, `replaceCustomerTags`, `addCustomerTag`, `removeCustomerTag`, `tagsOfCustomers`): o
+  tenant vem do escopo, nunca do corpo; o teto de 100 por escopo é conferido sob
+  `pg_advisory_xact_lock`; nome repetido é 409 `TAG_NAME_TAKEN` (nunca mescla); etiqueta de outro
+  escopo é 404. Constantes em `src/lib/crm/constants.ts` (100 por escopo, 20 por cliente, cor
+  padrão `#3b82f6`); cor normalizada por `normalizeHexColor` (`src/lib/crm/colors.ts`).
+- **API** (`src/api/tags.ts`; vínculo em `src/api/customers.ts`): `GET /api/tags` (`customer:read`,
+  com `usage`), `POST`, `PATCH`, `DELETE /api/tags[/:id]` (`tag:manage`; o `DELETE` devolve
+  `removedFrom`), `PUT` e `DELETE /api/customers/:id/tags/:tagId` (`customer:update`, idempotentes,
+  409 `CUSTOMER_TAG_LIMIT`). `POST` e `PATCH /api/customers` aceitam `tagIds` (substitui o conjunto;
+  sem ele o `PATCH` não mexe nas etiquetas); `GET /api/customers?tags=<id>,<id>` filtra por qualquer
+  uma e a resposta traz `tags: [{ id, name, color }]`. O portal nunca vê etiqueta.
+- **Permissões:** `tag:manage` para owner e admin; colaborador aplica (`customer:update`) e lê.
+- **Telas:** `/app/configuracoes/etiquetas` (`TagManager`, só com `tag:manage`), `TagPicker` no
+  formulário e no detalhe do cliente, filtro por etiqueta e chips (até 3 e "+N") em
+  `/app/clientes`; componentes em `src/components/crm/` (`TagChip`, `TagColorPicker`,
+  `TagPicker`, `tags-api.ts`), reaproveitáveis pelo atendimento.
+- **Auditoria:** `tag.created`, `tag.updated`, `tag.deleted`, só ids (nome e cor nunca). A
+  exportação LGPD do owner (`clientes-<slug>.json`) traz `etiquetas` (nomes); a anonimização do
+  cliente apaga os `customer_tag` por `cascade`/`customer`.
+- Testes: `tests/db/tags.test.ts` (CRUD, isolamento, teto, vínculo, filtro, RBAC) e a matriz de
+  `tests/db/rbac.test.ts`.
+
 ## O que a SPEC pede e ainda não existe
 
-Etiquetas, campos adicionais e os pedaços de `/admin` das fases A2 a A4 (esta página cresce com
-elas). Não existe tela de perfil da equipe: o telefone da equipe entra no `/cadastro` e é editado
+Campos adicionais (A3) e etiquetas e campos da plataforma em `/admin` (A4); esta página cresce
+com eles. Não existe tela de perfil da equipe: o telefone da equipe entra no `/cadastro` e é editado
 pelo proprietário da plataforma em `/admin/usuarios/:id`.

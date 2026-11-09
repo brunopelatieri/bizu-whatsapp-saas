@@ -1,4 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
 import { Hono } from "hono";
 import { requireAuth } from "@/api/auth";
 import {
@@ -17,6 +18,7 @@ import {
 } from "@/api/permissions";
 import { rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
+import { addCustomerTag, removeCustomerTag } from "@/lib/crm/tags";
 import {
   customerSchema,
   customersQuerySchema,
@@ -32,6 +34,15 @@ import {
 } from "@/lib/tenant/customers";
 
 export const customerRoutes = new Hono<TenantEnv>();
+
+/** Id malformado é só algo que não existe (como `validId`). */
+const validCustomerTag = zValidator(
+  "param",
+  z.object({ id: z.uuid(), tagId: z.uuid() }),
+  (result, c) => {
+    if (!result.success) return c.json({ error: "Não encontrado." }, 404);
+  },
+);
 
 customerRoutes.onError(handleTenantError);
 customerRoutes.use(
@@ -97,6 +108,31 @@ customerRoutes.patch(
     );
 
     return c.json({ customer });
+  },
+);
+
+/** Aplicar e tirar etiqueta é editar o cliente: `customer:update`. Idempotentes. */
+customerRoutes.put(
+  "/api/customers/:id/tags/:tagId",
+  requirePermission("customer", "update"),
+  validCustomerTag,
+  async (c) => {
+    const { id, tagId } = c.req.valid("param");
+    await addCustomerTag(c.get("tenant").id, id, tagId);
+
+    return c.json({ ok: true });
+  },
+);
+
+customerRoutes.delete(
+  "/api/customers/:id/tags/:tagId",
+  requirePermission("customer", "update"),
+  validCustomerTag,
+  async (c) => {
+    const { id, tagId } = c.req.valid("param");
+    await removeCustomerTag(c.get("tenant").id, id, tagId);
+
+    return c.json({ ok: true });
   },
 );
 
