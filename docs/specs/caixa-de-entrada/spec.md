@@ -1,6 +1,6 @@
 # SPEC: Caixa de entrada (chat e fila de atendimento)
 
-- **Status:** rascunho
+- **Status:** aprovada
 - **PRD:** `docs/specs/caixa-de-entrada/prd.md`
 - **Programa:** `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T6, T10, T11 e T13)
 - **Depende de:** `docs/specs/crm-cadastro/spec.md` (telefone, etiquetas, campos) e
@@ -40,7 +40,7 @@ Arquivo `src/db/schema/inbox.ts`. Todas com `tenant_id` anulável, `scopedPolicy
 
 | Tabela | Colunas principais | Observações |
 |---|---|---|
-| `chat_contact` | `id`, `tenant_id`, `phone` (canônico, T6), `wa_name`, `name`, `customer_id` → `customer` `set null`, `user_id` → `user` `set null`, `created_via` (`inbound` \| `outbound` \| `device`), `created_at`, `updated_at` | Único por escopo em `phone` (índice em `(tenant_id, phone)` e o parcial para `tenant_id IS NULL`). No tenant, `customer_id` **ou** `user_id`, nunca os dois (`CHECK`). Índices em `customer_id` e `user_id` |
+| `chat_contact` | `id`, `tenant_id`, `phone` (canônico, T6, como o provedor entregou), `phone_key` (chave de `crm-cadastro`: o celular sem o 9º dígito), `wa_name`, `name`, `customer_id` → `customer` `set null`, `user_id` → `user` `set null`, `created_via` (`inbound` \| `outbound` \| `device`), `created_at`, `updated_at` | Único por escopo em `phone_key` (índice em `(tenant_id, phone_key)` e o parcial para `tenant_id IS NULL`): o mesmo celular com e sem o 9º dígito é um contato só. No tenant, `customer_id` **ou** `user_id`, nunca os dois (`CHECK`). Na plataforma, `customer_id` é sempre nulo (`CHECK`: `tenant_id IS NOT NULL OR customer_id IS NULL`). Índices em `customer_id` e `user_id` |
 | `chat_contact_identity` | `id`, `tenant_id`, `contact_id` → `chat_contact` `cascade`, `kind` (`lid`), `value`, `created_at` | Único `(tenant_id, kind, value)` e o parcial da plataforma. Liga o identificador oculto do WhatsApp ao telefone |
 | `conversation` | `id`, `tenant_id`, `channel_id` → `channel` `restrict`, `contact_id` → `chat_contact` `cascade`, `status` (`open` \| `pending` \| `closed`), `assigned_user_id` → `user` `set null`, `assigned_at`, `last_message_at`, `last_message_preview` (até 120), `last_message_direction`, `last_inbound_at`, `unread_count` (int, `>= 0`), `closed_at`, `closed_by`, `created_at`, `updated_at` | Único `(tenant_id, contact_id, channel_id)` e o parcial da plataforma. Índices: `(tenant_id, status, last_message_at DESC, id DESC)`; parcial `(tenant_id, last_message_at DESC) WHERE assigned_user_id IS NULL AND status <> 'closed'` (fila); `(tenant_id, assigned_user_id, last_message_at DESC)` |
 | `message` | `id`, `tenant_id`, `conversation_id` → `conversation` `cascade`, `channel_id`, `direction` (`in` \| `out`), `sender_type` (`contact` \| `user` \| `device` \| `system`), `sender_user_id` → `user` `set null`, `type` (`text` \| `image` \| `video` \| `audio` \| `document` \| `sticker` \| `location` \| `contacts` \| `template` \| `interactive` \| `unsupported`), `text`, `file_id` → `file` `set null`, `media_status` (`ready` \| `pending` \| `failed`), `provider_media_id`, `provider_message_id`, `client_id`, `reply_to_message_id` → `message` `set null`, `template_name`, `payload` jsonb, `status` (`queued` \| `sent` \| `delivered` \| `read` \| `failed`), `error_code`, `error_message`, `provider_timestamp`, `created_at`, `updated_at` | Único parcial `(channel_id, provider_message_id) WHERE provider_message_id IS NOT NULL`; único parcial `(conversation_id, client_id) WHERE client_id IS NOT NULL`. Índice `(conversation_id, created_at DESC, id DESC)`. Parcial `(created_at) WHERE status = 'queued'` para a varredura |
@@ -55,7 +55,6 @@ Arquivo `src/db/schema/inbox.ts`. Todas com `tenant_id` anulável, `scopedPolicy
   mídia da plataforma. `owner_type = 'message'`, `owner_id = message.id`. Toda leitura
   existente de `file` roda em `withTenant` e segue vendo só as suas; o teste de RLS ganha o
   caso "tenant não lê arquivo da plataforma".
-- **`platform_setting`:** chave `inbox_reach_customers` (boolean, padrão `false`).
 - **Migrations:** `inbox.ts` + `db:generate`; customizada com `FORCE`, os índices parciais e a
   troca de política de `file`. Aditiva, sem backfill.
 
@@ -68,16 +67,23 @@ por evento. Idempotente: repetir o evento não muda nada.
 
 1. **Descartes:** grupo, status do WhatsApp, `fromMe` em canal sem `deviceEcho`, mensagem cujo
    remetente só tem LID sem telefone conhecido em `chat_contact_identity` → evento `ignored`.
-2. **Contato:** `normalizePhone(fromPhone)` → busca `chat_contact` por `phoneVariants`
-   (com e sem o 9º dígito). Não achou: cria com `created_via = inbound` e tenta o vínculo
-   automático, nesta ordem: `user` da equipe do tenant com aquele `phone_normalized`; `customer`
-   com aquele `phone_normalized`, **se for exatamente um**. Dois clientes com o mesmo número:
-   fica sem vínculo e o painel mostra os candidatos. `wa_name` é atualizado a cada mensagem.
+2. **Contato:** `normalizePhone(fromPhone)` → busca `chat_contact` pela `phone_key` (que junta
+   o número com e sem o 9º dígito; os provedores costumam entregar o celular do Brasil sem ele).
+   Não achou: cria com `created_via = inbound` e tenta o vínculo automático pela mesma
+   `phone_key`, nesta ordem, cada um **só se a correspondência for única**: `user` da equipe do
+   tenant (membro ativo); `customer` do tenant. O `customer` tem `phone_key` única por tenant
+   (`crm-cadastro`), então acha no máximo um. O `user` não: dois membros podem dividir um
+   número (o da empresa), e então o contato fica sem vínculo com `user`, passa ao `customer`, e
+   o painel mostra os membros candidatos para o vínculo manual. Na plataforma só há vínculo com
+   `user`, pela mesma regra (dois ou mais usuários com o número → sem vínculo; quem atende liga à
+   mão pelo `link` com `userId`); `customer` de tenant nunca é consultado. `wa_name` é
+   atualizado a cada mensagem.
    Se veio LID, grava a identidade.
 3. **Conversa:** `INSERT ... ON CONFLICT (escopo, contact_id, channel_id) DO UPDATE`, em um
    comando: `last_message_at`, prévia, `unread_count = unread_count + 1`,
-   `last_inbound_at = GREATEST(...)`, e `status = 'open'` se estava `closed` (o dono é
-   mantido se ainda for membro; senão `assigned_user_id = NULL`).
+   `last_inbound_at = GREATEST(...)`, e, se estava `closed`, `status = 'open'` **e
+   `assigned_user_id = NULL`**: a conversa reaberta volta para a fila, mesmo que o dono anterior
+   ainda seja da equipe. `assigned_at` e o `closed_*` são zerados.
 4. **Mensagem:** `INSERT ... ON CONFLICT (channel_id, provider_message_id) DO NOTHING`. Se nada
    foi inserido, os passos 3 e 5 são desfeitos (a transação aborta por erro controlado e o
    evento fica `processed`). `reply_to_message_id` é resolvido por `provider_message_id`.
@@ -115,7 +121,7 @@ A exclusão de mensagens e conversas com arquivo usa a remoção de arquivo que 
 3. Transação curta: insere a mensagem `queued` com `client_id` (repetido devolve a mesma
    linha), atualiza prévia e `last_message_at`, zera `unread_count` e **assume** a conversa se
    estava sem dono e o escopo é tenant (`UPDATE ... WHERE assigned_user_id IS NULL`). Conversa
-   `closed` volta a `open`.
+   `closed` volta a `open` (o dono não muda; sem dono, quem respondeu a assume pela regra acima).
 4. Fora da transação, chama `provider.sendText | sendMedia | sendTemplate` com timeout.
 5. Sucesso: `status = sent`, `provider_message_id`. Erro do provedor: `failed` com o código e
    a mensagem dele; a rota responde 200 com a mensagem `failed` (a falha é dado, não erro de
@@ -142,7 +148,7 @@ validadas contra `components`; `payload` guarda nome, idioma, variáveis e o tex
 | Quem | Vê |
 |---|---|
 | Tenant, com `inbox:supervise` | Todas as conversas do tenant |
-| Tenant, com `inbox:read` | `assigned_user_id IS NULL` (fila) ou `assigned_user_id = eu` |
+| Tenant, com `inbox:read` | `assigned_user_id IS NULL` (a fila inteira, de todos os números do tenant) ou `assigned_user_id = eu` (decisão do proprietário: sem liberar por número nesta entrega) |
 | Plataforma (`platform_owner`, `platform_support`) | Todas as do escopo plataforma |
 
 Conversa fora do predicado responde 404, igual a id inexistente.
@@ -153,7 +159,7 @@ Conversa fora do predicado responde 404, igual a id inexistente.
 | Responder | Assume se estava na fila; responder conversa de outro (supervisor) não troca o dono | passo 3 do envio |
 | Devolver à fila | Dono da conversa ou `inbox:assign` | `assigned_user_id = NULL` |
 | Transferir | `inbox:assign`; o destino é membro ativo com `inbox:reply` | `UPDATE` simples; 400 `INVALID_ASSIGNEE` |
-| Encerrar, pendente, reabrir | Quem vê e tem `inbox:reply` | `status`, `closed_at`, `closed_by` |
+| Encerrar, pendente, reabrir (à mão) | Quem vê e tem `inbox:reply` | Só `status`, `closed_at`, `closed_by`: o dono não muda (como na origem). Só a mensagem do contato devolve a conversa à fila |
 | Membro removido ou sem acesso | Gancho na remoção de membro (`src/lib/tenant/`) | `UPDATE conversation SET assigned_user_id = NULL WHERE assigned_user_id = :user` no tenant |
 
 A plataforma não tem dono nem fila: `assigned_user_id` fica sempre nulo e as rotas de
@@ -201,9 +207,9 @@ Schemas em `src/lib/schemas/inbox.ts`. Rotas de tenant: `requireAuth` + `require
 | `GET /api/inbox/unread` | – | `{ queue, mine }` | `inbox:read` |
 | `GET /api/inbox/assignees` | – | `{ users: [{ id, name }] }` | `inbox:assign` |
 | `PATCH /api/inbox/contacts/:id` | `{ name }` | `{ contact }` | `inbox:reply` |
-| `GET /api/inbox/contacts/:id/candidates` | – | `{ customers: [{ id, name, phone }] }` com o mesmo telefone | `inbox:reply` + `customer:read` |
-| `POST /api/inbox/contacts/:id/link` | `{ customerId \| null }` | `{ contact, link }` | `inbox:reply` + `customer:update` |
-| `POST /api/inbox/contacts/:id/customer` | `{ name, email?, tagIds?, customFields? }` | 201 `{ customer }`; 403 `PLAN_LIMIT_REACHED`; 409 `CUSTOMER_EMAIL_IN_USE` | `inbox:reply` + `customer:create` |
+| `GET /api/inbox/contacts/:id/candidates` | – | `{ customers: [{ id, name, phone }], users: [{ id, name }] }` com a mesma `phone_key` (`customers` só com `customer:read`) | `inbox:reply` |
+| `POST /api/inbox/contacts/:id/link` | `{ customerId } \| { userId } \| { customerId: null, userId: null }` (`userId` só de membro ativo do tenant) | `{ contact, link }` | `inbox:reply`; com `customerId`, também `customer:update` |
+| `POST /api/inbox/contacts/:id/customer` | `{ name, email?, tagIds?, customFields? }` | 201 `{ customer }`; 403 `PLAN_LIMIT_REACHED`; 400 `INVALID_PHONE` (o número do WhatsApp não passa na regra do cadastro: o atendente corrige no formulário); 409 `CUSTOMER_EMAIL_IN_USE`; 409 `PHONE_IN_USE` (com `{ customerId, name? }`: a tela oferece "Vincular a ele") | `inbox:reply` + `customer:create` |
 | `GET /api/inbox/events` | – | SSE | `inbox:read` |
 
 - `ConversationItem`: `id`, `status`, `channel { id, name, type }`, `contact { id, displayName,
@@ -221,7 +227,13 @@ Schemas em `src/lib/schemas/inbox.ts`. Rotas de tenant: `requireAuth` + `require
 - **Cursor:** `(last_message_at, id)` na lista e `(created_at, id)` nas mensagens, opaco em
   base64.
 - **Iniciar conversa:** `customerId` e `userId` precisam ter `phone_normalized`
-  (400 `PHONE_REQUIRED`); `phone` avulso é normalizado. Em canal Cloud a conversa nasce com a
+  (400 `PHONE_REQUIRED`); `phone` avulso é normalizado. O número só pode ser celular ou
+  estrangeiro (`canWhatsApp`) **ou já ter escrito pelo WhatsApp**: se existe `chat_contact` no
+  escopo com a mesma `phone_key`, a conversa usa esse contato e o número dele (o que o provedor
+  entregou), mesmo que o cadastro seja `mobile_legacy`. Sem contato, fixo e celular antigo de 8
+  dígitos dão 400 `PHONE_NOT_WHATSAPP`, e a tela esconde "Conversar" para eles, com a
+  explicação. "Salvar como cliente" grava o número do contato como veio (sem inserir o 9), e o
+  cliente continua com "Conversar", porque o contato existe. Em canal Cloud a conversa nasce com a
   janela fechada e a tela oferece o modelo.
 - **Mídia:** `GET .../media` confere a visibilidade da conversa da mensagem e serve com
   `X-Content-Type-Options: nosniff`; `Content-Disposition: inline` só para a lista segura de
@@ -233,15 +245,15 @@ Schemas em `src/lib/schemas/inbox.ts`. Rotas de tenant: `requireAuth` + `require
 ### Plataforma (`/api/admin/inbox/*`)
 
 As mesmas rotas, com `Scope = platform` e `withPlatformData`, **menos** `claim`, `assign`,
-`assignees` e as abas `queue` e `mine` (só existe a lista). Diferenças:
+`assignees`, `candidates`, `customer` (salvar como cliente) e as abas `queue` e `mine` (só
+existe a lista); `link` aceita só `userId` ou `null`. Diferenças:
 
 | Ponto | Regra |
 |---|---|
-| Autorização | Leitura: qualquer papel de plataforma. Envio e mudança de situação: `platform_owner` e `platform_support` (pergunta aberta do plano; se a resposta for "não", só `platform_owner`) |
-| Vínculo do contato | Com `user`, pelo `phone_normalized`. `link` = `{ kind: "user", user, organizations: [{ id, name, role, tags, customFields }] }`, com as etiquetas e os campos de `crm-cadastro` (`organization_tag`, `organization_profile`) |
-| Clientes dos owners | `GET /api/admin/inbox/contacts/:id/customers` procura o telefone em `customer` de todos os tenants (`withPlatformScope("atendimento da plataforma")`, só `id`, nome, organização) e só responde com `inbox_reach_customers` ligado |
-| Iniciar conversa | `{ channelId, userId \| phone }`; `{ customerId }` só com `inbox_reach_customers` ligado, senão 403 `REACH_CUSTOMERS_DISABLED`. Fica na auditoria (`inbox.platform_customer_contacted`) |
-| Configuração | `PATCH /api/admin/settings` (já existe) ganha `inboxReachCustomers`, só `platform_owner` |
+| Autorização | Leitura: qualquer papel de plataforma. Envio, mudança de situação e iniciar conversa: `platform_owner` e `platform_support` (decisão do proprietário). É a única escrita do suporte em `/admin`: canal, etiqueta e campo seguem só com `platform_owner`, e a sessão personificada segue sem enviar |
+| Vínculo do contato | Com `user`, pelo `phone_normalized`. `link` = `{ kind: "user", user, organizations: [{ id, name, role, tags, customFields }] }`, com as etiquetas e os campos de `crm-cadastro` (`organization_tag`, `organization_profile`). Sem correspondência: `{ kind: "none" }`, sem candidatos |
+| Clientes dos owners | **Fora do escopo** (decisão do proprietário). Não há rota, consulta, vínculo nem `customerId` na plataforma; o atendimento da plataforma não usa `withPlatformScope` |
+| Iniciar conversa | `{ channelId, userId \| phone }`. `customerId` é rejeitado pelo schema (400). Número avulso que pertença a um cliente de owner vira só "não identificado" |
 
 ## Permissões
 
@@ -295,8 +307,8 @@ Componentes em `src/components/inbox/`:
   lê, não envia, não marca como lida, não baixa mídia nem recebe evento SSE de conversa do
   membro B.
 - **Isolamento de escopo:** `scopedPolicy()` no banco; rotas de `/admin` em `withPlatformData`,
-  que não enxerga linha de tenant. A consulta a clientes dos owners é a única com
-  `withPlatformScope`, atrás da configuração e auditada.
+  que não enxerga linha de tenant. Nenhuma rota de `/api/admin/inbox` usa `withPlatformScope`
+  nem lê `customer` de tenant (teste dedicado).
 - **Personificação:** `blockMutationsWhileImpersonating` em toda escrita; a leitura é liberada
   e já fica na auditoria da personificação.
 - **SSE:** autenticado, filtrado no servidor, carga sem conteúdo; reautenticação periódica.
@@ -307,8 +319,8 @@ Componentes em `src/components/inbox/`:
   da mensagem é renderizado como texto (sem HTML); link vira âncora com `rel="noopener
   noreferrer"` e só `http(s)`.
 - **Auditoria:** `inbox.conversation_claimed`, `_assigned`, `_released`, `_closed`,
-  `_reopened`, `inbox.contact_linked`, `inbox.contact_saved_as_customer`,
-  `inbox.platform_customer_contacted`; `metadata` com ids, sem texto nem telefone.
+  `_reopened`, `inbox.contact_linked`, `inbox.contact_saved_as_customer`; `metadata` com ids,
+  sem texto nem telefone.
 - **LGPD:** a exclusão ou anonimização de `customer` apaga os `chat_contact` vinculados, com
   conversas, mensagens e arquivos; a exportação do cliente inclui as mensagens trocadas com
   ele. A exclusão de organização leva tudo por `cascade` e apaga os objetos do armazenamento.
@@ -322,23 +334,27 @@ Componentes em `src/components/inbox/`:
 1. **C1, dados:** schema, migrations, mudança de `file` → `rls.test.ts` (três modos, mais
    arquivo da plataforma).
 2. **C1, ingestão:** `ingest.ts`, `inbox.media`, ligação em `applyChannelEvent` → testes com as
-   fixtures de B0: número novo cria contato e conversa; cliente e membro reconhecidos; dois
-   clientes com o mesmo número ficam sem vínculo; repetido não duplica nem soma não lida;
-   status fora de ordem; eco do aparelho; conversa encerrada reabre; LID sem telefone ignorado.
+   fixtures de B0: número novo cria contato e conversa; cliente e membro reconhecidos, também
+   quando o provedor entrega o celular sem o 9º dígito; dois membros com o mesmo número ficam
+   sem vínculo com `user` e aparecem como candidatos; cliente `mobile_legacy` salvo a partir do
+   contato inicia conversa sem `PHONE_NOT_WHATSAPP`; repetido não
+   duplica nem soma não lida; status fora de ordem; eco do aparelho; conversa encerrada reabre
+   sem dono, na fila, mesmo com o dono anterior ainda na equipe; LID sem telefone ignorado.
 3. **C2, leitura e fila:** `visibility.ts`, listas, mensagens, assumir, transferir, situação,
    lida, não lidas → matriz de visibilidade; dois `claim` simultâneos (um 200, um 409); RBAC.
 4. **C2, envio de texto:** `send.ts`, janela de 24 h, `inbox.sweep`, reenviar → provedor
    simulado: sucesso, recusa (fica `failed`), timeout (varredura), `clientId` repetido,
    resposta assume, personificação 403.
 5. **C2, contato:** vincular, salvar como cliente (limite do plano), iniciar conversa, gancho
-   de remoção de membro.
+   de remoção de membro; salvar como cliente com telefone já usado → 409 `PHONE_IN_USE`.
 6. **C3, tela do tenant** com polling de 20 s → smoke nos dois tipos de canal.
 7. **C4, tempo real:** `realtime.ts`, SSE, `use-inbox-events.ts`, contador no menu → teste de
    filtro do SSE por pessoa; `JOBS_MODE=worker` (aviso atravessa processos); queda da conexão
    `LISTEN` cai em polling.
 8. **C5, mídia de saída, modelo e citação.**
-9. **C6, plataforma:** rotas e telas em `/admin`, configuração `inbox_reach_customers` →
-   suporte e proprietário; nenhuma conversa de tenant aparece; 403 com a opção desligada.
+9. **C6, plataforma:** rotas e telas em `/admin` → suporte e proprietário respondem; suporte
+   recebe 403 em canal, etiqueta e campo; nenhuma conversa de tenant aparece; `customerId` na
+   criação de conversa é 400; nenhuma consulta a `customer` de tenant.
 10. **C7, LGPD e contexto.**
 
 ## Verificação
@@ -359,6 +375,8 @@ Componentes em `src/components/inbox/`:
   exclusão e exportação cobrindo conversas
 - [ ] `tech/20-jobs.md`: `inbox.media` e `inbox.sweep`
 - [ ] `tech/26-seguranca.md`: SSE e regra de personificação no atendimento
+- [ ] `tech/22-admin.md` e `tech/21-tenant-rbac.md`: `platform_support` passa a responder no
+  atendimento (única escrita dele em `/admin`)
 - [ ] `tech/11-dashboard.md`, `tech/22-admin.md`, `tech/06-hono-api.md`, `tech/14-deploy.md`
   (`REALTIME_DATABASE_URL`; SSE atrás do Caddy sem buffer)
 - [ ] `.env.example`, `status.md`, `README.md`
@@ -370,13 +388,17 @@ Componentes em `src/components/inbox/`:
 | Decisão | Motivo | Alternativa descartada |
 |---|---|---|
 | `chat_contact` separado de `customer` | Decisão do proprietário (T4); a plataforma fala com `user`, que não é `customer` | Contato = cliente, como na origem |
-| Vínculo automático só com correspondência única | Dois clientes com o mesmo telefone são permitidos | Escolher o mais recente |
+| Vínculo automático só com correspondência única | O `customer` tem `phone_key` única por tenant, mas o `user` não (número da empresa dividido entre membros) | Escolher o mais recente |
+| Contato e vínculo por `phone_key` | Os provedores entregam o celular do Brasil sem o 9º dígito; comparar pelo canônico duplicaria contatos e perderia o vínculo | Busca por variantes em cada consulta |
 | Uma conversa por contato e canal, reaberta | Histórico contínuo, como na origem | Uma conversa por atendimento (ticket) |
 | Fila = sem dono; sem distribuição automática | Pedido do PRD; a origem também não tem rodízio real | Rodízio |
 | Mensagem `queued` gravada antes do envio | A falha fica visível e reenviável | Otimismo só na tela |
 | Envio na requisição, não em job | O atendente vê o resultado na hora; a varredura cobre o timeout | Fila de saída |
 | SSE com ids + releitura | Autorização em um lugar só; funciona com o worker separado | Mandar a linha no evento |
 | Conexão `LISTEN` única por processo | Uma conexão por aba esgotaria o Postgres | `LISTEN` por assinante |
-| Reabertura volta ao antigo dono | Continuidade do atendimento (pergunta aberta do PRD) | Sempre para a fila |
+| Mensagem do contato em conversa encerrada a devolve à fila, sem dono | Decisão do proprietário: quem estiver livre assume, e ninguém fica com conversa parada em nome de quem saiu. Reabrir à mão ou responder não muda o dono (segue a origem) | Voltar ao antigo dono |
+| Plataforma sem acesso a clientes dos owners | Decisão do proprietário: o cliente é do owner (controlador); a plataforma é operadora. Sem `inbox_reach_customers` e sem `withPlatformScope` no atendimento | Recurso atrás de configuração desligada por padrão |
+| Membro comum vê a fila inteira | Decisão do proprietário; liberar a fila por número fica para depois | Fila filtrada pelos números liberados ao membro |
+| `platform_support` responde | Decisão do proprietário; é a única escrita dele em `/admin` | Só `platform_owner` responde |
 | `file` com `tenant_id` anulável | Reaproveita armazenamento, exclusão e LGPD | Tabela de mídia própria |
 | Busca sem conteúdo de mensagem | Pede índice de texto e decisão de privacidade | `ILIKE` em `message.text` |
