@@ -14,7 +14,7 @@
 | `subscription` | tenant, RLS forçado | uma por tenant. Estados e colunas do provedor em `tech/24-billing-cobranca.md` |
 | `subscription_event` | tenant, RLS forçado | toda transição grava uma linha (`system`, `admin`, `job`, `owner`, `webhook`) |
 
-`plan.limits`: `{ members, customers, storage_mb, custom_roles, organizations }`. Chave ausente ou
+`plan.limits`: `{ members, customers, storage_mb, custom_roles, organizations, channels_whatsapp_cloud, channels_whatsapp_qr }`. Chave ausente ou
 `null` = ilimitado; `0` não deixa criar nada.
 
 ## Configurações da plataforma
@@ -120,7 +120,11 @@ configurações (`trial_plan_id` = `pro`, 14 e 7 dias), `owner@bizu.local` (`pla
 `acme.membro`, trial no `pro`) e três tenants na cobrança manual, cada um com owner próprio:
 `cliente-em-dia` (pago), `cliente-atrasado` (`past_due`, fatura aberta) e `cliente-vencido`
 (`unpaid` + `read_only`, fatura `failed`). Só cria o que falta: planos e configurações editados em
-`/admin` não são sobrescritos; plano existente sem `organizations` ganha só essa chave.
+`/admin` não são sobrescritos; plano existente sem `organizations` ou sem as chaves de canal ganha só essas chaves.
+Os limites de canal (`free` 1/1, `basic` 2/2, `pro` 3/3, oficial/QR) ainda não são **aplicados**: a contagem
+em `databaseLimitSource.used` e o `assertWithinLimit` na criação entram com a tabela `channel` (B1 de
+`docs/specs/whatsapp-canais/`). A página `/precos` só mostra o limite de canal cujo módulo está em
+`CHANNEL_PROVIDERS`.
 Conta já existente com o e-mail de um usuário do seed só tem o papel conferido se o e-mail estiver
 confirmado; sem isso o seed para, porque a senha é de quem cadastrou. Em produção, recusa o
 `SEED_PASSWORD` de `.env.example`.
