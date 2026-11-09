@@ -22,6 +22,15 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   entra direto.
 - Seed com preços manuais, limite de organizações e três tenants na cobrança manual (em dia, em
   atraso e vencido).
+- **Canal de WhatsApp por QR Code (Evolution Go), servidor e diálogo** (`docs/specs/whatsapp-canais/spec.md`,
+  fase B3; módulo opcional `whatsapp_qr` em `CHANNEL_PROVIDERS`): webhook
+  `POST /api/webhooks/whatsapp/evolution/:secret` (cadeia de verificação, 401 sem detalhe, 25 MB),
+  mídia de entrada gravada no `StorageProvider` sob `inbound/` (base64, ou `mediaUrl` só de
+  `EVOLUTION_MEDIA_ORIGINS`), rotas `POST /api/channels/whatsapp-qr`, `/:id/qr`, `/:id/pair`,
+  `GET /:id/status`, `/:id/disconnect`, `/logout`, `/reconnect` e `PATCH /:id/advanced-settings`,
+  teto do servidor antes do limite do plano, readoção do canal antigo quando o mesmo número
+  reconecta e o componente `QrChannelDialog`. Fixtures ainda simuladas: falta o smoke com o servidor
+  real. A página da lista de canais chega com a fase B2.
 - **Telefone obrigatório em todo cadastro de pessoa** (`docs/specs/crm-cadastro/spec.md`, fase A1):
   conta de equipe e do portal, perfil, `/admin` e cliente. Validação no Brasil (DDD, 9º dígito, fixo e
   celular antigo com aviso) e em E.164 para outros países, campo `PhoneField` com máscara e seletor de

@@ -71,7 +71,7 @@ recusar a subida.
 | `billing.period_end` | cron de hora em hora | 3x, 5 min com backoff | encerra cancelamentos e aplica downgrades vencidos (`runBillingPeriodEnd`) |
 | `billing.reconcile` | cron diário 04:00 UTC | 3x, 5 min com backoff | compara com o provedor, corrige e alerta; devolve à fila eventos `pending` há mais de 10 min (`runBillingReconcile`) |
 
-| `channel.inbound` | webhooks de canal | 5x, backoff de 30 s a 1 h | `exclusive`, `singletonKey = channel_event.id`; aplica o aviso gravado (`processChannelEvent`); na última tentativa o aviso vira `failed`; dead letter `channel.inbound.dead` (14 dias) |
+| `channel.inbound` | webhooks de canal | 5x, backoff de 30 s a 1 h | `exclusive`, `singletonKey = channel_event.id`; aplica o aviso gravado (`processChannelEvent`), baixando antes a mídia citada por `mediaUrl` (só de origem em `EVOLUTION_MEDIA_ORIGINS`; 403/404 fecham o aviso como `failed` sem retry); na última tentativa o aviso vira `failed`; dead letter `channel.inbound.dead` (14 dias) |
 | `channel.health` | cron a cada 15 min | 1x | `probe` de cada canal não desativado, grava o estado, avisa os owners na queda e devolve à fila avisos `pending` há mais de 10 min (`tech/29-canais-whatsapp.md`) |
 
 Detalhes das filas de cobrança em `tech/24-billing-cobranca.md`. As de LGPD entram na fase 10: acrescente em `queueDefinitions` (a

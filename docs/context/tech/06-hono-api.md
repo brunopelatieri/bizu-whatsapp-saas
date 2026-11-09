@@ -115,10 +115,20 @@ deve voltar em escopo controlado.
 
 ## Canais WhatsApp
 
-`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) e, com B2, os webhooks
+`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) e os webhooks
 `/api/webhooks/whatsapp/*` fora de `sameOrigin` e do CSRF, como os de pagamento. A rota monta
 `Scope` a partir de `requireTenant`; o serviço (`src/lib/channels/service.ts`) abre `withScope`.
 Ver `tech/29-canais-whatsapp.md`.
+
+- **QR Code (B3):** `POST /api/channels/whatsapp-qr`, `POST /:id/qr`, `/:id/pair`, `GET /:id/status`,
+  `POST /:id/disconnect`, `/logout`, `/reconnect` e `PATCH /:id/advanced-settings`. Limite de taxa
+  **por usuário** (`key` = id do usuário): criar 10, QR e código 15, estado 30, demais 30 por minuto.
+  QR e código saem com `Cache-Control: no-store`. A regra de negócio está em
+  `src/lib/channels/pairing.ts`; a rota só monta escopo, ator e validação.
+- **Webhook da Evolution:** `src/api/webhooks-channels-evolution.ts` exporta `evolutionWebhooks`
+  (`POST /api/webhooks/whatsapp/evolution/:secret`), montado em `app.ts` junto dos outros webhooks,
+  antes do `csrfGuard`. `bodyLimit` de 25 MB, 401 sem detalhe, `failureLimit` de 20 por IP por minuto.
+  O webhook da Cloud (B2) fica em `webhooks-channels.ts`.
 
 ## LGPD, arquivos e logs (fase 10)
 
