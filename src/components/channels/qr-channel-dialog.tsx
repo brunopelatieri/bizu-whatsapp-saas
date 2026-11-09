@@ -282,8 +282,8 @@ function PairStep({
 
   return (
     <div className="grid gap-3">
-      <Tabs defaultValue="qr">
-        <TabsList className="w-full">
+      <Tabs defaultValue="qr" className="flex-col">
+        <TabsList className="h-8 w-full">
           <TabsTrigger value="qr" className="flex-1">
             QR Code
           </TabsTrigger>
@@ -291,10 +291,11 @@ function PairStep({
             Código
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="qr" className="pt-2">
+        {/* `keepMounted`: voltar para a aba não gera outro QR (gerar reconecta a instância). */}
+        <TabsContent value="qr" keepMounted className="pt-2">
           <QrTab basePath={basePath} channelId={channelId} onAlreadyConnected={finish} />
         </TabsContent>
-        <TabsContent value="code" className="pt-2">
+        <TabsContent value="code" keepMounted className="pt-2">
           <CodeTab basePath={basePath} channelId={channelId} />
         </TabsContent>
       </Tabs>
