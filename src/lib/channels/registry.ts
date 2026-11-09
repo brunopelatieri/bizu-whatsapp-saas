@@ -114,7 +114,7 @@ export async function loadChannelModules() {
       .filter((entry) => entry.isDirectory())
       .map(
         (entry) =>
-          import(pathToFileURL(path.join(root, entry.name, "index.ts")).href) as Promise<ModuleFile>,
+          import(/* @vite-ignore */ pathToFileURL(path.join(root, entry.name, "index.ts")).href) as Promise<ModuleFile>,
       ),
   );
 }

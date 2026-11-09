@@ -218,6 +218,8 @@ function TextField<T extends Record<string, unknown>>({
               inputMode={numeric ? "numeric" : undefined}
               autoComplete={secret ? "new-password" : "off"}
               spellCheck={false}
+              // O `FormControl` do projeto põe o id no invólucro: o nome acessível vai aqui.
+              aria-label={label}
               placeholder={placeholder}
             />
           </FormControl>
@@ -313,7 +315,7 @@ function ConnectFlow({ onClose }: { onClose: () => void }) {
               label="Nome do número aqui"
               placeholder="Ex.: Atendimento"
             />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid items-start gap-3 sm:grid-cols-2">
               <TextField
                 control={form.control}
                 name="phoneNumberId"
@@ -342,7 +344,7 @@ function ConnectFlow({ onClose }: { onClose: () => void }) {
               description="Em Configurações do app → Básico. Confere a assinatura de cada aviso da Meta."
               secret
             />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid items-start gap-3 sm:grid-cols-2">
               <TextField
                 control={form.control}
                 name="appId"
@@ -444,7 +446,7 @@ function ManageView({ channel, onClose }: { channel: Channel; onClose: () => voi
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-3">
           <TextField control={form.control} name="name" label="Nome do número aqui" />
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid items-start gap-3 sm:grid-cols-2">
             <TextField control={form.control} name="wabaId" label="Identificador da conta (WABA)" numeric />
             <TextField
               control={form.control}
