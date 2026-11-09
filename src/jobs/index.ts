@@ -7,6 +7,7 @@ import {
   handleBillingReconcile,
   handleBillingTrial,
 } from "@/jobs/billing";
+import { handleChannelHealth, handleChannelInbound } from "@/jobs/channels";
 import { handleEmailSend } from "@/jobs/email";
 import { handleLgpdDelete, handleLgpdExport } from "@/jobs/lgpd";
 import { handleMaintenancePrune } from "@/jobs/maintenance";
@@ -49,6 +50,8 @@ export async function registerWorkers(
   await boss.offWork(QUEUE.billingReconcile);
   await boss.offWork(QUEUE.lgpdExport);
   await boss.offWork(QUEUE.lgpdDelete);
+  await boss.offWork(QUEUE.channelInbound);
+  await boss.offWork(QUEUE.channelHealth);
   await boss.work(
     QUEUE.emailSend,
     { includeMetadata: true, batchSize: 1, localConcurrency: 4, ...options },
@@ -70,6 +73,12 @@ export async function registerWorkers(
     handleLgpdExport,
   );
   await boss.work(QUEUE.lgpdDelete, options, handleLgpdDelete);
+  await boss.work(
+    QUEUE.channelInbound,
+    { includeMetadata: true, batchSize: 1, localConcurrency: 4, ...options },
+    handleChannelInbound,
+  );
+  await boss.work(QUEUE.channelHealth, options, handleChannelHealth);
 
 }
 

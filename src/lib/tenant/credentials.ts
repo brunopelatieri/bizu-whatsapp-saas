@@ -1,6 +1,7 @@
 import { and, desc, eq, ne } from "drizzle-orm";
 import { withPlatformScope, withTenant } from "@/db/rls";
 import { tenantPaymentCredential } from "@/db/schema";
+import { rotateChannelSecrets } from "@/lib/channels/credentials";
 import {
   currentKeyRing,
   decryptSecret,
@@ -117,8 +118,9 @@ export async function readCredentialSecret(tenantId: string, id: string) {
 }
 
 /**
- * Recifra o que não está na chave atual. Idempotente e numa transação só: uma linha
- * ilegível desfaz tudo, e a chave anterior continua necessária.
+ * Recifra o que não está na chave atual, nas credenciais de pagamento e nos segredos de canal
+ * (`src/lib/channels/credentials.ts`). Idempotente e numa transação só: uma linha ilegível
+ * desfaz tudo, e a chave anterior continua necessária.
  */
 export function rotateCredentials() {
   const { version } = currentKeyRing();
@@ -136,6 +138,8 @@ export function rotateCredentials() {
         .where(eq(tenantPaymentCredential.id, row.id));
     }
 
-    return { rotated: rows.length };
+    const channels = await rotateChannelSecrets(tx);
+
+    return { rotated: rows.length + channels };
   });
 }

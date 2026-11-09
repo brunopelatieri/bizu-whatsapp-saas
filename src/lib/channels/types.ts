@@ -206,4 +206,9 @@ export interface ChannelProvider {
   ): Promise<{ body: Buffer; mime: string }>;
   /** Estado real no provedor; a camada comum grava em `channel.status`. */
   probe(ctx: ChannelContext): Promise<ProbeResult>;
+  /**
+   * Apaga o que o canal tem no provedor antes de remover ou desativar (a instância da
+   * Evolution). "Já não existe" é sucesso. Ausente: não há nada a apagar (Cloud API).
+   */
+  destroy?(ctx: ChannelContext): Promise<void>;
 }

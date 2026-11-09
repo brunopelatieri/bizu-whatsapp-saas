@@ -8,7 +8,7 @@ import {
   readEvolutionConfig,
   unwrap,
 } from "@/lib/channels/providers/whatsapp_qr/client";
-import { fetchStatus } from "@/lib/channels/providers/whatsapp_qr/instances";
+import { deleteRemoteInstance, fetchStatus } from "@/lib/channels/providers/whatsapp_qr/instances";
 import { normalizeEvolutionEvents } from "@/lib/channels/providers/whatsapp_qr/normalize";
 import { verifyEvolutionWebhook } from "@/lib/channels/providers/whatsapp_qr/webhook";
 import type { ChannelModule } from "@/lib/channels/registry";
@@ -106,6 +106,13 @@ export function createEvolutionProvider(config: EvolutionConfig | null): Channel
         },
         required().mediaTimeoutMs,
       );
+    },
+
+    async destroy(ctx) {
+      const remoteInstanceId = ctx.credentials.remoteInstanceId;
+
+      // Instância que nunca chegou a existir no servidor: nada a apagar.
+      if (remoteInstanceId) await deleteRemoteInstance(required(), remoteInstanceId);
     },
 
     async probe(ctx): Promise<ProbeResult> {

@@ -4,6 +4,7 @@ import { getDb } from "@/db";
 import { withPlatformScope } from "@/db/rls";
 import {
   auditLog,
+  channelEvent,
   emailMessages,
   paymentEvent,
   portalSession,
@@ -17,6 +18,7 @@ import { deleteOldExportRecords, pruneExports } from "@/lib/lgpd/export";
 /** Prazos de retenção. A tabela com a base legal de cada um está em `docs/context/lgpd.md`. */
 export const EMAIL_MESSAGE_RETENTION_DAYS = 180;
 export const PAYMENT_EVENT_RETENTION_DAYS = 90;
+export const CHANNEL_EVENT_RETENTION_DAYS = 30;
 
 const DAY_MS = 86_400_000;
 
@@ -26,6 +28,7 @@ const daysAgo = (now: Date, days: number) => new Date(now.getTime() - days * DAY
  * `maintenance.prune` (cron diário): apaga o que passou do prazo de retenção.
  *
  * - `payment_event` já tratado (processado, ignorado ou duplicado) há mais de 90 dias;
+ * - `channel_event` já tratado (processado, ignorado ou falho) há mais de 30 dias;
  * - `email_message` com mais de 180 dias;
  * - sessões vencidas da equipe e do portal, e `verification`/`portal_verification` vencidos;
  * - exportações de dados (arquivo e registro) vencidas;
@@ -63,6 +66,19 @@ export async function pruneOldData(now = new Date()) {
       )
       .returning({ id: paymentEvent.id });
 
+    const channelEvents = await tx
+      .delete(channelEvent)
+      .where(
+        and(
+          inArray(channelEvent.status, ["processed", "ignored", "failed"]),
+          lt(
+            channelEvent.receivedAt,
+            sql`${daysAgo(now, CHANNEL_EVENT_RETENTION_DAYS).toISOString()}::timestamptz`,
+          ),
+        ),
+      )
+      .returning({ id: channelEvent.id });
+
     const audits = await tx
       .delete(auditLog)
       .where(
@@ -73,7 +89,11 @@ export async function pruneOldData(now = new Date()) {
       )
       .returning({ id: auditLog.id });
 
-    return { paymentEvents: events.length, auditLogs: audits.length };
+    return {
+      paymentEvents: events.length,
+      channelEvents: channelEvents.length,
+      auditLogs: audits.length,
+    };
   });
 
   const stamp = sql`${now.toISOString()}::timestamptz`;
