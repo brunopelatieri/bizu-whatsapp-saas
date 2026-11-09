@@ -1,12 +1,14 @@
 # Cadastro CRM: telefone, e-mail do cliente, etiquetas e campos
 
-- **Escopo:** Telefone obrigatório em todo cadastro de pessoa, e-mail opcional do cliente e
-  (nas fases A2 a A4) etiquetas e campos adicionais. Estado por fase na tabela abaixo.
+- **Escopo:** Telefone obrigatório em todo cadastro de pessoa, e-mail opcional do cliente,
+  etiquetas e campos adicionais do tenant (A1 a A3); etiquetas e campos da plataforma ficam na
+  A4. Estado por fase na tabela abaixo.
 - **Specs relacionadas:** `docs/specs/crm-cadastro/spec.md` e `prd.md`;
   `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T7, fase F0 e fases A1 a A4).
 - **Paths do código:** `src/lib/phone/`, `src/lib/schemas/phone.ts`,
   `src/components/ui/phone-field.tsx`, `src/db/phone-check.ts`, `src/lib/tenant/customers.ts`,
-  `src/lib/lgpd/consent.ts`, `src/lib/portal/`, `src/lib/admin/people.ts`
+  `src/lib/lgpd/consent.ts`, `src/lib/portal/`, `src/lib/admin/people.ts`, `src/lib/crm/`,
+  `src/api/{tags,custom-fields}.ts`, `src/components/crm/`, `src/components/app/crm/`
 
 ## Estado por fase
 
@@ -14,7 +16,7 @@
 |---|---|---|
 | A1 | Telefone obrigatório (biblioteca, schema, `PhoneField`, banco, cadastros) e e-mail do cliente opcional | implementada |
 | A2 | Etiquetas do tenant (`tag`, `customer_tag`) | implementada |
-| A3 | Campos adicionais do tenant (`custom_field`, `customer.custom_fields`) | pendente (depende da F0) |
+| A3 | Campos adicionais do tenant (`custom_field`, `customer.custom_fields`) | implementada |
 | A4 | Etiquetas e campos da plataforma (`organization_tag`, `organization_profile`) | pendente (A2 e A3) |
 
 ## Telefone (A1)
@@ -98,8 +100,48 @@ de e-mail repetido segue `CUSTOMER_EMAIL_TAKEN`.
 - Testes: `tests/db/tags.test.ts` (CRUD, isolamento, teto, vínculo, filtro, RBAC) e a matriz de
   `tests/db/rbac.test.ts`.
 
+## Campos adicionais do tenant (A3)
+
+- **Tabelas** (`src/db/schema/crm.ts`, migrations `0027_campos_adicionais` e `0028_rls_campos_adicionais`):
+  `custom_field` (`tenant_id` anulável e `scopedPolicy()`; `entity` `customer` do tenant ou `organization`
+  da plataforma, esta só na A4, com `CHECK` de escopo; `key` única por escopo e entidade com dois
+  índices, um normal e um parcial `WHERE tenant_id IS NULL`; `options` jsonb `[{ value, label }]`;
+  `required`, `position`, `archived_at`) e `customer.custom_fields` (jsonb `{ "<id do campo>": valor }`,
+  `CHECK` de objeto). A chave é o **id**: renomear o rótulo não toca em valor; `type` e `key` não mudam.
+- **Valores** (`src/lib/crm/values.ts`, puro, serve formulário e API): `text` até 500, `number` finito,
+  `date` `AAAA-MM-DD` que existe, `boolean`, `select` (um `value` das opções) e `multiselect` (até 20,
+  sem repetir). `buildCustomFieldsSchema(defs, { requireAll })` monta o Zod só das definições **ativas**
+  (chave desconhecida ou arquivada é recusada); texto vazio, lista vazia e `null` viram "remova".
+  O formulário usa `requireAll` (o `required` vale); a API valida os obrigatórios sobre o **estado final**
+  do cadastro (`assertRequiredFilled`, 400 `FIELD_REQUIRED`), e só quando o corpo traz `customFields`.
+- **Serviço** `src/lib/crm/custom-fields.ts`, genérico por `Scope` como `tags.ts`: teto de 12 campos
+  ativos e 50 opções (arquivado não conta; reativar com a lista cheia é 409 `FIELD_LIMIT`), conferido sob
+  `pg_advisory_xact_lock`; `FIELD_KEY_TAKEN` (inclui arquivado); `OPTION_IN_USE` (conta quem usa a opção
+  tirada; renomear o rótulo mantém o `value`); exclusão pede a `key` digitada (`CONFIRMATION_MISMATCH`) e
+  limpa o valor em todos os clientes na mesma transação (`clearedFrom`). Campo de outro escopo é 404.
+  O escopo `platform` já é aceito pelo serviço (a limpeza de valores na exclusão e a contagem de uso da
+  plataforma entram na A4, com `organization_profile`).
+- **API** (`src/api/custom-fields.ts`): `GET /api/custom-fields?entity=customer&archived=false|true|all`
+  (`customer:read`), `POST`, `PATCH /:id` (`label`, `options`, `required`, `archived`), `PUT /order` e
+  `DELETE /:id { confirm }` (`custom_field:manage`). `customFields` em `POST` e `PATCH /api/customers`
+  é **merge por chave** no mesmo `UPDATE` (`custom_fields || $set - $removidas`, com a linha travada):
+  `null` remove, ausente não muda; 400 `UNKNOWN_FIELD`, `INVALID_FIELD_VALUE` e `FIELD_REQUIRED`. O
+  cliente sai com `customFields`. O portal nunca vê campos (`findPortalCustomer` tem lista fechada).
+- **Permissões:** `custom_field:manage` para owner e admin; colaborador preenche (`customer:update`).
+- **Telas:** `/app/configuracoes/campos` (`CustomFieldManager`: lista ordenável por setas, diálogo de
+  criar e editar, arquivar e reativar, excluir digitando a `key`), `CustomFieldInput` por tipo e
+  `custom-fields-api.ts` em `src/components/crm/`, seção "Campos adicionais" no formulário do cliente
+  (Zod da `buildCustomFieldsSchema`) e no detalhe (com "campos obrigatórios pendentes"). Filtro por
+  campo na lista de clientes fica fora desta entrega.
+- **Auditoria:** `custom_field.created|updated|archived|deleted`, só ids e `key` (valor, rótulo e opções
+  nunca). **LGPD:** a exportação do owner traz `camposAdicionais` (rótulo, chave e valor legível, inclusive
+  de campo arquivado); a anonimização do cliente zera `custom_fields`.
+- **Seed:** o tenant `acme` tem três campos de exemplo (origem, nascimento e interesses).
+- Testes: `src/lib/crm/values.test.ts` (cada tipo e `buildCustomFieldsSchema`),
+  `tests/db/custom-fields.test.ts` (CRUD, teto, isolamento, merge concorrente, `OPTION_IN_USE`, exclusão,
+  `required`, portal), `lgpd-export`/`lgpd-deletion` e a matriz de `tests/db/rbac.test.ts`.
+
 ## O que a SPEC pede e ainda não existe
 
-Campos adicionais (A3) e etiquetas e campos da plataforma em `/admin` (A4); esta página cresce
-com eles. Não existe tela de perfil da equipe: o telefone da equipe entra no `/cadastro` e é editado
+Etiquetas e campos da plataforma em `/admin` (A4); esta página cresce com eles. Não existe tela de perfil da equipe: o telefone da equipe entra no `/cadastro` e é editado
 pelo proprietário da plataforma em `/admin/usuarios/:id`.

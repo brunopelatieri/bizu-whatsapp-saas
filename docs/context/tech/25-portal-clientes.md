@@ -56,7 +56,7 @@ cache. `tests/db/portal-isolation.test.ts` prova os dois casos, inclusive com co
 | `GET /api/portal/me` | `requirePortalAuth` | `{ user, tenants, active }` |
 | `POST /api/portal/active-tenant` | `requirePortalAuth` | só tenant disponível; o resto é 404 |
 | `PATCH /api/portal/me` | `requirePortalTenant` | atualiza a pessoa e o `customer` do tenant ativo |
-| `GET /api/portal/customer` | `requirePortalTenant` | dados do cliente, sem `notes` nem etiquetas (`customer_tag`) |
+| `GET /api/portal/customer` | `requirePortalTenant` | dados do cliente, sem `notes`, etiquetas (`customer_tag`) nem campos adicionais (`custom_fields`) |
 | `/api/customers/*` | `requireTenant` + `customer:*` | ver `tech/06-hono-api.md` |
 
 ## Magic link

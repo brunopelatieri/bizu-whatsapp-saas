@@ -51,5 +51,5 @@ Observações:
 ## Quando o template vira produto
 
 1. Preencher controlador e encarregado; revisar os textos com um advogado.
-2. Conferir esta tabela contra o que o produto realmente guarda (o telefone é dado pessoal obrigatório: a anonimização zera `phone`, `phone_normalized` e `phone_key`, e nunca vai para log nem auditoria; campos novos em `customer`, novas tabelas com dado pessoal entram na exportação e na anonimização: `src/lib/lgpd/export.ts` e `deletion.ts`).
+2. Conferir esta tabela contra o que o produto realmente guarda (o telefone é dado pessoal obrigatório: a anonimização zera `phone`, `phone_normalized` e `phone_key`, e nunca vai para log nem auditoria; campos novos em `customer` (os campos adicionais, `customer.custom_fields`, são exportados com rótulo e valor e zerados na anonimização), novas tabelas com dado pessoal entram na exportação e na anonimização: `src/lib/lgpd/export.ts` e `deletion.ts`).
 3. Configurar o backup cifrado e testar a restauração (`tech/14-deploy.md`).

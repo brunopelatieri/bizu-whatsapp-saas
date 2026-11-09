@@ -33,6 +33,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   Tela em `/app/configuracoes/etiquetas`, seletor no cliente, filtro e chips em `/app/clientes`,
   permissão `tag:manage` (owner e admin; colaborador aplica). A coluna de texto `customer.tags`
   sai, sem migração de dados (projeto novo).
+- **Campos adicionais do cliente** (`docs/specs/crm-cadastro/spec.md`, fase A3): definições por tenant
+  (`custom_field`) com seis tipos (texto, número, data, sim ou não, lista e lista múltipla), `key`
+  estável, ordem, obrigatório e arquivar; valores em `customer.custom_fields` (jsonb por id do campo,
+  mesclado por chave no `PATCH`). Até 12 campos ativos e 50 opções; excluir pede a `key` e limpa o
+  valor dos clientes. Tela em `/app/configuracoes/campos`, seção no formulário e no detalhe do cliente,
+  permissão `custom_field:manage` (owner e admin; colaborador preenche), exportação e anonimização LGPD.
+  O portal não vê campos adicionais. Migrations `0027` e `0028`.
 
 ### Alterado
 

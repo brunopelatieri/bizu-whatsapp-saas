@@ -107,7 +107,8 @@ Eventos: `auth.email_verified`, `auth.password_reset`, `tenant.created`, `tenant
 `member.invited`, `member.invitation_canceled`, `member.joined`, `member.role_changed`,
 `member.removed`, `role.created`, `role.updated`, `role.deleted`, `customer.created`,
 `customer.updated`, `customer.deleted`, `customer.invited`, `tag.created`, `tag.updated`,
-`tag.deleted`. Ações do próprio cliente gravam
+`tag.deleted`, `custom_field.created`, `custom_field.updated`, `custom_field.archived`,
+`custom_field.deleted` (só ids e `key`; valor de campo nunca). Ações do próprio cliente gravam
 `actor_type = portal_user`: `portal.signed_up`, `portal.profile_updated`, `portal.password_set`.
 
 Evento sem tenant só aparece com `withPlatformScope`. Ainda não há tela de leitura.

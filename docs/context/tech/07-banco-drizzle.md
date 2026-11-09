@@ -44,6 +44,8 @@ audit_log                 tenant_id nulo = fora de tenant; ip_hash; RLS forçado
 customer                  unique (tenant_id, email); portal_user_id nulo até o envio; status lead|active|blocked; RLS forçado
 tag                       tenant_id nulo = plataforma (scopedPolicy); nome único por escopo em lower(name); cor #rrggbb
 customer_tag              PK (customer_id, tag_id); tenant_id não nulo; RLS forçado
+custom_field              tenant_id nulo = plataforma (scopedPolicy); entity customer|organization (CHECK de escopo); key única por escopo e entidade; options jsonb
+                          customer.custom_fields: jsonb { id do campo: valor }, mesclado por chave no UPDATE
 portal_user               identidade do cliente, global, sem role nem ban (sem RLS)
 portal_session            active_tenant_id: o tenant em uso no portal (sem RLS)
 portal_account, portal_verification, portal_rate_limit   instância portalAuth (sem RLS)
