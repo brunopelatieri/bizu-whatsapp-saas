@@ -57,14 +57,14 @@ jobs:
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
 
-  # Prova que Stripe, Sentry e S3 saem apagando a pasta: typecheck e testes sem ela.
+  # Prova que Stripe, Sentry, S3 e os canais de WhatsApp saem apagando a pasta: typecheck e testes sem ela.
   # Não precisa de banco (npm test roda sem Postgres).
   module-removal:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: [stripe, sentry, s3]
+        module: [stripe, sentry, s3, whatsapp_cloud, whatsapp_qr]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

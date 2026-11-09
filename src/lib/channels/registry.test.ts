@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHANNEL_CAPABILITIES, can, capabilitiesFor } from "@/lib/channels/capabilities";
@@ -111,6 +111,8 @@ describe("o núcleo não conhece provedor pelo nome", () => {
   it("os módulos de canal não importam um ao outro", () => {
     for (const id of ["whatsapp_cloud", "whatsapp_qr"]) {
       const other = id === "whatsapp_cloud" ? "whatsapp_qr" : "whatsapp_cloud";
+      // Com a pasta apagada (`check:module-removal`), não há o que conferir.
+      if (!existsSync(path.join(providersDir, id))) continue;
       const files = sourceFiles(path.join(providersDir, id));
       const offenders = files.filter((file) =>
         new RegExp(`providers/${other}`).test(readFileSync(file, "utf8")),
