@@ -25,7 +25,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { paymentEventStatuses, PROVIDER_LABELS } from "@/lib/billing/constants";
+import { ChannelEventsTab } from "@/pages/admin/channel-events-tab";
 
 type PaymentEventStatus = (typeof paymentEventStatuses)[number];
 
@@ -71,6 +73,35 @@ const statusItems = [
 ];
 
 export function AdminWebhooksPage() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "canais" ? "canais" : "pagamentos";
+
+  return (
+    <div className="max-w-6xl space-y-6">
+      <PageTitle
+        title="Webhooks"
+        description="Eventos recebidos dos provedores de pagamento e dos canais de WhatsApp."
+      />
+
+      <Tabs
+        value={tab}
+        // Estado e página são de cada aba: trocar de aba recomeça os filtros.
+        onValueChange={(next) =>
+          setParams(next === "canais" ? { tab: "canais" } : {}, { replace: true })
+        }
+      >
+        <TabsList>
+          <TabsTrigger value="pagamentos">Pagamentos</TabsTrigger>
+          <TabsTrigger value="canais">Canais</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {tab === "canais" ? <ChannelEventsTab /> : <PaymentWebhooksTab />}
+    </div>
+  );
+}
+
+function PaymentWebhooksTab() {
   const owner = useIsPlatformOwner();
   const [params, setParams] = useSearchParams();
   const status = params.get("status") ?? ALL;
@@ -91,12 +122,7 @@ export function AdminWebhooksPage() {
   }
 
   return (
-    <div className="max-w-6xl space-y-6">
-      <PageTitle
-        title="Webhooks"
-        description="Eventos recebidos dos provedores de pagamento."
-      />
-
+    <div className="space-y-6">
       <Select
         items={statusItems}
         value={status}
