@@ -20,11 +20,19 @@ export const MAX_INBOUND_MEDIA_BYTES = 25 * 1024 * 1024;
 
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
 
-/** Só `tipo/subtipo`, sem parâmetros: o valor vem do aviso e vira `Content-Type` do objeto. */
+/** Tipos que o navegador executa se forem servidos como vieram: viram download genérico. */
+const ACTIVE_MIME = /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|(text|application)\/(x-)?(java|ecma)script)$/;
+
+/**
+ * Só `tipo/subtipo`, sem parâmetros: o valor vem de quem mandou a mensagem e vira `Content-Type`
+ * do objeto. HTML, SVG, XML e script viram `application/octet-stream`, para a tela que um dia
+ * servir o objeto não entregar conteúdo ativo de terceiros (XSS armazenado).
+ */
 export function safeMime(value: string | null | undefined) {
   const mime = value?.split(";")[0]?.trim().toLowerCase() ?? "";
 
-  return MIME.test(mime) && mime.length <= 100 ? mime : null;
+  if (!MIME.test(mime) || mime.length > 100) return null;
+  return ACTIVE_MIME.test(mime) ? "application/octet-stream" : mime;
 }
 
 export const storeInboundMedia: StoreInboundMedia = async (body, mime) => {

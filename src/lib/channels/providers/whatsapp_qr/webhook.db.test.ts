@@ -188,6 +188,19 @@ describe("webhook da Evolution", () => {
       expect(queued).toEqual([event?.id]);
     });
 
+    it("token repetido dentro de data também não vai ao raw", async () => {
+      const seeded = await seedFixtureChannel(tenantScope(tenantA));
+      const body = fixture<{ data: Record<string, unknown> }>("evolution/message-text");
+      body.data.instanceToken = FIXTURE_TOKEN;
+      body.data.Info = { ...(body.data.Info as object), apikey: FIXTURE_TOKEN };
+
+      const response = await post(seeded.webhookSecret, JSON.stringify(body));
+      const [event] = await eventsOf(seeded.id);
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(event?.raw)).not.toContain(FIXTURE_TOKEN);
+    });
+
     it("reentrega (dedupe_key da Evolution): 200, um só evento", async () => {
       const seeded = await seedFixtureChannel(tenantScope(tenantA));
       const body = fixtureText("evolution/receipt-delivered");

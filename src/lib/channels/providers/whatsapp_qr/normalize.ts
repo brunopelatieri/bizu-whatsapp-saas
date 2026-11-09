@@ -104,7 +104,12 @@ type Content = {
 export function isStoredRef(value: unknown): value is NonNullable<NormalizedMedia["storage"]> {
   const record = asRecord(value);
 
-  return typeof record?.storageKey === "string" && typeof record.size === "number";
+  // Só chave sob `inbound/`: é o prefixo em que o núcleo grava mídia de aviso.
+  return (
+    typeof record?.storageKey === "string" &&
+    record.storageKey.startsWith("inbound/") &&
+    typeof record.size === "number"
+  );
 }
 
 /**

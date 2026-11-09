@@ -62,14 +62,21 @@ async function findByPathSecret(pathSecret: string) {
  * O token da instância vem em todo aviso (é a prova de origem). Depois de conferido, sai do
  * corpo: `channel_event.raw` não é lugar de segredo em claro.
  */
-function stripCredentials(raw: unknown) {
-  const envelope = asRecord(raw);
-  if (!envelope) return raw;
+function stripCredentials(raw: unknown, depth = 0): unknown {
+  const record = asRecord(raw);
+  if (!record || depth > 6) return raw;
 
-  for (const key of Object.keys(envelope)) {
-    if (["instancetoken", "apikey", "token"].includes(key.toLowerCase())) delete envelope[key];
+  for (const [key, value] of Object.entries(record)) {
+    const name = key.toLowerCase();
+
+    // `token` só no envelope: mais fundo, é campo de mensagem (ex.: resposta de botão).
+    if (name === "instancetoken" || name === "apikey" || (depth === 0 && name === "token")) {
+      delete record[key];
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      stripCredentials(value, depth + 1);
+    }
   }
-  return envelope;
+  return record;
 }
 
 export async function receivePairingWebhook(input: {

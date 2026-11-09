@@ -56,6 +56,13 @@ describe("safeMime", () => {
     expect(safeMime("text/html\r\nX-Injected: 1")).toBeNull();
     expect(safeMime(null)).toBeNull();
   });
+
+  it("conteúdo ativo (HTML, SVG, XML, script) vira download genérico", () => {
+    for (const mime of ["text/html", "image/svg+xml", "application/xhtml+xml", "text/javascript"]) {
+      expect(safeMime(mime), mime).toBe("application/octet-stream");
+    }
+    expect(safeMime("application/pdf")).toBe("application/pdf");
+  });
 });
 
 describe("downloadMedia", () => {
