@@ -10,6 +10,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **WhatsApp Cloud (fase B2 de `docs/specs/whatsapp-canais/spec.md`)**: webhook por canal em
+  `/api/webhooks/whatsapp/cloud/:key` (`GET` de verificação e `POST` assinado com o segredo do
+  aplicativo daquele canal), rotas `POST /api/channels/whatsapp-cloud`, `PATCH /api/channels/:id`,
+  `/:id/webhook`, `/:id/webhook/rotate`, `/:id/test`, `/:id/templates` e `/:id/templates/sync`, e a
+  tela `/app/configuracoes/canais` com "Conectar número". Liga-se com `whatsapp_cloud` em
+  `CHANNEL_PROVIDERS`; sem migration nova. Módulos de canal passam a declarar webhook, rotas e
+  edição em `ChannelModule`. Falta o smoke com conta de teste da Meta.
 - **Cobrança manual como padrão** (`docs/specs/cobranca-manual/spec.md`): sem módulo de pagamento, o
   proprietário registra em `/admin/tenants/:id` quem pagou e quem não pagou
   (`POST /api/admin/subscriptions/:id/manual-payment` e `.../manual-unpaid`). Preço manual em

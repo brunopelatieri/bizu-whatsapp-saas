@@ -33,7 +33,10 @@
   `channel:read/manage`, variáveis `CHANNEL_PROVIDERS`/`EVOLUTION_*`, limites de plano e a **B1**
   (tabelas com RLS, serviço, caixa de avisos, filas `channel.inbound`/`channel.health`, rotas comuns
   `/api/channels`; `tech/29-canais-whatsapp.md`); as fixtures de `tests/fixtures/channels/` são
-  **simuladas** (a medição B0 real falta); B2 (rotas e webhook da Cloud) é a próxima etapa.
+  **simuladas** (a medição B0 real falta). **B2 (WhatsApp Cloud) implementada:** webhook comum
+  `/api/webhooks/whatsapp/<segmento>/:key`, rotas de salvar, editar, endereço, diagnóstico e modelos
+  e a tela `/app/configuracoes/canais`; falta o smoke com conta de teste da Meta. B3 (Evolution) e
+  B4 (plataforma) seguem.
   **Fases A1, A2 e A3 do `crm-cadastro` implementadas** (telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant; `tech/28-crm-cadastro.md`); A4 segue pendente. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
   válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se
