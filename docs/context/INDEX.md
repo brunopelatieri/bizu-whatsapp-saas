@@ -14,7 +14,7 @@ estão nas rules e no cabeçalho de cada arquivo.
 | Programa WhatsApp CRM (planejado, sem código): canais Cloud API e Evolution Go, caixa de entrada com fila, etiquetas e campos adicionais | `docs/specs/whatsapp-crm/plano.md` e a SPEC da feature tocada |
 | Rota, loader, `meta`, SSR, blog | `tech/05-react-router.md` |
 | Endpoint `/api/*`, `requireAuth` | `tech/06-hono-api.md` |
-| Schema, migration, query | `tech/07-banco-drizzle.md` |
+| Schema, migration, query, RLS, escopo de plataforma (`Scope`, `withScope`, `withPlatformData`, `scopedPolicy`) | `tech/07-banco-drizzle.md` |
 | Login, sessão, provedor de autenticação, verificação de e-mail opcional | `tech/08-auth.md` |
 | 2FA, sessões, personificação, CSP, CSRF, rate limit, criptografia de credenciais, leitura da auditoria | `tech/26-seguranca.md` |
 | LGPD: consentimento, `/legal/*`, exportação, exclusão com carência, retenção, arquivos (`StorageProvider`), logs, Sentry, backup | `tech/27-lgpd-arquivos.md`, `lgpd.md` |
