@@ -5,9 +5,9 @@ import { channel, channelEvolution, channelWhatsappCloud } from "@/db/schema";
 import {
   generateWebhookKey,
   generateWebhookSecret,
+  hashWebhookSecret,
   sealSecret,
 } from "@/lib/channels/credentials";
-import { hashWebhookSecret } from "@/lib/channels/providers/whatsapp_qr/webhook";
 import type { ChannelStatus, ChannelType } from "@/lib/channels/types";
 
 /** Apoio dos testes de canal: tenants, canais prontos e limpeza. */

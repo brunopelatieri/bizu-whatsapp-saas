@@ -11,5 +11,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Teste com banco de um módulo opcional mora na pasta dele e roda em `npm run test:db`.
+    exclude: ["**/node_modules/**", "src/**/*.db.test.ts"],
   },
 });

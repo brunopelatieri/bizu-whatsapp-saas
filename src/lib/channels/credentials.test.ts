@@ -6,6 +6,7 @@ import {
   generateVerifyToken,
   generateWebhookKey,
   generateWebhookSecret,
+  hashWebhookSecret,
   openSecret,
   sealSecret,
 } from "@/lib/channels/credentials";
@@ -67,3 +68,15 @@ describe("geradores", () => {
     expect(new Set(Array.from({ length: 50 }, generateWebhookSecret)).size).toBe(50);
   });
 });
+
+describe("hashWebhookSecret", () => {
+  it("sha256 em hex, estável, e não devolve o segredo", () => {
+    const hash = hashWebhookSecret("segredo-do-caminho");
+
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(hash).toBe(hashWebhookSecret("segredo-do-caminho"));
+    expect(hash).not.toContain("segredo");
+    expect(hash).not.toBe(hashWebhookSecret("outro"));
+  });
+});
+

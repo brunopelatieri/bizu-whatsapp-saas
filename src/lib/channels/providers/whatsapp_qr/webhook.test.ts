@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   evolutionDedupeKey,
-  hashWebhookSecret,
   isAllowedMediaUrl,
   verifyEvolutionWebhook,
 } from "@/lib/channels/providers/whatsapp_qr/webhook";
@@ -94,17 +93,6 @@ describe("evolutionDedupeKey", () => {
     const reordered = { data: original.data, instanceToken: original.instanceToken, event: original.event };
 
     expect(evolutionDedupeKey(reordered, JSON.stringify(reordered))).toBe(key("message-text"));
-  });
-});
-
-describe("hashWebhookSecret", () => {
-  it("sha256 em hex, estável, e não devolve o segredo", () => {
-    const hash = hashWebhookSecret("segredo-do-caminho");
-
-    expect(hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(hash).toBe(hashWebhookSecret("segredo-do-caminho"));
-    expect(hash).not.toContain("segredo");
-    expect(hash).not.toBe(hashWebhookSecret("outro"));
   });
 });
 

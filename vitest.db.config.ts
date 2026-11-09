@@ -15,7 +15,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/db/**/*.test.ts"],
+    include: ["tests/db/**/*.test.ts", "src/lib/channels/providers/**/*.db.test.ts"],
     // Fixos: os testes simulam um proxy e nunca enviam e-mail de verdade.
     env: {
       NODE_ENV: "test",

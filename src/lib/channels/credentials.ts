@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { eq, ne } from "drizzle-orm";
 import type { Tx } from "@/db/rls";
 import { channelEvolution, channelWhatsappCloud } from "@/db/schema";
@@ -54,6 +54,10 @@ export const generateVerifyToken = () => randomBytes(24).toString("hex");
 
 /** Segredo no caminho do webhook da Evolution (256 bits). */
 export const generateWebhookSecret = () => randomBytes(32).toString("base64url");
+
+/** sha256 (hex) do segredo do caminho: acha a instância sem varrer nem decifrar. */
+export const hashWebhookSecret = (secret: string) =>
+  createHash("sha256").update(secret).digest("hex");
 
 /** Token da instância: o `/instance/create` o exige e ele nasce do nosso lado. */
 export const generateInstanceToken = () => crypto.randomUUID();

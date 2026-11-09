@@ -17,8 +17,6 @@ import {
   setInboxHandlers,
 } from "@/lib/channels/events";
 import { checkChannelsHealth } from "@/lib/channels/health";
-import { createCloudProvider } from "@/lib/channels/providers/whatsapp_cloud";
-import { fixture } from "@/lib/channels/test-fixtures";
 import { setProvidersForTests } from "@/lib/channels/registry";
 import type {
   ChannelProvider,
@@ -102,6 +100,33 @@ describe("avisos de canal", () => {
       normalizeEvents: normalize,
       probe: probe ?? (async () => ({ status: "connected", detail: null })),
     }) as unknown as ChannelProvider;
+
+  /** O corpo do aviso já é a lista de eventos normalizados: o módulo real é testado em `providers/`. */
+  const passThrough = fakeProvider("whatsapp_cloud", (raw) => raw as NormalizedEvent[]);
+  const message = (phoneNumberId: string): NormalizedEvent => ({
+    type: "message",
+    fromPhone: "5511988880001",
+    fromExternalId: null,
+    pushName: null,
+    providerMessageId: randomUUID(),
+    fromMe: false,
+    messageType: "text",
+    text: "oi",
+    media: null,
+    replyToProviderMessageId: null,
+    occurredAt: new Date(),
+    channelPhoneNumberId: phoneNumberId,
+  });
+  const approvedTemplate: NormalizedEvent = {
+    type: "template",
+    event: "status",
+    providerTemplateId: "400000000000001",
+    name: "boas_vindas",
+    language: "pt_BR",
+    templateStatus: "APPROVED",
+    reason: null,
+    wabaId: "100000000000001",
+  };
 
   describe("recebimento", () => {
     it("grava pending; o mesmo aviso de novo é duplicado e continua pendente", async () => {
@@ -216,8 +241,8 @@ describe("avisos de canal", () => {
 
     it("mensagem e status ficam ignored enquanto a caixa de entrada não existe", async () => {
       const seeded = await seedCloudChannel(tenantScope(tenantA));
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(seeded, fixture("cloud/message-text"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(seeded, [message("200000000000001")]);
 
       await expect(processChannelEvent(id)).resolves.toBe("ignored");
 
@@ -228,8 +253,8 @@ describe("avisos de canal", () => {
       const own = await seedCloudChannel(tenantScope(tenantA), { phoneNumberId: "200000000000001" });
       const handler = vi.fn(async () => true);
       setInboxHandlers({ message: handler });
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(own, fixture("cloud/message-text"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(own, [message("200000000000001")]);
 
       await expect(processChannelEvent(id)).resolves.toBe("processed");
 
@@ -248,9 +273,9 @@ describe("avisos de canal", () => {
           return true;
         },
       });
-      setProvidersForTests([createCloudProvider()]);
+      setProvidersForTests([passThrough]);
       // O aviso chega na chave do canal A e traz mudança dos números A e B.
-      const { id } = await receive(a, fixture("cloud/two-numbers-same-waba"));
+      const { id } = await receive(a, [message("200000000000001"), message("200000000000002")]);
 
       await processChannelEvent(id);
 
@@ -267,8 +292,8 @@ describe("avisos de canal", () => {
           return true;
         },
       });
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(a, fixture("cloud/two-numbers-same-waba"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(a, [message("200000000000001"), message("200000000000002")]);
 
       await processChannelEvent(id);
 
@@ -289,8 +314,8 @@ describe("avisos de canal", () => {
           return true;
         },
       });
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(a, fixture("cloud/two-numbers-same-waba"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(a, [message("200000000000001"), message("200000000000002")]);
 
       await processChannelEvent(id);
 
@@ -308,8 +333,8 @@ describe("avisos de canal", () => {
           { tenantId: tenantB, wabaId: waba, name: "boas_vindas", language: "pt_BR", status: "PENDING", providerTemplateId: "400000000000001" },
         ]);
       });
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(a, fixture("cloud/template-status-approved"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(a, [approvedTemplate]);
 
       await expect(processChannelEvent(id)).resolves.toBe("processed");
 
@@ -324,8 +349,8 @@ describe("avisos de canal", () => {
 
     it("modelo que não existe aqui é ignorado (a sincronização o traz)", async () => {
       const a = await seedCloudChannel(tenantScope(tenantA), { wabaId: "100000000000001" });
-      setProvidersForTests([createCloudProvider()]);
-      const { id } = await receive(a, fixture("cloud/template-status-approved"));
+      setProvidersForTests([passThrough]);
+      const { id } = await receive(a, [approvedTemplate]);
 
       await expect(processChannelEvent(id)).resolves.toBe("ignored");
     });

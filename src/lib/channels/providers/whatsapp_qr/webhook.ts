@@ -26,11 +26,6 @@ export function sha256Hex(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/** Hash do segredo do caminho, para achar a instância sem guardar o segredo em claro duas vezes. */
-export function hashWebhookSecret(secret: string) {
-  return sha256Hex(secret);
-}
-
 function parseBody(rawBody: string) {
   try {
     return asRecord(JSON.parse(rawBody));
