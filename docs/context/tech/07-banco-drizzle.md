@@ -111,13 +111,16 @@ await withPlatformScope("motivo", (tx) => tx.select().from(auditLog));
 ### Escopo de plataforma (`scopedPolicy`)
 
 Para tabelas que servem o tenant (`/app`) e a plataforma (`/admin`) com o mesmo schema
-(WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Nenhuma tabela usa ainda.
+(WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Usam `scopedPolicy()`: `tag`,
+`custom_field` e `audit_log` (o evento da plataforma, sem `tenant_id`, grava em `withPlatformData`);
+usam `platformOnlyPolicy()`: `organization_tag` e `organization_profile` (A4, anotação da plataforma
+sobre a organização; o owner nunca as alcança).
 
 | Política | Tabela | Passa com |
 |---|---|---|
 | `tenantPolicy()` | `tenant_id` obrigatório ou nulo só por job | `app.bypass_tenant` ou `tenant_id = app.tenant_id` |
 | `scopedPolicy()` | `tenant_id` anulável; `NULL` é dado da plataforma | o anterior ou `tenant_id is null and app.platform_scope = 'on'` |
-| `platformOnlyPolicy()` | sem `tenant_id`, só da plataforma (ex.: `organization_tag`) | `app.bypass_tenant` ou `app.platform_scope = 'on'` |
+| `platformOnlyPolicy()` | sem `tenant_id`, só da plataforma (`organization_tag`, `organization_profile`) | `app.bypass_tenant` ou `app.platform_scope = 'on'` |
 
 ```ts
 await withScope(scope, (tx) => tx.insert(tag).values({ tenantId: scopeTenantId(scope), ... }));

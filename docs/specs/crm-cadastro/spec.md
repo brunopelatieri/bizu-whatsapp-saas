@@ -396,8 +396,9 @@ Componentes compartilhados em `src/components/crm/`, reaproveitados pelo atendim
    testes unitários de cada tipo; 13º campo ativo `FIELD_LIMIT` (arquivar libera vaga); teste
    de banco do merge concorrente e da exclusão que limpa valores.
 7. **A3, campos (telas):** gestor, formulário e detalhe → smoke.
-8. **A4, plataforma:** migration, rotas `/api/admin/crm/*`, telas → teste de que nenhuma rota de
-   tenant devolve dado da plataforma; suporte recebe 403 nas escritas.
+8. **A4, plataforma (implementada):** migration (`0029` a `0031`), rotas `/api/admin/crm/*`, telas → teste
+   de que nenhuma rota de tenant devolve dado da plataforma; suporte recebe 403 nas escritas
+   (`tests/db/crm-platform.test.ts`).
 9. **Contexto e revisão.**
 
 ## Verificação
@@ -416,19 +417,19 @@ Componentes compartilhados em `src/components/crm/`, reaproveitados pelo atendim
 
 ## Atualização de contexto
 
-- [ ] `docs/context/tech/28-crm-cadastro.md` (novo) e linha no `INDEX.md`
+- [x] `docs/context/tech/28-crm-cadastro.md` (novo) e linha no `INDEX.md`
 - [ ] `tech/25-portal-clientes.md`: e-mail opcional do cliente, cliente sem e-mail sem acesso,
   `tagIds`, o que o portal não vê
 - [ ] `tech/08-auth.md`: telefone obrigatório no cadastro (`signupSchema`, `auth-ext.ts`, hook
   de criação) e o `CHECK` de telefone no banco
 - [ ] `tech/12-shadcn-ui.md` (ou `tech/09`): `PhoneField`; `docs/references/` com o guia de
   telefones do Brasil; `docs/context/lgpd.md`: telefone como dado pessoal obrigatório
-- [ ] `tech/07-banco-drizzle.md`: tabelas novas, `scopedPolicy()` e `platformOnlyPolicy()`
-- [ ] `tech/21-tenant-rbac.md`: permissões e eventos de auditoria novos
-- [ ] `tech/22-admin.md`: rotas e telas de etiquetas e campos
-- [ ] `tech/27-lgpd-arquivos.md` e `lgpd.md`: exportação e anonimização
-- [ ] `status.md`; seed com etiquetas e campos de exemplo
-- [ ] Rules `banco-drizzle` (as duas políticas novas) em `.claude/rules/` e `.cursor/rules/`
+- [x] `tech/07-banco-drizzle.md`: tabelas novas, `scopedPolicy()` e `platformOnlyPolicy()`
+- [x] `tech/21-tenant-rbac.md`: permissões e eventos de auditoria novos
+- [x] `tech/22-admin.md`: rotas e telas de etiquetas e campos
+- [x] `tech/27-lgpd-arquivos.md` e `lgpd.md`: exportação e anonimização
+- [x] `status.md`; seed com etiquetas e campos de exemplo
+- [x] Rules `banco-drizzle` (as duas políticas novas) em `.claude/rules/` e `.cursor/rules/`
 
 ## Decisões
 

@@ -22,6 +22,7 @@ Mecânica (consentimento, exportação, exclusão, arquivos): `tech/27-lgpd-arqu
 | Prova de consentimento | `consent_log` | enquanto durar a relação e o prazo de defesa; sem nome nem e-mail (só id e hash de IP) | não é apagado pela exclusão | Exercício regular de direitos |
 | Pedido de exclusão e de exportação | `deletion_request`, `data_export` | `deletion_request` fica como registro da execução | — | Prestação de contas |
 | Conta de equipe, do portal e organização (inclui o **telefone**, obrigatório, e o e-mail, opcional no cliente) | `user`, `portal_user`, `customer`, `organization` ... | até o pedido de exclusão + 30 dias de carência | job `lgpd.delete` (anonimiza) | Execução de contrato; depois, direito do titular |
+| Anotação da plataforma sobre a organização (etiquetas e campos, `crm-cadastro` A4) | `organization_tag`, `organization_profile` | até a exclusão da organização | apagada em `anonymizeTenant` (`lgpd.delete`); **fora da exportação do owner**, que nunca a vê (é dado da plataforma, não do titular; texto livre de campo pode citar pessoas, daí a limpeza) | Legítimo interesse (gestão da base de clientes da plataforma) |
 | Arquivos do tenant | `file` e armazenamento | até o tenant apagar ou a organização ser excluída | tenant / `lgpd.delete` | Execução de contrato |
 | Logs da aplicação | stdout (JSON) | definido por quem opera (Docker, Loki, ...) | operação | Legítimo interesse; sem dado pessoal (redact) |
 | Backups | volume `backups` | `BACKUP_KEEP_DAYS` (padrão 14) | `backup.sh` | Legítimo interesse (continuidade); cifrados com `age` |

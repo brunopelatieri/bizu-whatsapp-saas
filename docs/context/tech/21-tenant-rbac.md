@@ -108,7 +108,7 @@ Eventos: `auth.email_verified`, `auth.password_reset`, `tenant.created`, `tenant
 `member.removed`, `role.created`, `role.updated`, `role.deleted`, `customer.created`,
 `customer.updated`, `customer.deleted`, `customer.invited`, `tag.created`, `tag.updated`,
 `tag.deleted`, `custom_field.created`, `custom_field.updated`, `custom_field.archived`,
-`custom_field.deleted` (só ids e `key`; valor de campo nunca). Ações do próprio cliente gravam
+`custom_field.deleted` (só ids e `key`; valor de campo nunca). Na plataforma os mesmos eventos levam o prefixo `admin.` (`admin.tag_created|updated|deleted`, `admin.custom_field_created|updated|archived|deleted`) e `admin.tenant_profile_updated`, com `actor_type = platform` e **sem `tenant_id`**: nunca aparecem em `/app/auditoria`. Ações do próprio cliente gravam
 `actor_type = portal_user`: `portal.signed_up`, `portal.profile_updated`, `portal.password_set`.
 
 Evento sem tenant só aparece com `withPlatformScope`. Ainda não há tela de leitura.

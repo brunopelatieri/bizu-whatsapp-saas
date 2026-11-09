@@ -40,6 +40,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   valor dos clientes. Tela em `/app/configuracoes/campos`, seção no formulário e no detalhe do cliente,
   permissão `custom_field:manage` (owner e admin; colaborador preenche), exportação e anonimização LGPD.
   O portal não vê campos adicionais. Migrations `0027` e `0028`.
+- **Etiquetas e campos da plataforma sobre as organizações** (`docs/specs/crm-cadastro/spec.md`, fase A4):
+  `organization_tag` e `organization_profile` (sem `tenant_id`, `platformOnlyPolicy()`), catálogo em
+  `/admin/configuracoes/etiquetas` e `/campos` (`/api/admin/crm/*`), anotação por organização
+  (`PUT /api/admin/tenants/:id/profile`), filtro `?tags=` e chips em `/admin/tenants` e cartão "Etiquetas e
+  campos" no detalhe. Escrita só do `platform_owner`; o suporte lê. O owner e a equipe do tenant nunca veem a
+  anotação (nem na exportação LGPD, que não a inclui; a anonimização da organização a apaga). Auditoria
+  `admin.tag_*`, `admin.custom_field_*` e `admin.tenant_profile_updated`, sem `tenant_id`. Migrations
+  `0029` a `0031` (a `0031` passa o `audit_log` a `scopedPolicy()`).
 
 ### Alterado
 

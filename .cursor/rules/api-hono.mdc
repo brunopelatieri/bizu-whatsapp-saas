@@ -26,6 +26,7 @@ alwaysApply: false
 - `/api/billing/*` segue aberta em `read_only`. Erro do provedor chega ao cliente como 502 genérico; nenhuma resposta traz referência do provedor (`tech/24-billing-cobranca.md`).
 - Falar com o provedor vem antes da transação local, nunca dentro dela.
 - `/api/admin/*` usa `requireAuth` + `requirePlatform()` e, nas escritas, `requirePlatform(["platform_owner"])` antes da validação; tabela de tenant só dentro de `withPlatformScope` (`tech/22-admin.md`).
+- Etiquetas e campos da plataforma: `/api/admin/crm/*` e `PUT /api/admin/tenants/:id/profile` reaproveitam `src/lib/crm/` com `{ kind: "platform" }`; escrita é `ownerOnly` + `blockWhileImpersonating`, e a anotação nunca sai em rota de tenant (`tech/28-crm-cadastro.md`).
 - Limite do plano: `assertWithinLimit(tenantId, metric)` antes de criar; organizações por dono, só por `createOrganizationWithinLimit(userId, create)` (`tech/23-billing-planos.md`).
 - Cobrança manual: só `platform_owner` marca pagamento (`/api/admin/subscriptions/:id/manual-*`); assinatura viva no provedor nunca é marcada à mão (`isProviderManaged`). `PATCH /api/admin/subscriptions/:id` (datas e status) exige `reason`; com provedor, chama o provedor antes e só grava o que ele aceitou (`src/lib/billing/admin-edit.ts`).
 - Teste rotas com `api.request()` em `src/api/*.test.ts`; com banco real, em `tests/db/`.

@@ -24,7 +24,7 @@ estão nas rules e no cabeçalho de cada arquivo.
 | Planos, preços, trial, limites (inclusive organizações por dono), features, estado `read_only`, `checkLimit`, seed | `tech/23-billing-planos.md` |
 | Clientes, portal, `portalAuth`, magic link, `/app/clientes`, `/portal/**`, `requirePortalAuth` | `tech/25-portal-clientes.md` |
 | Cobrança manual (padrão sem provedor), checkout, assinatura, edição de datas e status pelo admin, webhooks de pagamento, faturas, dunning, reconciliação, módulo de provedor | `tech/24-billing-cobranca.md`, `src/lib/payments/providers/README.md` |
-| Telefone obrigatório e máscara (`PhoneField`), `phone_key`, e-mail opcional do cliente, etiquetas e campos adicionais (A2 a A4 pendentes) | `tech/28-crm-cadastro.md` |
+| Telefone obrigatório e máscara (`PhoneField`), `phone_key`, e-mail opcional do cliente, etiquetas e campos adicionais do tenant e da plataforma (A1 a A4) | `tech/28-crm-cadastro.md` |
 | Tokens de design, Tailwind, dark mode | `tech/09-tema-css.md` |
 | Landing, header, páginas públicas | `tech/10-site-publico.md` |
 | Áreas `/app/**`, `/admin/**`, `/portal/**` | `tech/11-dashboard.md` |

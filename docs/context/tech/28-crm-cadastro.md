@@ -1,14 +1,16 @@
 # Cadastro CRM: telefone, e-mail do cliente, etiquetas e campos
 
 - **Escopo:** Telefone obrigatório em todo cadastro de pessoa, e-mail opcional do cliente,
-  etiquetas e campos adicionais do tenant (A1 a A3); etiquetas e campos da plataforma ficam na
-  A4. Estado por fase na tabela abaixo.
+  etiquetas e campos adicionais do tenant (A1 a A3) e da plataforma sobre as organizações (A4).
+  Estado por fase na tabela abaixo.
 - **Specs relacionadas:** `docs/specs/crm-cadastro/spec.md` e `prd.md`;
   `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T7, fase F0 e fases A1 a A4).
 - **Paths do código:** `src/lib/phone/`, `src/lib/schemas/phone.ts`,
   `src/components/ui/phone-field.tsx`, `src/db/phone-check.ts`, `src/lib/tenant/customers.ts`,
   `src/lib/lgpd/consent.ts`, `src/lib/portal/`, `src/lib/admin/people.ts`, `src/lib/crm/`,
-  `src/api/{tags,custom-fields}.ts`, `src/components/crm/`, `src/components/app/crm/`
+  `src/api/{tags,custom-fields}.ts`, `src/components/crm/`, `src/components/app/crm/`,
+  `src/lib/crm/organization-profile.ts`, `src/api/admin.ts` (bloco `/api/admin/crm/*`),
+  `src/components/admin/tenant-annotation-card.tsx`, `src/routes/admin/crm-{tags,fields}.tsx`
 
 ## Estado por fase
 
@@ -17,7 +19,7 @@
 | A1 | Telefone obrigatório (biblioteca, schema, `PhoneField`, banco, cadastros) e e-mail do cliente opcional | implementada |
 | A2 | Etiquetas do tenant (`tag`, `customer_tag`) | implementada |
 | A3 | Campos adicionais do tenant (`custom_field`, `customer.custom_fields`) | implementada |
-| A4 | Etiquetas e campos da plataforma (`organization_tag`, `organization_profile`) | pendente (A2 e A3) |
+| A4 | Etiquetas e campos da plataforma (`organization_tag`, `organization_profile`) | implementada |
 
 ## Telefone (A1)
 
@@ -143,7 +145,58 @@ de e-mail repetido segue `CUSTOMER_EMAIL_TAKEN`.
   `tests/db/custom-fields.test.ts` (CRUD, teto, isolamento, merge concorrente, `OPTION_IN_USE`, exclusão,
   `required`, portal), `lgpd-export`/`lgpd-deletion` e a matriz de `tests/db/rbac.test.ts`.
 
+## Etiquetas e campos da plataforma (A4)
+
+A plataforma classifica e anota as **organizações** com as mesmas peças do tenant, sobre `Scope =
+platform`. **Regra central: o owner e a equipe do tenant nunca veem a anotação.**
+
+- **Tabelas** (migrations `0029_crm_plataforma`, `0030_rls_crm_plataforma` e
+  `0031_audit_escopo_plataforma`): `organization_tag` (PK `(organization_id, tag_id)`) e
+  `organization_profile` (`organization_id` PK, `custom_fields` jsonb por **id** do campo, `updated_by`),
+  ambas **sem `tenant_id`**, com `platformOnlyPolicy()` + `FORCE`, `cascade` na organização. Só
+  `withPlatformData` (ou o bypass de jobs e do seed) lê e grava; `withTenant` e o `bizu_app` cru leem
+  vazio. As etiquetas e campos em si são `tag`/`custom_field` com `tenant_id` nulo (`entity =
+  organization`), sob o `scopedPolicy()` da A2 e A3: o tenant nunca recebe linha de `tenant_id` nulo.
+  A `0031` troca a política do `audit_log` por `scopedPolicy()`: sem isso, o evento da plataforma (sem
+  `tenant_id`) era recusado dentro de `withPlatformData` (lacuna da F0).
+- **Serviços:** `tags.ts` e `custom-fields.ts` ganharam o escopo da plataforma por inteiro: `usage`
+  (conta `organization_tag` e `organization_profile`), `removedFrom` e `clearedFrom` reais, `OPTION_IN_USE`
+  sobre `organization_profile`, `resolveCustomFieldsIn(tx, scope, raw)` e `customFieldsMergeSql(patch, column)`.
+  `src/lib/crm/organization-profile.ts` é novo e só `/api/admin/*` o importa: `setOrganizationProfile`
+  (etiquetas substituem o conjunto, campos fazem merge por chave, `required` sobre o estado final, lock
+  por organização), `getOrganizationAnnotation`, `tagsOfOrganizationPage` e `organizationIdsWithTags`
+  (filtro). Organização inexistente, em exclusão (`deleting`/`deleted`) e etiqueta de outro escopo ou
+  inexistente respondem 404 igual, sem dizer qual. Nunca use `withPlatformScope` para ler a anotação.
+- **API** (`src/api/admin.ts`): `GET`, `POST /api/admin/crm/tags` e `PATCH`, `DELETE .../:id`;
+  `GET`, `POST /api/admin/crm/custom-fields` (`entity` padrão `organization`; `customer` é 400
+  `INVALID_ENTITY`), `PATCH`, `DELETE .../:id` e `PUT .../order`; `PUT /api/admin/tenants/:id/profile
+  { tagIds?, customFields? }`; `GET /api/admin/tenants` soma `tags` por linha e o filtro `tags=<id>,<id>`
+  (qualquer uma; resolvido em `withPlatformData`, depois entra como `organization.id IN (...)`);
+  `GET /api/admin/tenants/:id` soma `tags` e `customFields`. Leitura: `platform_owner` e
+  `platform_support`; **toda escrita** é `ownerOnly` + `blockWhileImpersonating` antes da validação
+  (suporte recebe 403).
+- **Auditoria:** `admin.tag_created|updated|deleted`, `admin.custom_field_created|updated|archived|deleted`
+  e `admin.tenant_profile_updated`, com `actor_type = platform` e **sem `tenant_id`** (com ele o owner
+  leria o evento em `/app/auditoria`); só ids e `key` em `metadata` (nome, cor, rótulo e valor nunca).
+- **Telas:** `/admin/configuracoes/etiquetas` e `/campos` (`routes/admin/crm-tags.tsx`, `crm-fields.tsx`,
+  links no cartão "Organizações: etiquetas e campos" de `/admin/configuracoes`) reaproveitam `TagManager` e
+  `CustomFieldManager` com a API por props (`platformTagsApi`, `platformFieldsApi` em
+  `src/components/crm/`; `readOnly` para o suporte); `/admin/tenants` ganha filtro por etiqueta
+  (`?tags=`) e chips; `/admin/tenants/:id` ganha o cartão "Etiquetas e campos"
+  (`TenantAnnotationCard`: editável só por `platform_owner`, texto para o suporte). `TagPicker` e
+  `CustomFieldInput` são os mesmos do cliente. Sem `loader` em `/admin`.
+- **LGPD:** a anotação é dado da **plataforma** sobre a organização, não do titular: **não** entra na
+  exportação do owner (`export.ts` nunca a lê; teste prova) e a anonimização da organização
+  (`anonymizeTenant`) apaga `organization_tag` e `organization_profile` (a linha da organização fica,
+  então o `cascade` não dispara e o texto livre dos campos poderia citar pessoas). Ver `lgpd.md`.
+- Testes: `tests/db/crm-platform.test.ts` (RBAC: suporte lê e leva 403 nas escritas; CRUD; unicidade com
+  `tenant_id` nulo; `usage` e `removedFrom` reais; anotação, filtro `tags=` e validações; 404 sem dizer
+  qual; auditoria sem dado; **nenhuma rota de tenant devolve dado da plataforma**), `tests/db/rls.test.ts`
+  (as duas tabelas e `tag`/`custom_field` nos modos), `admin.test.ts` (matriz de acesso),
+  `lgpd-export`/`lgpd-deletion`.
+
 ## O que a SPEC pede e ainda não existe
 
-Etiquetas e campos da plataforma em `/admin` (A4); esta página cresce com eles. Não existe tela de perfil da equipe: o telefone da equipe entra no `/cadastro` e é editado
-pelo proprietário da plataforma em `/admin/usuarios/:id`.
+Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe: o telefone
+da equipe entra no `/cadastro` e é editado pelo proprietário da plataforma em `/admin/usuarios/:id`.
+Filtro por campo adicional segue fora (decisão da SPEC).

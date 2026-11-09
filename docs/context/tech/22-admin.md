@@ -23,9 +23,12 @@ só o caminho da interface. Sem `loader` de servidor. Em produção, sem 2FA, to
 | Rota | Quem | Observação |
 |---|---|---|
 | `GET /api/admin/overview` | plataforma | tenants por estado, usuários, testes acabando em 7 dias, planos ativos, webhooks com falha |
-| `GET /api/admin/tenants?q&status&plan&page` | plataforma | `status` é o estado de cobrança; `plan` (uuid) filtra as organizações de um plano; 20 por página |
+| `GET /api/admin/tenants?q&status&plan&tags&page` | plataforma | `status` é o estado de cobrança; `plan` (uuid) filtra as organizações de um plano; `tags=<id>,<id>` filtra por etiqueta da plataforma (qualquer uma); cada linha traz `tags`; 20 por página |
 | `PATCH /api/admin/tenants/:id` `{ name?, slug? }` | owner | mesmas regras do owner (`slugSchema`); 409 `SLUG_TAKEN`, `TENANT_DELETING` (status `deleting`/`deleted`; suspensa edita); sem mudança real responde 200 e não audita; audita `admin.tenant_updated` no `tenant_id` com antes e depois. Gravação direta por Drizzle: o plugin `organization` só atualiza quem é membro, e a plataforma não é (ele só confere o slug, e o banco já tem `organization.slug` único). Trocar o slug quebra `/portal/login?org=` e magic links já enviados (a tela avisa); o `org` só escolhe entre os tenants da pessoa, então slug antigo reaproveitado não abre outra organização |
-| `GET /api/admin/tenants/:id` | plataforma | membros, assinatura (período, vencimento, carência, `billingMode`), 12 últimas faturas, preços manuais do plano, últimos eventos e auditoria |
+| `GET /api/admin/tenants/:id` | plataforma | membros, assinatura (período, vencimento, carência, `billingMode`), 12 últimas faturas, preços manuais do plano, últimos eventos e auditoria, e a anotação da plataforma (`tags`, `customFields`) |
+| `GET /api/admin/crm/tags`, `GET /api/admin/crm/custom-fields?entity=organization&archived&usage` | plataforma | catálogo de etiquetas e campos das organizações (`tech/28-crm-cadastro.md`) |
+| `POST`, `PATCH`, `DELETE /api/admin/crm/tags[/:id]`; `POST`, `PATCH`, `DELETE /api/admin/crm/custom-fields[/:id]`; `PUT .../custom-fields/order` | owner | `ownerOnly` + `blockWhileImpersonating` antes da validação; 409 `TAG_NAME_TAKEN`, `TAG_LIMIT`, `FIELD_KEY_TAKEN`, `FIELD_LIMIT`, `OPTION_IN_USE`; o `DELETE` devolve `removedFrom`/`clearedFrom` reais; audita `admin.tag_*` e `admin.custom_field_*` (só ids e `key`, sem `tenant_id`) |
+| `PUT /api/admin/tenants/:id/profile` `{ tagIds?, customFields? }` | owner | grava `organization_tag` (substitui) e `organization_profile` (merge por chave); 404 sem dizer qual para organização inexistente ou em exclusão e etiqueta de outro escopo; audita `admin.tenant_profile_updated` sem `tenant_id` |
 | `POST /api/admin/tenants/:id/suspend` `{ reason? }` | owner | `suspended` + `locked`; e-mail `tenant-suspended` aos proprietários (falha no aviso só vai para o log: a suspensão vale e é auditada); 409 `ALREADY_SUSPENDED` |
 | `POST /api/admin/tenants/:id/unsuspend` | owner | volta `full`, ou `read_only` se a assinatura expirou; 409 `NOT_SUSPENDED` |
 | `PUT /api/admin/tenants/:id/plan` `{ planId }` | owner | plano gratuito encerra o trial, destrava o `read_only`, limpa o período e larga a referência do provedor; plano pago mantém o estado, e do gratuito (sem período) vence **agora**; faturas manuais abertas viram `void`; 409 `PROVIDER_SUBSCRIPTION_ACTIVE` com assinatura viva no provedor (`unpaid` conta como viva: cancele antes) |
@@ -55,12 +58,13 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | Rota | Arquivo |
 |---|---|
 | `/admin` | `pages/admin/overview-page.tsx` |
-| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=`), `tenant-detail-page.tsx` ("Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx` |
+| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx` |
 | `/admin/usuarios` | `users-page.tsx`; o nome leva ao detalhe |
 | `/admin/usuarios/:id`, `/admin/usuarios/portal/:id` | `user-detail-page.tsx`, `portal-user-detail-page.tsx` (rotas `routes/admin/user.tsx`, `portal-user.tsx`) |
 | `/admin/planos`, `/admin/planos/:id` | `plans-page.tsx`, `plan-detail-page.tsx`: arquivar/reativar em botão, "Excluir plano" (desabilitado com uso, pede arquivar) e excluir preço, ambos com `confirm-dialog.tsx` |
 | `/admin/assinaturas` | `subscriptions-page.tsx`; menu por linha em `components/admin/subscription-actions.tsx`: editar datas e status (só os destinos de `allowedTargets`, motivo obrigatório), trocar plano, marcar pago/não pago (o mesmo `manual-billing-card`, com os dados de `GET /api/admin/tenants/:id`), buscar do provedor e cancelar |
 | `/admin/webhooks` | `webhooks-page.tsx` |
+| `/admin/configuracoes/etiquetas`, `/admin/configuracoes/campos` | `routes/admin/crm-tags.tsx`, `crm-fields.tsx`: `TagManager` e `CustomFieldManager` com a API da plataforma por props (suporte só lê); links em `/admin/configuracoes` |
 | `/admin/auditoria` | `routes/admin/audit.tsx`: log global, por ação, nome da organização (`tenantQ`, `ilike` em `organization.name`) e pessoa |
 | `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte |
 | `/admin/configuracoes/seguranca` | `routes/admin/security.tsx`: 2FA de quem administra |
