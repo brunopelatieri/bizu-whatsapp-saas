@@ -57,6 +57,7 @@ export type ChannelView = {
   webhookVerifiedAt?: Date | null;
   // QR Code
   connectedPhone?: string | null;
+  advancedSettings?: Record<string, unknown> | null;
 };
 
 const NOT_FOUND = "Canal não encontrado.";
@@ -140,7 +141,10 @@ async function toViews(tx: Tx, rows: ChannelRow[]): Promise<ChannelView[]> {
           webhookVerifiedAt: cloud.webhookVerifiedAt,
         });
       }
-      if (evolution) view.connectedPhone = evolution.connectedPhone;
+      if (evolution) {
+        view.connectedPhone = evolution.connectedPhone;
+        view.advancedSettings = evolution.advancedSettings;
+      }
 
       return view;
     }),

@@ -28,6 +28,7 @@ import { sessionRoutes } from "@/api/sessions";
 import { teamRoutes } from "@/api/team";
 import { tenantRoutes } from "@/api/tenant";
 import { emailWebhooks } from "@/api/webhooks-email";
+import { evolutionWebhooks } from "@/api/webhooks-channels-evolution";
 import { paymentWebhooks } from "@/api/webhooks-payments";
 import { getDb } from "@/db";
 import { contactMessages } from "@/db/schema";
@@ -59,6 +60,7 @@ api.get("/api/ready", async (c) => {
 // Antes de tudo que lê o corpo: webhook é verificado sobre os bytes brutos.
 api.route("/", emailWebhooks);
 api.route("/", paymentWebhooks);
+api.route("/", evolutionWebhooks);
 api.route("/", cspReportRoutes);
 
 // Depois dos webhooks e do relatório de CSP, que não vêm de uma página do app.
