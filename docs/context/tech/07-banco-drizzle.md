@@ -8,9 +8,10 @@
 
 - `src/db/schema/<domínio>.ts`: um arquivo por domínio (`auth.ts`, `tenant.ts`, `audit.ts`,
   `contact.ts`, `email.ts`, `billing.ts`, `security.ts`).
-- `src/db/rls.ts`: `withTenant` e `withPlatformScope`.
-- `src/db/tenant-policy.ts`: `tenantPolicy()`, fora de `rls.ts` porque o Drizzle Kit carrega o
-  schema sem o alias `@/` nem as variáveis de ambiente.
+- `src/db/rls.ts`: `withTenant`, `withPlatformScope`, `withPlatformData`, `withScope`, o tipo
+  `Scope` e `scopeTenantId`.
+- `src/db/tenant-policy.ts`: `tenantPolicy()`, `scopedPolicy()` e `platformOnlyPolicy()`, fora
+  de `rls.ts` porque o Drizzle Kit carrega o schema sem o alias `@/` nem as variáveis de ambiente.
 - `src/db/schema.ts`: reexporta os domínios. `drizzle.config.ts` e o adapter do Better
   Auth leem este arquivo, então domínio novo entra aqui com `export * from "./schema/<domínio>"`.
 - `src/db/index.ts`: `getDb()`, conexão de runtime com `DATABASE_URL` lida de `getEnv()`.
@@ -101,6 +102,34 @@ await withPlatformScope("motivo", (tx) => tx.select().from(auditLog));
 - As tabelas `portal_*` não têm RLS: a identidade do cliente atravessa tenants, e o vínculo fica em `customer`. Quem lê `customer` de vários tenants parte do `portal_user` da sessão, em `withPlatformScope`.
 - `organization`, `member`, `invitation` e `organization_role` não têm RLS
   (`spec-tenant-rbac.md`); o isolamento fica em `requireTenant` e em `src/lib/tenant/`.
+
+### Escopo de plataforma (`scopedPolicy`)
+
+Para tabelas que servem o tenant (`/app`) e a plataforma (`/admin`) com o mesmo schema
+(WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Nenhuma tabela usa ainda.
+
+| Política | Tabela | Passa com |
+|---|---|---|
+| `tenantPolicy()` | `tenant_id` obrigatório ou nulo só por job | `app.bypass_tenant` ou `tenant_id = app.tenant_id` |
+| `scopedPolicy()` | `tenant_id` anulável; `NULL` é dado da plataforma | o anterior ou `tenant_id is null and app.platform_scope = 'on'` |
+| `platformOnlyPolicy()` | sem `tenant_id`, só da plataforma (ex.: `organization_tag`) | `app.bypass_tenant` ou `app.platform_scope = 'on'` |
+
+```ts
+await withScope(scope, (tx) => tx.insert(tag).values({ tenantId: scopeTenantId(scope), ... }));
+await withPlatformData((tx) => tx.select().from(tag)); // só tenant_id nulo
+```
+
+- `withPlatformData` liga só `app.platform_scope`: não lê linha de tenant e o banco recusa gravar
+  linha com `tenant_id`. `withTenant` não lê nem grava linha da plataforma. Um modo por transação.
+- `withPlatformScope` continua sendo o único que atravessa tenants; o atendimento da plataforma
+  não o usa.
+- `tenant_id` vem do `Scope` (`scopeTenantId`), nunca do corpo da requisição; tabela filha repete o
+  do pai. As rotas `/api/*` montam `{ kind: "tenant", tenantId }` depois de `requireTenant`, e
+  `/api/admin/*` montam `{ kind: "platform" }` depois de `requirePlatform`.
+- Unicidade com `tenant_id` nulo pede dois índices: o normal e um parcial `WHERE tenant_id IS NULL`.
+- Tabela nova continua com `.enableRLS()` e `FORCE ROW LEVEL SECURITY` em migration customizada.
+- `tests/db/rls.test.ts` prova os três modos em tabelas de prova que recebem o SQL renderizado
+  das próprias políticas.
 
 ## Papéis do Postgres
 
