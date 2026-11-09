@@ -274,7 +274,8 @@ export async function updateCloudChannel(
   const stored = readCredentials(cloud);
   const accessToken = input.accessToken ?? stored?.accessToken;
   const wabaId = input.wabaId ?? cloud.wabaId;
-  const touchesMeta = Boolean(input.accessToken || input.wabaId || input.pin);
+  // O formulário reenvia o WABA que já está gravado: só a troca leva à Meta.
+  const touchesMeta = Boolean(input.accessToken || input.pin || wabaId !== cloud.wabaId);
 
   let info: MetaPhoneInfo | null = null;
   let registered = false;
