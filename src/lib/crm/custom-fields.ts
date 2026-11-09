@@ -111,11 +111,18 @@ function usageSql(scope: Scope) {
 
 export function listCustomFields(
   scope: Scope,
-  { archived }: { archived: "true" | "false" | "all" },
+  {
+    entity,
+    archived,
+    usage = false,
+  }: { entity: CustomFieldEntity; archived: "true" | "false" | "all"; usage?: boolean },
 ): Promise<CustomFieldView[]> {
+  assertEntity(scope, entity);
+
   return withScope(scope, async (tx) => {
     const rows = await tx
-      .select({ row: customField, usage: usageSql(scope) })
+      // `usage` varre os clientes de cada campo: só o gestor pede.
+      .select({ row: customField, usage: usage ? usageSql(scope) : sql<number>`0` })
       .from(customField)
       .where(
         and(
@@ -136,27 +143,28 @@ export function listCustomFields(
   });
 }
 
-/** Definições ativas, na ordem da tela: o que valida e desenha o formulário. */
-export async function activeCustomFields(tx: Tx, scope: Scope): Promise<CustomFieldDef[]> {
-  const rows = await tx
+/**
+ * Definições na ordem da tela. Sem `includeArchived`, só as ativas (o que valida e desenha o
+ * formulário). Com `lock`, `FOR SHARE`: excluir o campo ou tirar opção (`FOR UPDATE`) espera quem
+ * está gravando valor, e vice-versa.
+ */
+async function loadDefs(
+  tx: Tx,
+  scope: Scope,
+  { includeArchived = false, lock = false } = {},
+): Promise<CustomFieldDef[]> {
+  const query = tx
     .select()
     .from(customField)
-    .where(and(inScope(scope), isNull(customField.archivedAt)))
+    .where(and(inScope(scope), includeArchived ? undefined : isNull(customField.archivedAt)))
     .orderBy(asc(customField.position), asc(customField.createdAt));
 
-  return rows.map(toDef);
+  return (lock ? await query.for("share") : await query).map(toDef);
 }
 
 /** Todas as definições (inclusive arquivadas): rótulo dos valores na exportação LGPD. */
-export async function allCustomFields(tx: Tx, scope: Scope): Promise<CustomFieldDef[]> {
-  const rows = await tx
-    .select()
-    .from(customField)
-    .where(inScope(scope))
-    .orderBy(asc(customField.position), asc(customField.createdAt));
-
-  return rows.map(toDef);
-}
+export const allCustomFields = (tx: Tx, scope: Scope) =>
+  loadDefs(tx, scope, { includeArchived: true });
 
 async function assertActiveRoom(tx: Tx, scope: Scope, exceptId?: string) {
   const [{ total } = { total: 0 }] = await tx
@@ -354,7 +362,9 @@ export function updateCustomField(
 }
 
 /** Grava a ordem dos campos pedidos (posição = índice). Campo de outro escopo é 404. */
-export function reorderCustomFields(scope: Scope, ids: string[]) {
+export function reorderCustomFields(scope: Scope, entity: CustomFieldEntity, ids: string[]) {
+  assertEntity(scope, entity);
+
   return withScope(scope, async (tx) => {
     await lockScope(tx, scope);
 
@@ -428,7 +438,8 @@ export type ResolvedCustomFields = {
 
 /**
  * Confere o bloco `customFields` do corpo contra as definições ativas do tenant, na transação
- * de quem grava o cliente. Id desconhecido ou arquivado é 400 `UNKNOWN_FIELD`; valor
+ * de quem grava o cliente (chame antes de travar a linha do cliente: a ordem dos locks evita
+ * deadlock com a exclusão do campo). Id desconhecido ou arquivado é 400 `UNKNOWN_FIELD`; valor
  * inválido, 400 `INVALID_FIELD_VALUE`. `null` (ou vazio) vira "remova".
  */
 export async function resolveCustomFields(
@@ -436,7 +447,8 @@ export async function resolveCustomFields(
   tenantId: string,
   raw: Record<string, unknown>,
 ): Promise<ResolvedCustomFields> {
-  const defs = await activeCustomFields(tx, { kind: "tenant", tenantId });
+  // `FOR SHARE`: o campo não é excluído nem perde opção enquanto este cadastro é gravado.
+  const defs = await loadDefs(tx, { kind: "tenant", tenantId }, { lock: true });
   const known = new Set(defs.map(({ id }) => id));
 
   if (Object.keys(raw).some((id) => !known.has(id))) {

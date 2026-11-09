@@ -233,6 +233,11 @@ export async function updateCustomer(
 
   try {
     const updated = await withTenant(tenantId, async (tx) => {
+      // Antes de travar a linha do cliente: a exclusão do campo trava o campo e depois os clientes.
+      const resolved = patch.customFields
+        ? await resolveCustomFields(tx, tenantId, patch.customFields)
+        : null;
+
       const [current] = await tx
         .select()
         .from(customer)
@@ -255,12 +260,11 @@ export async function updateCustomer(
       const status =
         patch.status ?? (emailChanged ? fallbackStatus : current.status);
 
-      const { tagIds, customFields, ...fields } = patch;
+      const { tagIds, customFields: _customFields, ...fields } = patch;
       // Merge por chave no mesmo `UPDATE`: `null` remove, ausente não muda. `required` vale
       // sobre o estado final, e só quando o corpo trouxe `customFields`.
       let customFieldsSet = {};
-      if (customFields) {
-        const resolved = await resolveCustomFields(tx, tenantId, customFields);
+      if (resolved) {
         const merged = mergeCustomFields(
           current.customFields as CustomFieldValues,
           resolved.patch,

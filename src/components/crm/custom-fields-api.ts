@@ -26,7 +26,8 @@ export function useCustomFields(archived: "false" | "all" = "false", enabled = t
     queryKey: ["custom-fields", tenant?.id, "customer", archived],
     queryFn: () =>
       apiFetch<{ fields: CustomField[] }>(
-        `/api/custom-fields?entity=customer&archived=${archived}`,
+        // Só o gestor (`all`) precisa da contagem de uso.
+        `/api/custom-fields?entity=customer&archived=${archived}${archived === "all" ? "&usage=true" : ""}`,
       ).then(({ fields }) => fields),
     enabled: enabled && Boolean(tenant),
     retry: false,

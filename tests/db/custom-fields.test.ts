@@ -54,8 +54,8 @@ async function newField(user: TestUser, body: NewField) {
   return ((await response.json()) as { field: Field }).field;
 }
 
-async function listFields(user: TestUser, archived = "false") {
-  const response = await call("GET", `/api/custom-fields?entity=customer&archived=${archived}`, {
+async function listFields(user: TestUser, archived = "false", usage = true) {
+  const response = await call("GET", `/api/custom-fields?entity=customer&archived=${archived}${usage ? "&usage=true" : ""}`, {
     cookie: user.cookie,
   });
   expect(response.status).toBe(200);
@@ -624,7 +624,8 @@ describe("excluir campo", () => {
     expect(await bodyOf(wrong)).toMatchObject({ code: "CONFIRMATION_MISMATCH" });
     expect((await listFields(user)).map(({ id }) => id)).toContain(doomed.id);
 
-    // `usage` mostra quantos cadastros têm valor, para a confirmação.
+    // `usage` só vem quando pedido (varre os clientes); mostra quantos têm valor.
+    expect((await listFields(user, "false", false)).find(({ id }) => id === doomed.id)?.usage).toBe(0);
     expect((await listFields(user)).find(({ id }) => id === doomed.id)?.usage).toBe(2);
 
     const removed = await removeField(user, doomed.id, "some_campo");
@@ -639,6 +640,29 @@ describe("excluir campo", () => {
 
     // A key volta a ficar livre.
     expect((await createField(user, { label: "Some", type: "text", key: "some_campo" })).status).toBe(201);
+  });
+
+  it("excluir o campo durante gravações de valor não deixa valor órfão nem trava (sem 500)", async () => {
+    const { user } = await freshTenant("Exclusão concorrente");
+    const field = await newField(user, { label: "Efêmero", type: "text", key: "efemero" });
+    const customers = await Promise.all(
+      Array.from({ length: 6 }, async () =>
+        ((await (await newCustomer(user)).json()) as { customer: CustomerView }).customer,
+      ),
+    );
+
+    const results = await Promise.all([
+      removeField(user, field.id, "efemero"),
+      ...customers.map((customer) =>
+        patchCustomer(user, customer.id, { customFields: { [field.id]: "tarde demais" } }),
+      ),
+    ]);
+
+    // Cada gravação ou ganhou da exclusão (200, e a exclusão limpou depois) ou perdeu (UNKNOWN_FIELD).
+    expect(results.every(({ status }) => status === 200 || status === 400)).toBe(true);
+    for (const customer of customers) {
+      expect((await detail(user, customer.id)).customFields).toEqual({});
+    }
   });
 
   it("arquivar preserva o valor, que some do formulário mas volta ao reativar", async () => {

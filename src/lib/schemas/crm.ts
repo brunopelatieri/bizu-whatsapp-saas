@@ -128,6 +128,8 @@ export const customFieldsQuerySchema = z.object({
   entity: z.enum(customFieldEntities).default("customer"),
   /** Padrão: só os ativos; `true`, só os arquivados; `all`, todos. */
   archived: z.enum(["true", "false", "all"]).default("false"),
+  /** Soma `usage` (quantos cadastros têm valor): custa uma varredura por campo, só o gestor pede. */
+  usage: z.enum(["true", "false"]).default("false"),
 });
 
 export const customFieldOrderSchema = z.object({

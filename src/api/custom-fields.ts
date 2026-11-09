@@ -27,7 +27,6 @@ import {
   deleteCustomFieldSchema,
   updateCustomFieldSchema,
 } from "@/lib/schemas/crm";
-import { TenantRuleError } from "@/lib/tenant/errors";
 
 /**
  * `/api/custom-fields`: campos adicionais do cliente (`docs/specs/crm-cadastro/spec.md`). Ler
@@ -63,12 +62,11 @@ customFieldRoutes.get(
   canRead,
   zValidator("query", customFieldsQuerySchema, validationError),
   async (c) => {
-    const { entity, archived } = c.req.valid("query");
-    if (entity !== "customer") {
-      throw new TenantRuleError(400, "INVALID_ENTITY", "Entidade inválida.");
-    }
+    const { entity, archived, usage } = c.req.valid("query");
 
-    return c.json({ fields: await listCustomFields(scopeOf(c), { archived }) });
+    return c.json({
+      fields: await listCustomFields(scopeOf(c), { entity, archived, usage: usage === "true" }),
+    });
   },
 );
 
@@ -89,11 +87,8 @@ customFieldRoutes.put(
   zValidator("json", customFieldOrderSchema, validationError),
   async (c) => {
     const { entity, ids } = c.req.valid("json");
-    if (entity !== "customer") {
-      throw new TenantRuleError(400, "INVALID_ENTITY", "Entidade inválida.");
-    }
 
-    await reorderCustomFields(scopeOf(c), ids);
+    await reorderCustomFields(scopeOf(c), entity, ids);
     return c.json({ ok: true });
   },
 );

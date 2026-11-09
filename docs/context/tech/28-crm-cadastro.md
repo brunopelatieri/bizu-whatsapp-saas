@@ -118,11 +118,13 @@ de e-mail repetido segue `CUSTOMER_EMAIL_TAKEN`.
   ativos e 50 opções (arquivado não conta; reativar com a lista cheia é 409 `FIELD_LIMIT`), conferido sob
   `pg_advisory_xact_lock`; `FIELD_KEY_TAKEN` (inclui arquivado); `OPTION_IN_USE` (conta quem usa a opção
   tirada; renomear o rótulo mantém o `value`); exclusão pede a `key` digitada (`CONFIRMATION_MISMATCH`) e
-  limpa o valor em todos os clientes na mesma transação (`clearedFrom`). Campo de outro escopo é 404.
+  limpa o valor em todos os clientes na mesma transação (`clearedFrom`). Campo de outro escopo é 404. Quem grava valor
+  trava as definições com `FOR SHARE` **antes** de travar a linha do cliente (`resolveCustomFields`); a exclusão e a
+  edição de opções usam `FOR UPDATE` no campo: nenhum valor órfão e sem deadlock.
   O escopo `platform` já é aceito pelo serviço (a limpeza de valores na exclusão e a contagem de uso da
   plataforma entram na A4, com `organization_profile`).
-- **API** (`src/api/custom-fields.ts`): `GET /api/custom-fields?entity=customer&archived=false|true|all`
-  (`customer:read`), `POST`, `PATCH /:id` (`label`, `options`, `required`, `archived`), `PUT /order` e
+- **API** (`src/api/custom-fields.ts`): `GET /api/custom-fields?entity=customer&archived=false|true|all&usage=true`
+  (`customer:read`; `usage`, a contagem de cadastros com valor, só quando pedido: o gestor), `POST`, `PATCH /:id` (`label`, `options`, `required`, `archived`), `PUT /order` e
   `DELETE /:id { confirm }` (`custom_field:manage`). `customFields` em `POST` e `PATCH /api/customers`
   é **merge por chave** no mesmo `UPDATE` (`custom_fields || $set - $removidas`, com a linha travada):
   `null` remove, ausente não muda; 400 `UNKNOWN_FIELD`, `INVALID_FIELD_VALUE` e `FIELD_REQUIRED`. O
