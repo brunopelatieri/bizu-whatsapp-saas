@@ -1,0 +1,18 @@
+{
+  "data": {
+    "Info": {
+      "Chat": "5511988880001@s.whatsapp.net",
+      "Sender": "5511999990001@s.whatsapp.net",
+      "IsFromMe": true,
+      "ID": "3EB0SENT0001",
+      "Timestamp": "2026-11-02T10:00:05-03:00"
+    },
+    "Message": {
+      "extendedTextMessage": {
+        "text": "ok"
+      }
+    },
+    "MessageContextInfo": {}
+  },
+  "message": "success"
+}

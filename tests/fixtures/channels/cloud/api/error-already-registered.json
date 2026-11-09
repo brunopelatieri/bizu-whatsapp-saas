@@ -1,0 +1,8 @@
+{
+  "error": {
+    "message": "Phone number is already registered",
+    "type": "OAuthException",
+    "code": 133005,
+    "fbtrace_id": "AbCdEf125"
+  }
+}

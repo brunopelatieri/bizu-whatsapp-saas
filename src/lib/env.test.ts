@@ -196,4 +196,64 @@ describe("parseEnv", () => {
 
     expect(env.NODE_ENV).toBe("production");
   });
+  describe("canais de mensagem", () => {
+    it("sem CHANNEL_PROVIDERS, nenhum módulo e padrões da Evolution", () => {
+      const env = parseEnv(base);
+
+      expect(env.CHANNEL_PROVIDERS).toEqual([]);
+      expect(env.EVOLUTION_INSTANCE_PREFIX).toBe("bizu");
+      expect(env.EVOLUTION_MAX_INSTANCES_TOTAL).toBe(20);
+      expect(env.EVOLUTION_MEDIA_ORIGINS).toEqual([]);
+      expect(env.EVOLUTION_REQUEST_TIMEOUT_MS).toBe(15_000);
+    });
+
+    it("whatsapp_cloud não pede variável", () => {
+      expect(problemsOf({ ...base, CHANNEL_PROVIDERS: "whatsapp_cloud" })).toEqual([]);
+    });
+
+    it("whatsapp_qr exige URL e chave do servidor Evolution", () => {
+      expect(problemsOf({ ...base, CHANNEL_PROVIDERS: "whatsapp_qr" })).toEqual([
+        "EVOLUTION_API_URL: obrigatória com whatsapp_qr em CHANNEL_PROVIDERS",
+        "EVOLUTION_GLOBAL_API_KEY: obrigatória com whatsapp_qr em CHANNEL_PROVIDERS",
+      ]);
+    });
+
+    it("recusa origem de mídia com caminho ou barra final", () => {
+      for (const origin of ["https://s3.exemplo.com/", "https://s3.exemplo.com/bucket", "ftp://x"]) {
+        expect(problemsOf({ ...base, EVOLUTION_MEDIA_ORIGINS: origin })).toEqual([
+          "EVOLUTION_MEDIA_ORIGINS: use origens exatas, como https://s3.exemplo.com (sem caminho nem barra final)",
+        ]);
+      }
+      expect(
+        problemsOf({
+          ...base,
+          EVOLUTION_MEDIA_ORIGINS: "https://s3.exemplo.com, http://minio:9000",
+        }),
+      ).toEqual([]);
+    });
+
+    it("recusa a chave global de exemplo em produção", () => {
+      const production = {
+        ...base,
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://bizu_app:9f8e7d6c5b4a39281706f5e4d3c2b1a0@postgres:5432/bizu",
+        DIRECT_URL: "postgresql://bizu_owner:0a1b2c3d4e5f60718293a4b5c6d7e8f9@postgres:5432/bizu",
+        BETTER_AUTH_SECRET: "u1Z9x2Qw8eRtYuIoPaSdFgHjKlZxCvBnM0987654321=",
+        CREDENTIALS_ENCRYPTION_KEY: "aB3dE6fG9hJ2kL5mN8pQ1rS4tU7vW0xYzA1bC2dE3fg=",
+        AUDIT_SALT: "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+        RATE_LIMIT_STORE: "postgres",
+        CHANNEL_PROVIDERS: "whatsapp_qr",
+        EVOLUTION_API_URL: "https://evolution.exemplo.com",
+      };
+
+      expect(
+        problemsOf({ ...production, EVOLUTION_GLOBAL_API_KEY: "change-me-evolution-global-key" }),
+      ).toEqual([
+        "EVOLUTION_GLOBAL_API_KEY: use o valor gerado no servidor Evolution, não o exemplo do .env.example",
+      ]);
+      expect(
+        problemsOf({ ...production, EVOLUTION_GLOBAL_API_KEY: "k3y-gerada-no-servidor-evolution" }),
+      ).toEqual([]);
+    });
+  });
 });
