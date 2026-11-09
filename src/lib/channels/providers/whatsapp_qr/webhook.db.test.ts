@@ -331,10 +331,12 @@ describe("webhook da Evolution", () => {
 
       expect(downloads).toHaveLength(2);
       expect(storage.objects.size).toBe(1);
-      expect((event?.raw as { data: { Message: { base64: unknown } } }).data.Message.base64).toMatchObject({
-        storageKey: [...storage.objects.keys()][0],
-        mime: "image/jpeg",
-        size: 4,
+      expect(event?.raw).toMatchObject({
+        data: {
+          Message: {
+            base64: { storageKey: [...storage.objects.keys()][0], mime: "image/jpeg", size: 4 },
+          },
+        },
       });
     });
   });

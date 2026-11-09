@@ -258,9 +258,9 @@ describe("/api/channels (QR Code)", () => {
       });
       expect(evolution.calls.map((item) => item.path)).toEqual(["/instance/connect", "/instance/qr"]);
       expect(evolution.calls.every((item) => item.key === FIXTURE_TOKEN)).toBe(true);
-      expect((connect?.body as { webhookUrl: string }).webhookUrl).toBe(
-        `https://app.test/api/webhooks/whatsapp/evolution/${seeded.webhookSecret}`,
-      );
+      expect(connect?.body).toMatchObject({
+        webhookUrl: `https://app.test/api/webhooks/whatsapp/evolution/${seeded.webhookSecret}`,
+      });
       expect((await channelOf(seeded.id))?.status).toBe("connecting");
       expect((await rowsOf(tenantId))[0]?.evolution.lastQrAt).toBeInstanceOf(Date);
     });
@@ -313,7 +313,7 @@ describe("/api/channels (QR Code)", () => {
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await bodyOf(response)).toEqual({ pairingCode: "ABCD-1234" });
-      expect((pair?.body as { phone: string }).phone).toBe("5511999990001");
+      expect(pair?.body).toMatchObject({ phone: "5511999990001" });
 
       for (const phone of ["+55 11 99999-0001", "123", ""]) {
         const invalid = await call("POST", `/api/channels/${seeded.id}/pair`, {
