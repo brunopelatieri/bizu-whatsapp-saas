@@ -21,6 +21,13 @@
 | 10 | LGPD, arquivos e observabilidade | concluída; falta preencher controlador e encarregado nos textos legais (`docs/context/lgpd.md`) |
 | 11 | Repositório público e README final | concluída; falta o teste de onboarding com pessoa externa (checklist em `CONTRIBUTING.md`) |
 
+## Programas em planejamento
+
+- **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs em rascunho para
+  `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
+  Evolution Go) e `caixa-de-entrada` (chat e fila). Aguarda aprovação dos PRDs; nenhuma linha
+  de código foi escrita. Primeira fase proposta: F0 e A1, com a medição B0 em paralelo.
+
 ## Estado atual do código
 
 - React Router Framework Mode com `ssr: true`; Hono integrado via `react-router-hono-server`.

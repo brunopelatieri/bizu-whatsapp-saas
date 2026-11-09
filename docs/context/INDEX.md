@@ -11,6 +11,7 @@ estão nas rules e no cabeçalho de cada arquivo.
 | Criar tabela, rota, tela ou página | `receitas.md` |
 | PRD/SPEC, modelo, tokens, novo projeto | `ai-engineering.md`, `docs/specs/README.md` |
 | Fase atual da transformação em SaaS | `status.md`, `docs/specs/saas-foundation/spec-plano.md` |
+| Programa WhatsApp CRM (planejado, sem código): canais Cloud API e Evolution Go, caixa de entrada com fila, etiquetas e campos adicionais | `docs/specs/whatsapp-crm/plano.md` e a SPEC da feature tocada |
 | Rota, loader, `meta`, SSR, blog | `tech/05-react-router.md` |
 | Endpoint `/api/*`, `requireAuth` | `tech/06-hono-api.md` |
 | Schema, migration, query | `tech/07-banco-drizzle.md` |
