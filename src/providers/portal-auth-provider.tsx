@@ -18,6 +18,8 @@ export type PortalUser = {
   name: string;
   email: string;
   phone: string | null;
+  /** Dígitos com DDI: o formulário monta o valor do `PhoneField` a partir dele. */
+  phoneNormalized: string | null;
   hasPassword: boolean;
 };
 

@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   pgTable,
@@ -9,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { phoneRequired } from "../phone-check";
 import { organization } from "./tenant";
 
 /**
@@ -37,9 +39,14 @@ export const portalUser = pgTable("portal_user", {
   // Sem tela nesta fase: as rotas `/two-factor/*` do portal ficam fechadas.
   twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
   phone: text("phone"),
+  phoneNormalized: text("phone_normalized"),
+  phoneKey: text("phone_key"),
   locale: text("locale"),
   ...timestamps,
-});
+}, (table) => [
+  index("portal_user_phone_key_idx").on(table.phoneKey),
+  check("portal_user_phone_required", phoneRequired),
+]);
 
 export const portalSession = pgTable(
   "portal_session",

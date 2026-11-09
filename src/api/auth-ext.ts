@@ -153,7 +153,7 @@ authRoutes.post(
   "/api/auth/sign-up/email",
   zValidator("json", signupSchema, validationError),
   async (c) => {
-    const { name, email, password, termsVersion, marketing } = c.req.valid("json");
+    const { name, email, password, phone, termsVersion, marketing } = c.req.valid("json");
     const verifyEmail = getEnv().EMAIL_VERIFICATION_REQUIRED;
 
     // Sem verificação, a conta não verificada já é usável: apagá-la seria tomar a de alguém.
@@ -165,6 +165,7 @@ authRoutes.post(
         subjectType: "user",
         termsVersion,
         marketing,
+        phone,
         ip: clientKey(c),
         userAgent: c.req.header("User-Agent"),
       },

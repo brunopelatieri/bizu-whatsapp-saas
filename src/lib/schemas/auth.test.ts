@@ -8,6 +8,7 @@ import {
 const signup = {
   name: "Ana",
   email: "Ana@Example.com ",
+  phone: "(11) 98765-4321",
   password: "senha-com-10",
   acceptTerms: true,
   termsVersion: "2026-11",
@@ -30,8 +31,25 @@ describe("signupSchema", () => {
     );
   });
 
-  it("não exige telefone", () => {
-    expect(signupSchema.safeParse(signup).success).toBe(true);
+  it("exige telefone válido, com a mensagem do motivo", () => {
+    const { phone: _phone, ...withoutPhone } = signup;
+    expect(signupSchema.safeParse(withoutPhone).success).toBe(false);
+
+    const message = (phone: string) => {
+      const result = signupSchema.safeParse({ ...signup, phone });
+      return result.success ? null : result.error.issues[0]?.message;
+    };
+    expect(message("")).toBe("Informe o telefone.");
+    expect(message("(10) 98765-4321")).toBe("DDD inexistente.");
+    expect(message("(11) 88765-4321")).toBe("Celular precisa começar com 9 depois do DDD.");
+    expect(message("(11) 98765-43")).toBe("Número incompleto ou com dígitos a mais.");
+    expect(message("(11) 98765-4321 ramal 2")).toBe("Use só números e + ( ) - .");
+  });
+
+  it("aceita celular, fixo, celular antigo, +55 e estrangeiro", () => {
+    for (const phone of ["+55 (11) 98765-4321", "(11) 3456-7890", "(11) 9876-5432", "+1 415 555 2671"]) {
+      expect(signupSchema.safeParse({ ...signup, phone }).success).toBe(true);
+    }
   });
 });
 

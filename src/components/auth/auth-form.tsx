@@ -21,6 +21,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PhoneField } from "@/components/ui/phone-field";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { TERMS_VERSION } from "@/lib/legal/versions";
 import {
@@ -227,6 +228,7 @@ export function SignupForm({
     defaultValues: {
       name: "",
       email: lockedEmail ?? "",
+      phone: "",
       password: "",
       termsVersion: TERMS_VERSION,
       marketing: false,
@@ -304,6 +306,26 @@ export function SignupForm({
                     placeholder="voce@empresa.com"
                     readOnly={Boolean(lockedEmail)}
                     className={authInputClassName}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="phone"
+            render={({ field }) => (
+              <FormItem className="w-full">
+                <FormLabel className={authLabelClassName}>Telefone / WhatsApp *</FormLabel>
+                <FormControl className="w-full">
+                  <PhoneField
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    inputClassName={authInputClassName}
                   />
                 </FormControl>
                 <FormMessage />

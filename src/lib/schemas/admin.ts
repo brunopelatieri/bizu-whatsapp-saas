@@ -9,6 +9,7 @@ import {
   subscriptionStatusList,
 } from "@/lib/billing/constants";
 import { billingStates } from "@/lib/billing/state";
+import { phoneSchema } from "@/lib/schemas/phone";
 import {
   slugSchema,
   updateTenantSchema as ownerUpdateTenantSchema,
@@ -271,9 +272,10 @@ const personFields = {
     .toLowerCase()
     .max(254, "E-mail muito longo.")
     .email("Informe um e-mail válido."),
+  phone: phoneSchema,
 };
 
-/** Papéis não se editam por aqui. */
+/** Papéis não se editam por aqui. O telefone se troca, mas nunca se apaga. */
 export const updateUserSchema = z
   .object(personFields)
   .partial()

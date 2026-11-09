@@ -20,7 +20,7 @@ Mecânica (consentimento, exportação, exclusão, arquivos): `tech/27-lgpd-arqu
 | Faturas | `invoice` | **5 anos**, fixo (sem configuração nem job), anonimizadas se a organização for excluída | não há job: guarda por obrigação fiscal | Obrigação legal |
 | Prova de consentimento | `consent_log` | enquanto durar a relação e o prazo de defesa; sem nome nem e-mail (só id e hash de IP) | não é apagado pela exclusão | Exercício regular de direitos |
 | Pedido de exclusão e de exportação | `deletion_request`, `data_export` | `deletion_request` fica como registro da execução | — | Prestação de contas |
-| Conta de equipe, do portal e organização | `user`, `portal_user`, `customer`, `organization` ... | até o pedido de exclusão + 30 dias de carência | job `lgpd.delete` (anonimiza) | Execução de contrato; depois, direito do titular |
+| Conta de equipe, do portal e organização (inclui o **telefone**, obrigatório, e o e-mail, opcional no cliente) | `user`, `portal_user`, `customer`, `organization` ... | até o pedido de exclusão + 30 dias de carência | job `lgpd.delete` (anonimiza) | Execução de contrato; depois, direito do titular |
 | Arquivos do tenant | `file` e armazenamento | até o tenant apagar ou a organização ser excluída | tenant / `lgpd.delete` | Execução de contrato |
 | Logs da aplicação | stdout (JSON) | definido por quem opera (Docker, Loki, ...) | operação | Legítimo interesse; sem dado pessoal (redact) |
 | Backups | volume `backups` | `BACKUP_KEEP_DAYS` (padrão 14) | `backup.sh` | Legítimo interesse (continuidade); cifrados com `age` |
@@ -50,5 +50,5 @@ Observações:
 ## Quando o template vira produto
 
 1. Preencher controlador e encarregado; revisar os textos com um advogado.
-2. Conferir esta tabela contra o que o produto realmente guarda (campos novos em `customer`, novas tabelas com dado pessoal entram na exportação e na anonimização: `src/lib/lgpd/export.ts` e `deletion.ts`).
+2. Conferir esta tabela contra o que o produto realmente guarda (o telefone é dado pessoal obrigatório: a anonimização zera `phone`, `phone_normalized` e `phone_key`, e nunca vai para log nem auditoria; campos novos em `customer`, novas tabelas com dado pessoal entram na exportação e na anonimização: `src/lib/lgpd/export.ts` e `deletion.ts`).
 3. Configurar o backup cifrado e testar a restauração (`tech/14-deploy.md`).

@@ -90,6 +90,7 @@ export async function createUser(
       name: "Pessoa Teste",
       email,
       password: PASSWORD,
+      phone: "11987654321",
       acceptTerms: true,
       termsVersion: "2026-11",
     },

@@ -16,6 +16,7 @@ import {
   makePlatformUser,
   STUB_ID,
 } from "./billing-helpers";
+import { uniquePhone } from "./phone-helpers";
 import { cleanUpPortal } from "./portal-helpers";
 import {
   addMember,
@@ -106,7 +107,11 @@ describe("rotas de equipe sobre o servidor Node", () => {
     async function createCustomerOverHttp() {
       const response = await request("POST", "/api/customers", {
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Cliente", email: `${randomUUID()}@${DOMAIN}` }),
+        body: JSON.stringify({
+          name: "Cliente",
+          email: `${randomUUID()}@${DOMAIN}`,
+          phone: uniquePhone(),
+        }),
       });
       expect(response.status).toBe(201);
 

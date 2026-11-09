@@ -43,6 +43,7 @@ describe("autenticação sobre o servidor Node", () => {
         name: "Ana",
         email,
         password,
+        phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
       },

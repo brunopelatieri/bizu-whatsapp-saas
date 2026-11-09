@@ -87,6 +87,10 @@ responde 403 e avisa os owners. A política se edita em `/admin/configuracoes` e
 há banimento: o acesso é de cada tenant, por `customer.status`. O overview conta os clientes
 de todos os tenants.
 
+O proprietário da plataforma edita nome, e-mail e **telefone** (obrigatório, nunca apagado) de
+usuários de equipe e do portal (`PersonEditCard`); a auditoria (`admin.user_updated`,
+`admin.portal_user_updated`) diz só `phone: true`, nunca o número (`tech/28-crm-cadastro.md`).
+
 ## Ainda não existe
 
 Overview sem MRR e jobs mortos; `/admin/jobs`.

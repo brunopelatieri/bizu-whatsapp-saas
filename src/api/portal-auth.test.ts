@@ -20,6 +20,7 @@ function resolved(emailVerified = true): ResolvedPortalSession {
       name: "Júlia",
       emailVerified,
       phone: null,
+      phoneNormalized: null,
     },
     session: {
       id: "sessao",

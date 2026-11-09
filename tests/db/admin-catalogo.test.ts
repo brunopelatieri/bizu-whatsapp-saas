@@ -34,6 +34,7 @@ import {
   createUser,
   type TestUser,
 } from "./tenant-helpers";
+import { phoneRow } from "./phone-helpers";
 
 /**
  * SPEC `admin-crud`, trilha A: nome da organização nas listagens, excluir plano e preço,
@@ -143,15 +144,19 @@ describe("etapa 1: nome da organização nas listagens", () => {
 
   it("portal: nomes das organizações com o status do vínculo", async () => {
     const email = customerEmail();
+    const ph = phoneRow();
     const [person] = await owner<{ id: string }[]>`
-      insert into portal_user (name, email) values ('Cliente', ${email}) returning id
+      insert into portal_user (name, email, phone, phone_normalized, phone_key)
+      values ('Cliente', ${email}, ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey}) returning id
     `;
     await asPlatform(owner, async (tx) => {
       for (const [index, org] of orgs.entries()) {
         await tx`
-          insert into customer (tenant_id, portal_user_id, name, email, status)
+          insert into customer (tenant_id, portal_user_id, name, email, status,
+                                phone, phone_normalized, phone_key)
           values (${org.id}, ${person?.id ?? ""}, 'Cliente', ${email},
-                  ${index === 1 ? "active" : "lead"})
+                  ${index === 1 ? "active" : "lead"},
+                  ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
         `;
       }
     });

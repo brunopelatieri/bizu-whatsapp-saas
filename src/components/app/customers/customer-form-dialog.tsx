@@ -24,6 +24,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { Textarea } from "@/components/ui/textarea";
 import { customerSchema } from "@/lib/schemas/customer";
 
@@ -45,7 +46,7 @@ function toFormValues(customer?: Customer): FormInput {
   return {
     name: customer?.name ?? "",
     email: customer?.email ?? "",
-    phone: customer?.phone ?? "",
+    phone: toPhoneFieldValue(customer?.phoneNormalized),
     document: customer?.document ?? "",
     notes: customer?.notes ?? "",
     tagsText: customer?.tags.join(", ") ?? "",
@@ -90,7 +91,7 @@ export function CustomerFormDialog({
   }
 
   const emailChanging =
-    customer?.hasPortalAccess && form.watch("email") !== customer.email;
+    customer?.hasPortalAccess && (form.watch("email") ?? "") !== (customer.email ?? "");
 
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
@@ -98,7 +99,7 @@ export function CustomerFormDialog({
         <DialogHeader>
           <DialogTitle>{customer ? "Editar cliente" : "Novo cliente"}</DialogTitle>
           <DialogDescription>
-            Só nome e e-mail são obrigatórios. O acesso ao portal é enviado depois.
+            Nome e telefone são obrigatórios. O e-mail é opcional, mas só quem tem e-mail pode receber acesso ao portal.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -123,7 +124,7 @@ export function CustomerFormDialog({
                 <FormItem>
                   <FormLabel>E-mail</FormLabel>
                   <FormControl>
-                    <Input {...field} type="email" autoComplete="off" />
+                    <Input {...field} value={field.value ?? ""} type="email" autoComplete="off" />
                   </FormControl>
                   {emailChanging ? (
                     <p className="text-xs text-muted-foreground">
@@ -134,15 +135,20 @@ export function CustomerFormDialog({
                 </FormItem>
               )}
             />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3">
               <FormField
                 control={form.control}
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Telefone</FormLabel>
+                    <FormLabel>Telefone / WhatsApp *</FormLabel>
                     <FormControl>
-                      <Input {...field} value={field.value ?? ""} type="tel" />
+                      <PhoneField
+                        value={field.value}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

@@ -140,6 +140,15 @@ enviar acesso (`customer:invite`, o único caminho de `lead` para `active`) e ex
 (`customer:delete`). O status fica fora do formulário de propósito. A lista
 (`pages/customers-page.tsx`) mostra também telefone e etiquetas, que antes só apareciam no detalhe.
 
+**E-mail opcional e telefone obrigatório (crm-cadastro, A1).** O cliente pode não ter e-mail
+(chega pelo WhatsApp), mas **não tem conta acessível**: sem e-mail, `POST .../invite` responde 409
+`EMAIL_REQUIRED`, o magic link e o login nunca casam, e o botão fica desabilitado com a explicação.
+Tirar o e-mail de quem tinha acesso corta o acesso. O telefone é obrigatório e **único por tenant**
+(409 `PHONE_IN_USE`, também na variante com ou sem o 9º dígito); `ensurePortalUser(email, name,
+phone)` e `confirmPortalSignup` levam o telefone ao `portal_user` e ao `customer`. O portal segue
+com a lista fechada de colunas (`findPortalCustomer`): nada de etiqueta ou campo adicional.
+Detalhes: `tech/28-crm-cadastro.md`.
+
 ## Fora desta fase
 
 2FA no portal (fase 9), exportação e exclusão LGPD (fase 10), `/portal/faturas` real (fluxo b),

@@ -25,6 +25,7 @@ import {
   createUser,
   type TestUser,
 } from "./tenant-helpers";
+import { phoneRow } from "./phone-helpers";
 
 /**
  * Identidades de equipe e de portal não se misturam, e o cliente de dois tenants só vê o
@@ -142,8 +143,10 @@ describe("portal: isolamento", () => {
 
     it("link de verificação de equipe não confirma e-mail no portal", async () => {
       const { email } = await createCustomer(ownerA);
+      const ph = phoneRow();
       const [teamUser] = await owner<{ id: string }[]>`
-        insert into portal_user (name, email) values ('Pessoa', ${email})
+        insert into portal_user (name, email, phone, phone_normalized, phone_key)
+        values ('Pessoa', ${email}, ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
         returning id
       `;
       expect(teamUser).toBeDefined();
@@ -153,6 +156,7 @@ describe("portal: isolamento", () => {
           name: "Pessoa",
           email,
           password: "senha-forte-123",
+          phone: "11987654321",
           acceptTerms: true,
           termsVersion: "2026-11",
         },
@@ -305,9 +309,12 @@ describe("portal: isolamento", () => {
       const inB = await call("GET", `/api/customers/${customerB}`, {
         cookie: ownerB.cookie,
       });
-      expect(await inB.json()).toMatchObject({
-        customer: { name: "Júlia em B", phone: null },
-      });
+      const { customer: inBCustomer } = (await inB.json()) as {
+        customer: { name: string; phone: string };
+      };
+      // O telefone de B continua o que o owner de B cadastrou, não o do perfil editado em A.
+      expect(inBCustomer.name).toBe("Júlia em B");
+      expect(inBCustomer.phone).not.toBe("11 90000-0000");
 
       const inA = await call("GET", `/api/customers/${customerA}`, {
         cookie: ownerA.cookie,
@@ -377,10 +384,12 @@ describe("portal: isolamento", () => {
       // Passo 1: com o dono, um cliente em cada tenant.
       await owner.begin(async (tx) => {
         await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        const pa = phoneRow();
+        const pb = phoneRow();
         await tx`
-          insert into customer (tenant_id, name, email, notes) values
-            (${tenantA.id}, 'A', ${emailA}, ${marker}),
-            (${tenantB.id}, 'B', ${emailB}, ${marker})
+          insert into customer (tenant_id, name, email, notes, phone, phone_normalized, phone_key) values
+            (${tenantA.id}, 'A', ${emailA}, ${marker}, ${pa.phone}, ${pa.phoneNormalized}, ${pa.phoneKey}),
+            (${tenantB.id}, 'B', ${emailB}, ${marker}, ${pb.phone}, ${pb.phoneNormalized}, ${pb.phoneKey})
         `;
       });
     });
@@ -399,6 +408,7 @@ describe("portal: isolamento", () => {
           tenantId: tenantB.id,
           name: "Invasor",
           email: `${marker}-c@cliente.test`,
+          ...phoneRow(),
         }),
       ).catch((caught: unknown) => caught);
 

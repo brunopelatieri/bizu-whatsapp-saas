@@ -22,6 +22,12 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   entra direto.
 - Seed com preços manuais, limite de organizações e três tenants na cobrança manual (em dia, em
   atraso e vencido).
+- **Telefone obrigatório em todo cadastro de pessoa** (`docs/specs/crm-cadastro/spec.md`, fase A1):
+  conta de equipe e do portal, perfil, `/admin` e cliente. Validação no Brasil (DDD, 9º dígito, fixo e
+  celular antigo com aviso) e em E.164 para outros países, campo `PhoneField` com máscara e seletor de
+  país, colunas `phone_normalized` e `phone_key` com `CHECK` no banco e telefone **único por tenant**
+  no cliente (409 `PHONE_IN_USE`). O e-mail do cliente passa a ser opcional (sem e-mail, sem convite
+  nem conta acessível).
 
 ### Alterado
 
@@ -58,6 +64,14 @@ Cobrança manual e verificação opcional:
 3. Planos sem `limits.organizations` valem 1 organização por dono, como trial e vencida. Defina o
    valor em `/admin/planos/:id` (o seed preenche os planos dele).
 4. Cadastre um preço `Manual` nos planos pagos para registrar pagamentos sem provedor.
+
+Telefone obrigatório (migration `0022_telefone_email_opcional`):
+
+1. A migration **aborta** se houver conta ou cliente já cadastrado (não há backfill de telefone). Em
+   projeto novo, nada a fazer; em base de desenvolvimento, recrie o banco e rode `db:migrate` e
+   `db:seed`. Em base com dados, preencha o telefone antes (decisão do projeto derivado).
+2. `POST /api/auth/sign-up/email`, `/api/portal/auth-ext/sign-up` e `POST /api/customers` passam a
+   exigir `phone`; o seed já traz telefone em todas as contas e clientes.
 
 Node e dependências (sem migration nem variável nova). Para projetos derivados:
 

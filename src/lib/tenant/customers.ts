@@ -1,7 +1,7 @@
-import { and, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
-import { withTenant } from "@/db/rls";
+import { and, count, desc, eq, ilike, ne, or, type SQL } from "drizzle-orm";
+import { type Tx, withTenant } from "@/db/rls";
 import { customer } from "@/db/schema";
-import { isUniqueViolation } from "@/db/errors";
+import { isUniqueViolation, violatedConstraint } from "@/db/errors";
 import { escapeLike } from "@/lib/admin/tenants";
 import { auditInTransaction } from "@/lib/audit";
 import { getPortalAuth } from "@/lib/auth/portal";
@@ -18,10 +18,17 @@ import {
   type CustomersQuery,
   type UpdateCustomerInput,
 } from "@/lib/schemas/customer";
-import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import { phoneErrorMessage } from "@/lib/phone/br";
+import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Quem age e de onde, para a auditoria. */
-export type CustomerActor = { userId: string; ip?: string };
+export type CustomerActor = {
+  userId: string;
+  ip?: string;
+  /** Só quem lê clientes vê o nome do dono do telefone repetido (`PHONE_IN_USE`). */
+  canRead?: boolean;
+};
 
 type CustomerRow = typeof customer.$inferSelect;
 
@@ -32,8 +39,64 @@ const EMAIL_TAKEN = new TenantRuleError(
   "Já existe um cliente com este e-mail.",
 );
 
+const PHONE_INDEX = "customer_tenant_phone_key_idx";
+
+/** Colunas de telefone calculadas no servidor; número recusado vira 400 `INVALID_PHONE`. */
+function phoneOf(raw: string) {
+  try {
+    return phoneValues(raw);
+  } catch (error) {
+    if (error instanceof InvalidPhoneError) {
+      throw new TenantRuleError(400, "INVALID_PHONE", phoneErrorMessage(error.reason), {
+        reason: error.reason,
+      });
+    }
+    throw error;
+  }
+}
+
+/** O mesmo número (ou a variante sem o 9º dígito) em outro cliente do tenant: 409. */
+async function assertPhoneFree(
+  tx: Tx,
+  tenantId: string,
+  phoneKey: string,
+  actor: CustomerActor,
+  exceptId?: string,
+) {
+  const [other] = await tx
+    .select({ id: customer.id, name: customer.name })
+    .from(customer)
+    .where(
+      and(
+        eq(customer.tenantId, tenantId),
+        eq(customer.phoneKey, phoneKey),
+        exceptId ? ne(customer.id, exceptId) : undefined,
+      ),
+    );
+
+  if (other) {
+    throw phoneInUse({
+      customerId: other.id,
+      ...(actor.canRead ? { name: other.name } : {}),
+    });
+  }
+}
+
+/** O índice único é a rede de segurança da corrida: o 23505 vira o mesmo 409, sem detalhes. */
+function translateUnique(error: unknown): never {
+  if (isUniqueViolation(error)) {
+    throw violatedConstraint(error) === PHONE_INDEX ? phoneInUse() : EMAIL_TAKEN;
+  }
+  throw error;
+}
+
 /** `emailVerified` e os demais dados de `portal_user` são globais e não saem daqui. */
-function toCustomer({ portalUserId, tenantId: _tenantId, ...row }: CustomerRow) {
+function toCustomer({
+  portalUserId,
+  tenantId: _tenantId,
+  phoneKey: _phoneKey,
+  ...row
+}: CustomerRow) {
   return { ...row, hasPortalAccess: portalUserId !== null };
 }
 
@@ -51,6 +114,7 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
       or(
         ilike(customer.name, term),
         ilike(customer.email, term),
+        ilike(customer.phone, term),
         ilike(customer.document, term),
       ),
     );
@@ -92,12 +156,15 @@ export async function createCustomer(
   actor: CustomerActor,
 ) {
   await assertWithinLimit(tenantId, "customers");
+  const phone = phoneOf(input.phone);
 
   try {
     return await withTenant(tenantId, async (tx) => {
+      await assertPhoneFree(tx, tenantId, phone.phoneKey, actor);
+
       const [created] = await tx
         .insert(customer)
-        .values({ ...input, tenantId })
+        .values({ ...input, ...phone, tenantId })
         .returning();
       if (!created) throw new Error("cliente não criado");
 
@@ -112,8 +179,7 @@ export async function createCustomer(
       return toCustomer(created);
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw EMAIL_TAKEN;
-    throw error;
+    return translateUnique(error);
   }
 }
 
@@ -128,6 +194,7 @@ export async function updateCustomer(
   actor: CustomerActor,
 ) {
   let unlinkedUserId: string | null = null;
+  const phone = patch.phone === undefined ? null : phoneOf(patch.phone);
 
   try {
     const updated = await withTenant(tenantId, async (tx) => {
@@ -137,6 +204,14 @@ export async function updateCustomer(
         .where(byId(tenantId, customerId))
         .for("update");
       if (!current) throw notFound(NOT_FOUND);
+
+      // O `PATCH` pode omitir o telefone, mas o estado final não pode ficar sem ele.
+      if (!phone && !current.phoneKey) {
+        throw new TenantRuleError(400, "PHONE_REQUIRED", "Informe o telefone do cliente.");
+      }
+      if (phone && phone.phoneKey !== current.phoneKey) {
+        await assertPhoneFree(tx, tenantId, phone.phoneKey, actor, customerId);
+      }
 
       const emailChanged =
         patch.email !== undefined && patch.email !== current.email;
@@ -149,6 +224,7 @@ export async function updateCustomer(
         .update(customer)
         .set({
           ...patch,
+          ...(phone ?? {}),
           status,
           ...(emailChanged
             ? { portalUserId: null, invitedAt: null, lastLoginAt: null }
@@ -178,8 +254,7 @@ export async function updateCustomer(
 
     return updated;
   } catch (error) {
-    if (isUniqueViolation(error)) throw EMAIL_TAKEN;
-    throw error;
+    return translateUnique(error);
   }
 }
 
@@ -228,6 +303,18 @@ export async function inviteCustomer(
   );
 
   if (!current) throw notFound(NOT_FOUND);
+
+  // Só tem conta acessível quem tem e-mail: sem ele não há convite, magic link nem login.
+  if (!current.email) {
+    throw new TenantRuleError(
+      409,
+      "EMAIL_REQUIRED",
+      "Cadastre um e-mail para liberar o acesso do cliente.",
+    );
+  }
+  if (!current.phone) {
+    throw new TenantRuleError(409, "PHONE_REQUIRED", "Informe o telefone do cliente.");
+  }
   if (current.status === "blocked") {
     throw new TenantRuleError(
       409,
@@ -238,7 +325,7 @@ export async function inviteCustomer(
 
   const portalUserId =
     current.portalUserId ??
-    (await ensurePortalUser(current.email, current.name));
+    (await ensurePortalUser(current.email, current.name, current.phone));
 
   await withTenant(tenant.id, async (tx) => {
     await tx

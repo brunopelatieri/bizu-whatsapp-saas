@@ -8,6 +8,7 @@ import {
   portalUser,
 } from "@/db/schema";
 import type { TenantAccessMode, TenantStatus } from "@/db/schema/tenant";
+import { phoneValues } from "@/lib/phone/columns";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 
 /**
@@ -88,7 +89,8 @@ export type PortalCustomer = {
   accessMode: TenantAccessMode;
   status: CustomerStatus;
   name: string;
-  email: string;
+  /** `null` se o cadastro perdeu o e-mail: o acesso é cortado junto (`updateCustomer`). */
+  email: string | null;
   phone: string | null;
   document: string | null;
 };
@@ -185,11 +187,15 @@ export function leavePortalTenant(
     );
 }
 
-/** Identidade do e-mail, criada sem senha e sem verificação se ainda não existir. */
-export async function ensurePortalUser(email: string, name: string) {
+/**
+ * Identidade do e-mail, criada sem senha e sem verificação se ainda não existir. O telefone é
+ * o do cliente convidado e só entra na criação: quem já tem conta (mesmo e-mail em outro
+ * tenant) mantém o dele. Este `INSERT` direto não passa pelo hook do Better Auth.
+ */
+export async function ensurePortalUser(email: string, name: string, phone: string) {
   await getDb()
     .insert(portalUser)
-    .values({ email, name })
+    .values({ email, name, ...phoneValues(phone) })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [row] = await getDb()

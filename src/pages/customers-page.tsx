@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { formatPhoneForDisplay } from "@/lib/phone/br";
 import {
   Select,
   SelectContent,
@@ -135,9 +136,13 @@ export function CustomersPage() {
                             {customer.name}
                           </Link>
                         </TableCell>
-                        <TableCell className="break-all">{customer.email}</TableCell>
+                        <TableCell className="break-all">
+                          {customer.email ?? <span className="text-muted-foreground">—</span>}
+                        </TableCell>
                         <TableCell className="whitespace-nowrap">
-                          {customer.phone ?? (
+                          {customer.phoneNormalized ? (
+                            formatPhoneForDisplay(customer.phoneNormalized)
+                          ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </TableCell>

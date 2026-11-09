@@ -570,6 +570,7 @@ describe("usuários de equipe e suporte", () => {
         name: "Intruso",
         email: newAddress,
         password: "senha-do-intruso-1",
+        phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
       },

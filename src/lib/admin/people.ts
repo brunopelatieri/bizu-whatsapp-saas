@@ -22,6 +22,7 @@ import { appLink } from "@/lib/auth/links";
 import { getAuth } from "@/lib/auth/server";
 import { billingState } from "@/lib/billing/state";
 import { maskEmail } from "@/lib/email/address";
+import { phoneValues } from "@/lib/phone/columns";
 import { sendEmail } from "@/lib/email/send";
 import { emailChangedTemplate } from "@/lib/email/templates/email-changed";
 import { hasPortalPassword } from "@/lib/portal/profile";
@@ -107,6 +108,8 @@ export async function getUserDetail(userId: string) {
       id: user.id,
       name: user.name,
       email: user.email,
+      phone: user.phone,
+      phoneNormalized: user.phoneNormalized,
       platformRole: user.role,
       emailVerified: user.emailVerified,
       twoFactorEnabled: user.twoFactorEnabled,
@@ -162,7 +165,9 @@ export async function updateUserByAdmin(
 ) {
   const target = await assertManageableUser(targetId, actor.id);
   const emailChanged = input.email !== undefined && input.email !== target.email;
-  if (!emailChanged && input.name === undefined) throw nothingToChange();
+  if (!emailChanged && input.name === undefined && input.phone === undefined) {
+    throw nothingToChange();
+  }
 
   if (emailChanged && input.email) {
     const [other] = await getDb()
@@ -177,6 +182,7 @@ export async function updateUserByAdmin(
       .update(user)
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
         ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
       })
       .where(eq(user.id, target.id))
@@ -197,7 +203,12 @@ export async function updateUserByAdmin(
     await auditInTransaction(tx, "admin.user_updated", {
       actor: { type: "platform", id: actor.id },
       target: { type: "user", id: target.id },
-      metadata: { name: input.name !== undefined, email: emailChanged },
+      // Telefone é dado pessoal: a auditoria só diz que mudou, nunca o número.
+      metadata: {
+        name: input.name !== undefined,
+        email: emailChanged,
+        phone: input.phone !== undefined,
+      },
       ip: actor.ip,
     });
 
@@ -258,6 +269,8 @@ export async function loadPortalPerson(personId: string) {
       id: portalUser.id,
       name: portalUser.name,
       email: portalUser.email,
+      phone: portalUser.phone,
+      phoneNormalized: portalUser.phoneNormalized,
       emailVerified: portalUser.emailVerified,
       createdAt: portalUser.createdAt,
     })
@@ -329,7 +342,9 @@ export async function updatePortalUserByAdmin(
   const person = await loadPortalPerson(personId);
   const newEmail = input.email;
   const emailChanged = newEmail !== undefined && newEmail !== person.email;
-  if (!emailChanged && input.name === undefined) throw nothingToChange();
+  if (!emailChanged && input.name === undefined && input.phone === undefined) {
+    throw nothingToChange();
+  }
 
   const updated = await withPlatformScope("admin: e-mail do portal", async (tx) => {
     if (emailChanged) {
@@ -362,6 +377,7 @@ export async function updatePortalUserByAdmin(
       .update(portalUser)
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
         ...(emailChanged ? { email: newEmail } : {}),
       })
       .where(eq(portalUser.id, person.id))
@@ -390,7 +406,11 @@ export async function updatePortalUserByAdmin(
     await auditInTransaction(tx, "admin.portal_user_updated", {
       actor: { type: "platform", id: actor.id },
       target: { type: "portal_user", id: person.id },
-      metadata: { name: input.name !== undefined, email: emailChanged },
+      metadata: {
+        name: input.name !== undefined,
+        email: emailChanged,
+        phone: input.phone !== undefined,
+      },
       ip: actor.ip,
     });
 

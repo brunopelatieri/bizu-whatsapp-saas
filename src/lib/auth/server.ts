@@ -32,7 +32,7 @@ import {
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
 
-import { recordSignupConsent } from "@/lib/lgpd/consent";
+import { recordSignupConsent, signupPhoneValues } from "@/lib/lgpd/consent";
 import { preferredTenantId } from "@/lib/tenant/membership";
 
 /** Só o plugin grava `two_factor_enabled`, então a rota diz o que mudou. */
@@ -132,7 +132,11 @@ function createAuth() {
 
     user: {
       additionalFields: {
+        // O telefone só entra pelo contexto do cadastro (`signupPhoneValues`), nunca pelo
+        // corpo: `input: false` nas três colunas.
         phone: { type: "string", required: false, input: false },
+        phoneNormalized: { type: "string", required: false, input: false },
+        phoneKey: { type: "string", required: false, input: false },
         locale: { type: "string", required: false, input: false },
       },
       changeEmail: {
@@ -152,6 +156,9 @@ function createAuth() {
     databaseHooks: {
       user: {
         create: {
+          // Toda conta nasce com telefone (`CHECK` no banco). Sem o contexto do cadastro, a
+          // criação falha aqui, antes do `INSERT`.
+          before: async (user) => ({ data: { ...user, ...signupPhoneValues("user") } }),
           after: async (user, context) => {
             // Só grava se a rota de cadastro abriu o contexto de aceite (`withSignupConsent`).
             await recordSignupConsent({ type: "user", id: user.id }).catch((error) =>

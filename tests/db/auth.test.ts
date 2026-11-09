@@ -74,6 +74,7 @@ function signUp(email: string, options: RequestOptions = {}) {
       name: "Ana Teste",
       email,
       password: PASSWORD,
+      phone: "11987654321",
       acceptTerms: true,
       termsVersion: "2026-11",
     },
@@ -202,11 +203,13 @@ describe("autenticação", () => {
       const noTerms = await post("/api/auth/sign-up/email", {
         ...base,
         password: PASSWORD,
+        phone: "11987654321",
         acceptTerms: false,
       });
       const shortPassword = await post("/api/auth/sign-up/email", {
         ...base,
         password: "curta",
+        phone: "11987654321",
         acceptTerms: true,
       });
 
@@ -222,6 +225,7 @@ describe("autenticação", () => {
         name: "Ana",
         email,
         password: PASSWORD,
+        phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
         role: "platform_owner",
@@ -353,6 +357,7 @@ describe("autenticação", () => {
           name: "Sonda",
           email,
           password,
+          phone: "11987654321",
           acceptTerms: true,
           termsVersion: "2026-11",
         });
@@ -401,6 +406,7 @@ describe("autenticação", () => {
         name: "Atacante",
         email,
         password: ATTACKER_PASSWORD,
+        phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
       });
@@ -482,6 +488,7 @@ describe("autenticação", () => {
         name: "Invasor",
         email,
         password: "outra-senha-123",
+        phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
       });

@@ -15,6 +15,7 @@ import { DetailRow } from "@/components/detail-row";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatPhoneForDisplay } from "@/lib/phone/br";
 
 function PortalAccessCard({ customer }: { customer: Customer }) {
   const invite = useCustomerMutation("Acesso enviado por e-mail.");
@@ -38,7 +39,7 @@ function PortalAccessCard({ customer }: { customer: Customer }) {
         <div className="flex flex-wrap gap-2">
           <Can resource="customer" action="invite">
             <Button
-              disabled={blocked || invite.isPending}
+              disabled={blocked || invite.isPending || !customer.email}
               onClick={() => invite.mutate({ path: `${path}/invite`, method: "POST" })}
             >
               {customer.invitedAt
@@ -46,6 +47,11 @@ function PortalAccessCard({ customer }: { customer: Customer }) {
                 : "Enviar acesso ao portal"}
             </Button>
           </Can>
+          {customer.email ? null : (
+            <p className="basis-full text-xs text-muted-foreground">
+              Cadastre um e-mail para liberar o acesso do cliente.
+            </p>
+          )}
           <Can resource="customer" action="update">
             <Button
               variant="outline"
@@ -126,7 +132,10 @@ export function CustomerDetailPage() {
               <CardContent className="space-y-4">
                 <dl className="space-y-3 text-sm">
                   <DetailRow label="E-mail" value={customer.email} />
-                  <DetailRow label="Telefone" value={customer.phone} />
+                  <DetailRow
+                    label="Telefone"
+                    value={customer.phoneNormalized ? formatPhoneForDisplay(customer.phoneNormalized) : null}
+                  />
                   <DetailRow label="Documento" value={customer.document} />
                 </dl>
                 {customer.tags.length > 0 ? (

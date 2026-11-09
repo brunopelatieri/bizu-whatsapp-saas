@@ -26,8 +26,8 @@
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
   Evolution Go) e `caixa-de-entrada` (chat e fila); decisões do proprietário no fim do plano.
-  Nenhuma linha de código foi escrita. Primeira fase proposta: F0 e A1, com a medição B0 em
-  paralelo. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
+  **Fase A1 implementada** (telefone obrigatório e e-mail opcional do cliente; `tech/28-crm-cadastro.md`);
+  A2 a A4 aguardam a F0. Primeira fase proposta: F0 e A1, com a medição B0 em paralelo. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
   válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se
   validado; regra do Brasil só para DDI 55; máscara; único por tenant no cliente) e e-mail
   obrigatório para conta acessível. Projeto novo: sem cadastro anterior, sem backfill nem

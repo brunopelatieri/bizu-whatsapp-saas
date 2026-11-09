@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   pgTable,
   text,
@@ -10,6 +12,7 @@ import {
   type CustomerStatus,
   customerStatuses,
 } from "../../lib/tenant/customer-constants";
+import { phoneRequired } from "../phone-check";
 import { tenantPolicy } from "../tenant-policy";
 import { portalUser } from "./portal-auth";
 import { organization } from "./tenant";
@@ -33,8 +36,12 @@ export const customer = pgTable(
       onDelete: "set null",
     }),
     name: text("name").notNull(),
-    email: text("email").notNull(),
+    // Opcional: o cliente que chega pelo WhatsApp raramente tem e-mail. Sem e-mail não há
+    // convite, magic link nem conta acessível. Vários nulos convivem no índice único.
+    email: text("email"),
     phone: text("phone"),
+    phoneNormalized: text("phone_normalized"),
+    phoneKey: text("phone_key"),
     document: text("document"),
     status: text("status", { enum: customerStatuses })
       .notNull()
@@ -52,6 +59,11 @@ export const customer = pgTable(
   (table) => [
     uniqueIndex("customer_tenant_email_idx").on(table.tenantId, table.email),
     index("customer_portal_user_id_idx").on(table.portalUserId),
+    // Telefone único por tenant, também na variante com ou sem o 9º dígito (`phone_key`).
+    uniqueIndex("customer_tenant_phone_key_idx")
+      .on(table.tenantId, table.phoneKey)
+      .where(sql`${table.phoneKey} IS NOT NULL`),
+    check("customer_phone_required", phoneRequired),
     tenantPolicy(),
   ],
 ).enableRLS();

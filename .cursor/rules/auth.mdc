@@ -25,6 +25,7 @@ alwaysApply: false
 - Permissões são validadas no servidor; o cliente só esconde botões.
 - Sessões e usuários ficam no Postgres, via Drizzle.
 - Cadastro grava o aceite em `consent_log` pelo hook de criação do usuário (`withSignupConsent`); versão nova em `src/lib/legal/versions.ts` faz `/api/me` e `/api/portal/me` devolverem `consentRequired`. A sessão de suporte nunca aceita termos.
+- Telefone é obrigatório em toda conta: o hook `user.create.before` das duas instâncias grava `phone_normalized` e `phone_key` a partir do contexto do cadastro e recusa sem telefone válido (`tech/28-crm-cadastro.md`).
 - Token de confirmação da exclusão do portal é de uso único, só em hash, consumido por POST; nenhum link da LGPD consome token em GET.
 
 Para entender este domínio, leia: docs/context/tech/08-auth.md, docs/context/tech/25-portal-clientes.md e docs/context/tech/26-seguranca.md, docs/context/tech/27-lgpd-arquivos.md

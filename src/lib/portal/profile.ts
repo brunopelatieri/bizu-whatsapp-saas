@@ -1,5 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
+import { isUniqueViolation } from "@/db/errors";
 import { withTenant } from "@/db/rls";
 import { customer, portalAccount, portalSession, portalUser } from "@/db/schema";
 import { audit, auditInTransaction } from "@/lib/audit";
@@ -11,7 +12,8 @@ import type {
   PortalProfileInput,
   SetPasswordInput,
 } from "@/lib/schemas/portal";
-import { TenantRuleError } from "@/lib/tenant/errors";
+import { phoneValues } from "@/lib/phone/columns";
+import { phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Sessão aberta há menos que isto acabou de provar o e-mail ou a senha. */
 const FRESH_SESSION_MS = 10 * 60 * 1000;
@@ -40,22 +42,25 @@ export function updatePortalProfile(
   ip?: string,
 ) {
   const tenantId = current.tenant.id;
+  // Duas formas do mesmo número casam em `phone_key`; o índice único do tenant barra a repetida.
+  const values = { name: input.name, ...phoneValues(input.phone) };
 
   return withTenant(tenantId, async (tx) => {
     const [person] = await tx
       .update(portalUser)
-      .set(input)
+      .set(values)
       .where(eq(portalUser.id, portalUserId))
       .returning({
         id: portalUser.id,
         name: portalUser.name,
         email: portalUser.email,
         phone: portalUser.phone,
+        phoneNormalized: portalUser.phoneNormalized,
       });
 
     await tx
       .update(customer)
-      .set(input)
+      .set(values)
       .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)));
     await auditInTransaction(tx, "portal.profile_updated", {
       actor: { type: "portal_user", id: portalUserId },
@@ -65,6 +70,10 @@ export function updatePortalProfile(
     });
 
     return person;
+  }).catch((error: unknown) => {
+    // Outro cliente do tenant já tem o número: sem dizer quem (o autor é o próprio cliente).
+    if (isUniqueViolation(error)) throw phoneInUse();
+    throw error;
   });
 }
 

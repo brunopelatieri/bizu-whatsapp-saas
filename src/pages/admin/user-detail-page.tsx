@@ -31,6 +31,8 @@ type UserDetail = {
     id: string;
     name: string;
     email: string;
+    phone: string | null;
+    phoneNormalized: string | null;
     platformRole: string;
     emailVerified: boolean;
     twoFactorEnabled: boolean;
@@ -158,7 +160,7 @@ export function AdminUserDetailPage() {
 
             {manageable && !detail.deletion ? (
               <PersonEditCard
-                key={`${target.name}:${target.email}`}
+                key={`${target.name}:${target.email}:${target.phoneNormalized}`}
                 path={`/api/admin/users/${id}`}
                 person={target}
                 emailWarning="Trocar o e-mail desverifica a conta, encerra as sessões, avisa o endereço antigo e manda ao novo um link para definir a senha."

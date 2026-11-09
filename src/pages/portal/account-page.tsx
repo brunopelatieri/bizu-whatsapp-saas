@@ -18,6 +18,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { ApiError, apiFetch } from "@/lib/api/client";
 import { portalClient } from "@/lib/auth/portal-client";
 import {
@@ -33,7 +34,7 @@ function ProfileCard() {
   const { user, refresh } = usePortalAuth();
   const form = useForm<PortalProfileValues, unknown, PortalProfileInput>({
     resolver: zodResolver(portalProfileSchema),
-    defaultValues: { name: user?.name ?? "", phone: user?.phone ?? "" },
+    defaultValues: { name: user?.name ?? "", phone: toPhoneFieldValue(user?.phoneNormalized) },
     mode: "onChange",
   });
 
@@ -81,13 +82,13 @@ function ProfileCard() {
               name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Telefone</FormLabel>
+                  <FormLabel>Telefone / WhatsApp *</FormLabel>
                   <FormControl>
-                    <Input
-                      {...field}
-                      value={field.value ?? ""}
-                      type="tel"
-                      autoComplete="tel"
+                    <PhoneField
+                      value={field.value}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      name={field.name}
                     />
                   </FormControl>
                   <FormMessage />

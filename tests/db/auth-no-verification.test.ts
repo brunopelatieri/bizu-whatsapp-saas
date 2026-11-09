@@ -30,6 +30,7 @@ function signUp(email: string, password = PASSWORD) {
       name: "Pessoa Sem Link",
       email,
       password,
+      phone: "11987654321",
       acceptTerms: true,
       termsVersion: "2026-11",
     },

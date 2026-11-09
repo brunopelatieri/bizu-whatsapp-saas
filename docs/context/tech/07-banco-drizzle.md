@@ -22,7 +22,8 @@ Schema atual:
 
 ```text
 user                      Better Auth; role, banned e ban_* (plugin admin), two_factor_enabled,
-                          phone, locale, last_tenant_id
+                          phone, phone_normalized, phone_key (CHECK de telefone), locale,
+                          last_tenant_id
 two_factor                plugin twoFactor: secret e backup_codes cifrados, verified, lockout
 portal_two_factor         o mesmo no portal, sem rotas abertas
 impersonation_grant       consentimento do owner: expires_at, revoked_at, used_by (RLS)

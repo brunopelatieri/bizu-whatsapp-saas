@@ -14,6 +14,7 @@ import {
   saveSettings,
 } from "./billing-helpers";
 import { connectOwner, createUser, DOMAIN, cleanUp } from "./tenant-helpers";
+import { phoneRow } from "./phone-helpers";
 
 /** Retenção do `maintenance.prune`, com datas controladas, uma tabela por vez. */
 
@@ -45,8 +46,10 @@ beforeAll(async () => {
   setStorageForTests(createLocalProvider(storageDir));
 
   userId = (await createUser(owner)).id;
+  const ph = phoneRow();
   const [person] = await owner<{ id: string }[]>`
-    insert into portal_user (name, email, email_verified) values ('Prune', ${portalEmail}, true)
+    insert into portal_user (name, email, email_verified, phone, phone_normalized, phone_key)
+    values ('Prune', ${portalEmail}, true, ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
     returning id
   `;
   portalId = person?.id ?? "";

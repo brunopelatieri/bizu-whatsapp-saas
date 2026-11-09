@@ -28,7 +28,7 @@ import {
 } from "@/lib/auth/portal-emails";
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
-import { recordSignupConsent } from "@/lib/lgpd/consent";
+import { recordSignupConsent, signupPhoneValues } from "@/lib/lgpd/consent";
 import { portalAccessBarred } from "@/lib/lgpd/deletion";
 import { recordPortalLogin, soleTenantId } from "@/lib/portal/access";
 
@@ -105,6 +105,8 @@ function createPortalAuth() {
       modelName: "portal_user",
       additionalFields: {
         phone: { type: "string", required: false, input: false },
+        phoneNormalized: { type: "string", required: false, input: false },
+        phoneKey: { type: "string", required: false, input: false },
         locale: { type: "string", required: false, input: false },
       },
     },
@@ -130,6 +132,11 @@ function createPortalAuth() {
     databaseHooks: {
       user: {
         create: {
+          // Autocadastro do portal: o telefone vem do contexto (`requestPortalSignup`). O
+          // convite cria o `portal_user` por `INSERT` direto (`ensurePortalUser`) e não passa aqui.
+          before: async (user) => ({
+            data: { ...user, ...signupPhoneValues("portal_user") },
+          }),
           after: async (user) => {
             await recordSignupConsent({ type: "portal_user", id: user.id }).catch(
               (error) => logError("Falha ao registrar o consentimento", error),

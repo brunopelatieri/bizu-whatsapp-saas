@@ -180,6 +180,12 @@ update "user" set role = 'platform_owner' where email = 'voce@empresa.com';
 - `audit_log` recebe `auth.signed_up`, `auth.email_verified`, `auth.email_changed`,
   `auth.password_reset`, `auth.2fa_enabled`, `auth.2fa_disabled` e `auth.session_revoked`.
 - O log de requisições passa por `redactTokens` (`src/api/request-logger.ts`).
+- **Telefone obrigatório em toda conta** (`signupSchema.phone`). O `POST /api/auth/sign-up/email`
+  leva o telefone no contexto de `withSignupConsent`; `databaseHooks.user.create.before` (nas duas
+  instâncias) grava `phone`, `phone_normalized` e `phone_key` por `signupPhoneValues` e **recusa** a
+  criação sem telefone válido, então chamar o Better Auth direto falha fechado. Os `additionalFields`
+  de telefone têm `input: false`. Os `INSERT` diretos (convite do portal, seed) gravam o telefone
+  eles mesmos. O banco reforça com `CHECK` (`tech/28-crm-cadastro.md`).
 - Schema do Better Auth é escrito à mão a partir de `getAuthTables`. `@better-auth/cli`
   1.4 não acompanha a 1.7 e traz Prisma e `better-sqlite3` como dependências.
 

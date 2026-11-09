@@ -1,15 +1,12 @@
 import { z } from "zod";
+import { phoneSchema } from "@/lib/schemas/phone";
 import { customerStatuses } from "@/lib/tenant/customer-constants";
 
 /** Contratos de `/api/customers/*` e dos formulários de `/app/clientes`. */
 
 export const CUSTOMER_PAGE_SIZE = 20;
 
-export const phoneSchema = z
-  .string()
-  .trim()
-  .max(30, "Telefone muito longo.")
-  .regex(/^[\d\s()+.-]*$/, "Use só números e + ( ) - .");
+export { phoneSchema };
 
 /** Texto opcional: vazio vira `null`, ausente segue ausente (o PATCH não mexe). */
 export const optionalText = (schema: z.ZodType<string, string>) =>
@@ -18,16 +15,22 @@ export const optionalText = (schema: z.ZodType<string, string>) =>
     .optional()
     .transform((value) => (value === "" ? null : value));
 
-// Sem `.default()`: em `partial()` ele preencheria o que o PATCH não mandou.
-export const customerSchema = z.object({
-  name: z.string().trim().min(2, "Informe o nome.").max(120, "Nome muito longo."),
-  email: z
+/** E-mail opcional do cliente: vazio vira `null`. Sem e-mail não há conta nem acesso. */
+const optionalEmail = optionalText(
+  z
     .string()
     .trim()
     .toLowerCase()
     .max(254, "E-mail muito longo.")
-    .email("Informe um e-mail válido."),
-  phone: optionalText(phoneSchema),
+    .refine((value) => value === "" || z.email().safeParse(value).success, "Informe um e-mail válido."),
+);
+
+// Sem `.default()`: em `partial()` ele preencheria o que o PATCH não mandou. O telefone é
+// obrigatório (`phoneSchema`); o `PATCH partial()` pode omiti-lo, mas nunca apagá-lo.
+export const customerSchema = z.object({
+  name: z.string().trim().min(2, "Informe o nome.").max(120, "Nome muito longo."),
+  email: optionalEmail,
+  phone: phoneSchema,
   document: optionalText(z.string().trim().max(30, "Documento muito longo.")),
   status: z.enum(customerStatuses).optional(),
   tags: z

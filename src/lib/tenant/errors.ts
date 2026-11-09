@@ -24,3 +24,7 @@ export const ROLE_IN_USE = new TenantRuleError(
 
 export const notFound = (message: string) =>
   new TenantRuleError(404, "NOT_FOUND", message);
+
+/** Telefone já usado por outro cliente do tenant (inclui a variante com ou sem o 9º dígito). */
+export const phoneInUse = (details?: { customerId: string; name?: string }) =>
+  new TenantRuleError(409, "PHONE_IN_USE", "Já existe um cliente com este telefone.", details);

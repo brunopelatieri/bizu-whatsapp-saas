@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { config } from "dotenv";
 import { pathToFileURL } from "node:url";
 import { logError } from "@/api/log";
+import { phoneValues } from "@/lib/phone/columns";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 
 /**
@@ -62,14 +63,14 @@ export const SEED_PLANS = [
 ];
 
 export const SEED_USERS = {
-  platformOwner: { email: "owner@bizu.local", name: "Proprietário Bizu", role: "platform_owner" },
-  platformSupport: { email: "suporte@bizu.local", name: "Suporte Bizu", role: "platform_support" },
-  acmeOwner: { email: "acme.owner@bizu.local", name: "Ana Acme", role: "user" },
-  acmeAdmin: { email: "acme.admin@bizu.local", name: "Beto Admin", role: "user" },
-  acmeMember: { email: "acme.membro@bizu.local", name: "Carla Membro", role: "user" },
-  manualPaid: { email: "em-dia.owner@bizu.local", name: "Dora Em Dia", role: "user" },
-  manualLate: { email: "atrasado.owner@bizu.local", name: "Edu Atrasado", role: "user" },
-  manualExpired: { email: "vencido.owner@bizu.local", name: "Fábio Vencido", role: "user" },
+  platformOwner: { email: "owner@bizu.local", name: "Proprietário Bizu", phone: "11987650001", role: "platform_owner" },
+  platformSupport: { email: "suporte@bizu.local", name: "Suporte Bizu", phone: "11987650002", role: "platform_support" },
+  acmeOwner: { email: "acme.owner@bizu.local", name: "Ana Acme", phone: "11987650003", role: "user" },
+  acmeAdmin: { email: "acme.admin@bizu.local", name: "Beto Admin", phone: "11987650004", role: "user" },
+  acmeMember: { email: "acme.membro@bizu.local", name: "Carla Membro", phone: "11987650005", role: "user" },
+  manualPaid: { email: "em-dia.owner@bizu.local", name: "Dora Em Dia", phone: "11987650006", role: "user" },
+  manualLate: { email: "atrasado.owner@bizu.local", name: "Edu Atrasado", phone: "11987650007", role: "user" },
+  manualExpired: { email: "vencido.owner@bizu.local", name: "Fábio Vencido", phone: "11987650008", role: "user" },
 } as const;
 
 /** Tenants da cobrança manual: em dia, em atraso (na carência) e vencido (`read_only`). */
@@ -87,8 +88,8 @@ export const SEED_MANUAL_TENANTS: ReadonlyArray<{
 
 /** Clientes do portal. Júlia é ativa em dois tenants: prova a escolha em `/portal/escolher`. */
 export const SEED_CUSTOMERS = {
-  julia: { email: "julia@cliente.local", name: "Júlia Lima" },
-  lead: { email: "lead@cliente.local", name: "Lia Lead" },
+  julia: { email: "julia@cliente.local", name: "Júlia Lima", phone: "11987650101" },
+  lead: { email: "lead@cliente.local", name: "Lia Lead", phone: "11987650102" },
 } as const;
 
 /** O valor de `.env.example`: público, serve só para desenvolvimento. */
@@ -196,7 +197,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   // confirmado veio do cadastro público, com a senha de quem cadastrou: promovê-la daria o
   // papel a essa pessoa.
   const ids = new Map<string, string>();
-  for (const { email, name, role } of Object.values(SEED_USERS)) {
+  for (const { email, name, role, phone } of Object.values(SEED_USERS)) {
     const [found] = await db
       .select({ id: user.id, emailVerified: user.emailVerified })
       .from(user)
@@ -216,7 +217,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
     const [created] = await db
       .insert(user)
-      .values({ name, email, role, emailVerified: true })
+      .values({ name, email, role, emailVerified: true, ...phoneValues(phone) })
       .returning({ id: user.id });
     if (!created) throw new Error(`usuário ${email} não foi criado`);
 
@@ -404,7 +405,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
   await db
     .insert(portalUser)
-    .values({ ...julia, emailVerified: true })
+    .values({ ...julia, ...phoneValues(julia.phone), emailVerified: true })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [juliaUser] = await db
@@ -436,12 +437,13 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   for (const tenantId of [acme.id, beta.id]) {
     await seedCustomer(tenantId, {
       ...julia,
+      ...phoneValues(julia.phone),
       tenantId,
       portalUserId: juliaUser.id,
       status: "active",
     });
   }
-  await seedCustomer(acme.id, { ...lead, tenantId: acme.id });
+  await seedCustomer(acme.id, { ...lead, ...phoneValues(lead.phone), tenantId: acme.id });
 
   // Contas do seed já aceitaram os textos vigentes: sem isso, o primeiro login abriria o
   // modal de re-aceite. O cadastro real grava o aceite pelo hook de `src/lib/lgpd/consent.ts`.

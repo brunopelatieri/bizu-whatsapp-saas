@@ -61,6 +61,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-hook-form": "^7.91.0",
+    "react-phone-number-input": "^3.4.18",
     "react-router": "^8.5.1",
     "react-router-hono-server": "^4.1.7",
     "resend": "^6.37.0",

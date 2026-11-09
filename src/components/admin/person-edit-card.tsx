@@ -4,10 +4,11 @@ import { Field } from "@/components/admin/field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { updateUserSchema } from "@/lib/schemas/admin";
 
 /**
- * Nome e e-mail de uma pessoa (equipe ou portal). Só manda o que mudou; o mesmo schema da API
+ * Nome, e-mail e telefone de uma pessoa (equipe ou portal). O telefone é obrigatório e se troca, nunca se apaga. Só manda o que mudou; o mesmo schema da API
  * valida aqui. `emailWarning` diz o que a troca de e-mail faz com o acesso.
  */
 export function PersonEditCard({
@@ -16,11 +17,13 @@ export function PersonEditCard({
   emailWarning,
 }: {
   path: string;
-  person: { name: string; email: string };
+  person: { name: string; email: string; phoneNormalized: string | null };
   emailWarning: ReactNode;
 }) {
   const [name, setName] = useState(person.name);
   const [email, setEmail] = useState(person.email);
+  const initialPhone = toPhoneFieldValue(person.phoneNormalized);
+  const [phone, setPhone] = useState(initialPhone);
   const [error, setError] = useState<string | null>(null);
   const save = useAdminMutation("Dados salvos.");
   const emailChanged = email.trim().toLowerCase() !== person.email;
@@ -29,6 +32,7 @@ export function PersonEditCard({
     const parsed = updateUserSchema.safeParse({
       ...(name.trim() !== person.name ? { name } : {}),
       ...(emailChanged ? { email } : {}),
+      ...(phone !== initialPhone ? { phone } : {}),
     });
 
     if (!parsed.success) {
@@ -73,6 +77,9 @@ export function PersonEditCard({
                 onChange={(event) => setEmail(event.target.value)}
               />
             )}
+          </Field>
+          <Field label="Telefone / WhatsApp">
+            {(id) => <PhoneField id={id} value={phone} onChange={setPhone} />}
           </Field>
           {emailChanged ? (
             <p className="text-xs text-amber-700 dark:text-amber-400 sm:col-span-2">

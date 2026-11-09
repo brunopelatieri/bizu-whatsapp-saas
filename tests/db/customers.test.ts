@@ -17,6 +17,7 @@ import {
   lastLink,
   verify,
 } from "./portal-helpers";
+import { uniquePhone } from "./phone-helpers";
 import {
   call,
   cleanUp,
@@ -99,16 +100,25 @@ describe("clientes", () => {
         cookie: tenantOwner.cookie,
         body: { phone: "", notes: null, tags: [] },
       });
-      expect(patched.status).toBe(200);
-      expect(await patched.json()).toMatchObject({
+      // O telefone se troca, mas nunca se apaga.
+      expect(patched.status).toBe(400);
+
+      const kept = await call("PATCH", `/api/customers/${customer.id}`, {
+        cookie: tenantOwner.cookie,
+        body: { notes: null, tags: [] },
+      });
+      expect(kept.status).toBe(200);
+      expect(await kept.json()).toMatchObject({
         customer: {
           name: "Júlia Lima",
           document: "123.456.789-09",
-          phone: null,
+          phone: "(11) 99999-0000",
+          phoneNormalized: "5511999990000",
           notes: null,
           tags: [],
         },
       });
+      expect(customer).not.toHaveProperty("phoneKey");
 
       const removed = await call("DELETE", `/api/customers/${customer.id}`, {
         cookie: tenantOwner.cookie,
@@ -141,7 +151,7 @@ describe("clientes", () => {
 
       const repeated = await call("POST", "/api/customers", {
         cookie: tenantOwner.cookie,
-        body: { name: "Outro", email },
+        body: { name: "Outro", email, phone: uniquePhone() },
       });
       expect(repeated.status).toBe(409);
       expect(await bodyOf(repeated)).toMatchObject({
@@ -185,10 +195,165 @@ describe("clientes", () => {
     it("entrada inválida responde 400", async () => {
       const response = await call("POST", "/api/customers", {
         cookie: tenantOwner.cookie,
-        body: { name: "A", email: "nao-e-email" },
+        body: { name: "A", email: "nao-e-email", phone: uniquePhone() },
       });
 
       expect(response.status).toBe(400);
+    });
+
+    it("telefone é obrigatório, com ou sem e-mail", async () => {
+      for (const body of [
+        { name: "Sem telefone", email: customerEmail() },
+        { name: "Sem os dois" },
+        { name: "Telefone vazio", phone: "" },
+      ]) {
+        const response = await call("POST", "/api/customers", {
+          cookie: tenantOwner.cookie,
+          body,
+        });
+        expect(response.status).toBe(400);
+      }
+    });
+
+    it("telefone inválido responde 400 com a mensagem do motivo", async () => {
+      const response = await call("POST", "/api/customers", {
+        cookie: tenantOwner.cookie,
+        body: { name: "Invalido", phone: "(10) 98765-4321" },
+      });
+      expect(response.status).toBe(400);
+      expect(JSON.stringify(await response.json())).toContain("DDD inexistente.");
+    });
+
+    it("cliente sem e-mail e com telefone é aceito", async () => {
+      const phone = uniquePhone();
+      const response = await call("POST", "/api/customers", {
+        cookie: tenantOwner.cookie,
+        body: { name: "Chegou pelo WhatsApp", phone },
+      });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toMatchObject({
+        customer: { email: null, hasPortalAccess: false, phoneNormalized: `55${phone}` },
+      });
+    });
+
+    it("dois clientes sem e-mail convivem (o índice único aceita vários nulos)", async () => {
+      for (const name of ["Sem e-mail 1", "Sem e-mail 2"]) {
+        const response = await call("POST", "/api/customers", {
+          cookie: tenantOwner.cookie,
+          body: { name, phone: uniquePhone() },
+        });
+        expect(response.status).toBe(201);
+      }
+    });
+
+    it("telefone repetido no tenant é 409 PHONE_IN_USE, inclusive escrito de outra forma e com ou sem o 9", async () => {
+      const original = await call("POST", "/api/customers", {
+        cookie: tenantOwner.cookie,
+        body: { name: "Dona do número", phone: "(11) 97654-3210" },
+      });
+      expect(original.status).toBe(201);
+      const { customer: first } = (await original.json()) as { customer: { id: string } };
+
+      for (const phone of ["11976543210", "+55 11 97654-3210", "011 97654-3210", "11 7654-3210"]) {
+        const dup = await call("POST", "/api/customers", {
+          cookie: tenantOwner.cookie,
+          body: { name: "Repetida", phone },
+        });
+        // `11 7654-3210` é fixo na forma, mas a chave coincide com a do celular sem o 9.
+        expect(dup.status).toBe(409);
+        expect(await bodyOf(dup)).toMatchObject({
+          code: "PHONE_IN_USE",
+          customerId: first.id,
+          name: "Dona do número",
+        });
+      }
+
+      // Em outro tenant, o mesmo número é livre.
+      const other = await call("POST", "/api/customers", {
+        cookie: otherOwner.cookie,
+        body: { name: "Outro tenant", phone: "(11) 97654-3210" },
+      });
+      expect(other.status).toBe(201);
+    });
+
+    it("o próprio cliente salva sem conflito; trocar para o número de outro é 409", async () => {
+      const a = await createCustomer(tenantOwner, { phone: "(11) 96543-2100" });
+      const b = await createCustomer(tenantOwner);
+
+      const same = await call("PATCH", `/api/customers/${a.id}`, {
+        cookie: tenantOwner.cookie,
+        body: { name: "Mesmo número", phone: "(11) 96543-2100" },
+      });
+      expect(same.status).toBe(200);
+
+      const clash = await call("PATCH", `/api/customers/${b.id}`, {
+        cookie: tenantOwner.cookie,
+        body: { phone: "11965432100" },
+      });
+      expect(clash.status).toBe(409);
+      expect(await bodyOf(clash)).toMatchObject({ code: "PHONE_IN_USE" });
+    });
+
+    it("dois POST simultâneos com o mesmo número: um vence, o outro é 409", async () => {
+      const phone = uniquePhone();
+      const results = await Promise.all([
+        call("POST", "/api/customers", { cookie: tenantOwner.cookie, body: { name: "Corrida 1", phone } }),
+        call("POST", "/api/customers", { cookie: tenantOwner.cookie, body: { name: "Corrida 2", phone } }),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    });
+
+    it("corrida com uma variante em cada forma do 9º dígito também termina em 409", async () => {
+      const results = await Promise.all([
+        call("POST", "/api/customers", {
+          cookie: tenantOwner.cookie,
+          body: { name: "Com 9", phone: "11 99876-1234" },
+        }),
+        call("POST", "/api/customers", {
+          cookie: tenantOwner.cookie,
+          body: { name: "Sem 9", phone: "11 9876-1234" },
+        }),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    });
+
+    it("INSERT direto sem telefone é barrado pelo CHECK", async () => {
+      const error = await owner.begin(async (tx) => {
+        await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        await tx`
+          insert into customer (tenant_id, name, email)
+          values (${tenant.id}, 'Sem telefone', ${customerEmail()})
+        `;
+      }).catch((caught: unknown) => caught);
+      expect((error as { code?: string }).code).toBe("23514");
+
+      const noEmail = await owner.begin(async (tx) => {
+        await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        await tx`insert into customer (tenant_id, name) values (${tenant.id}, 'Sem nada')`;
+      }).catch((caught: unknown) => caught);
+      expect((noEmail as { code?: string }).code).toBe("23514");
+    });
+
+    it("INSERT direto de user e portal_user sem telefone também é barrado", async () => {
+      const user = await owner`
+        insert into "user" (name, email) values ('Sem fone', ${customerEmail()})
+      `.catch((caught: unknown) => caught);
+      expect((user as { code?: string }).code).toBe("23514");
+
+      const portal = await owner`
+        insert into portal_user (name, email) values ('Sem fone', ${customerEmail()})
+      `.catch((caught: unknown) => caught);
+      expect((portal as { code?: string }).code).toBe("23514");
+    });
+
+    it("a linha anonimizada (deleted+...@invalid) passa no CHECK sem telefone", async () => {
+      const id = randomUUID();
+      const rows = await owner`
+        insert into portal_user (id, name, email) values (${id}, 'Removido', ${`deleted+${id}@invalid`})
+        returning id
+      `;
+      expect(rows).toHaveLength(1);
+      await owner`delete from portal_user where id = ${id}`;
     });
   });
 
@@ -248,7 +413,7 @@ describe("clientes", () => {
 
       const over = await call("POST", "/api/customers", {
         cookie: user.cookie,
-        body: { name: "Terceiro", email: customerEmail() },
+        body: { name: "Terceiro", email: customerEmail(), phone: uniquePhone() },
       });
       expect(over.status).toBe(403);
       expect(await bodyOf(over)).toMatchObject({ code: "PLAN_LIMIT_REACHED" });
@@ -314,6 +479,36 @@ describe("clientes", () => {
       expect(message?.html).toContain(
         "http://localhost:5173/portal/entrar?token=",
       );
+    });
+
+    it("cliente sem e-mail não recebe convite: 409 EMAIL_REQUIRED", async () => {
+      const created = await call("POST", "/api/customers", {
+        cookie: tenantOwner.cookie,
+        body: { name: "Sem e-mail", phone: uniquePhone() },
+      });
+      const { customer } = (await created.json()) as { customer: { id: string } };
+
+      const response = await invite(customer.id);
+
+      expect(response.status).toBe(409);
+      expect(await bodyOf(response)).toMatchObject({ code: "EMAIL_REQUIRED" });
+      expect(mail.sent).toHaveLength(0);
+    });
+
+    it("o portal_user criado pelo convite leva o telefone do cliente", async () => {
+      const phone = "(11) 98123-4567";
+      const { id, email } = await createCustomer(tenantOwner, { phone });
+
+      expect((await invite(id)).status).toBe(200);
+
+      const [person] = await owner<{ phone: string; phone_normalized: string; phone_key: string }[]>`
+        select phone, phone_normalized, phone_key from portal_user where email = ${email}
+      `;
+      expect(person).toEqual({
+        phone,
+        phone_normalized: "5511981234567",
+        phone_key: "551181234567",
+      });
     });
 
     it("cliente bloqueado não recebe convite", async () => {

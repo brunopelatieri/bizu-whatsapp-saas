@@ -66,7 +66,7 @@ customerRoutes.post(
     const customer = await createCustomer(
       c.get("tenant").id,
       c.req.valid("json"),
-      teamActor(c),
+      { ...teamActor(c), canRead: c.get("permissions").includes("customer:read") },
     );
 
     return c.json({ customer }, 201);
@@ -93,7 +93,7 @@ customerRoutes.patch(
       c.get("tenant").id,
       c.req.valid("param").id,
       c.req.valid("json"),
-      teamActor(c),
+      { ...teamActor(c), canRead: c.get("permissions").includes("customer:read") },
     );
 
     return c.json({ customer });

@@ -13,6 +13,7 @@ export type PortalUserContext = {
   name: string;
   emailVerified: boolean;
   phone: string | null;
+  phoneNormalized: string | null;
 };
 
 export type PortalSessionContext = {
@@ -63,6 +64,7 @@ const resolvePortalSession: ResolvePortalSession = async (headers) => {
       name: user.name,
       emailVerified: user.emailVerified,
       phone: user.phone ?? null,
+      phoneNormalized: user.phoneNormalized ?? null,
     },
     session: {
       id: session.id,

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
 import { DetailRow } from "@/components/detail-row";
+import { displayPhone } from "@/lib/phone/br";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api/client";
 import { usePortalAuth } from "@/providers/portal-auth-provider";
@@ -42,7 +43,7 @@ export function PortalHomePage() {
               <dl className="space-y-3 text-sm">
                 <DetailRow label="Nome" value={data.customer.name} />
                 <DetailRow label="E-mail" value={data.customer.email} />
-                <DetailRow label="Telefone" value={data.customer.phone} />
+                <DetailRow label="Telefone" value={displayPhone(data.customer.phone)} />
                 <DetailRow label="Documento" value={data.customer.document} />
               </dl>
             </CardContent>

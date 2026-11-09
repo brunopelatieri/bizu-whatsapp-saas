@@ -4,6 +4,7 @@ import { expect } from "vitest";
 import { waitForBackgroundTasks } from "@/lib/auth/background";
 import type { MemoryEmailProvider } from "@/lib/email/providers/memory";
 import { call, DOMAIN, type TestUser } from "./tenant-helpers";
+import { uniquePhone } from "./phone-helpers";
 
 /** Cenários do portal pela API, com Postgres real e e-mail em memória. */
 
@@ -20,12 +21,12 @@ export function sessionCookies(response: Response) {
 
 export async function createCustomer(
   user: TestUser,
-  values: { email?: string; name?: string; status?: string } = {},
+  values: { email?: string; name?: string; status?: string; phone?: string } = {},
 ) {
   const email = values.email ?? customerEmail();
   const response = await call("POST", "/api/customers", {
     cookie: user.cookie,
-    body: { name: "Cliente Teste", ...values, email },
+    body: { name: "Cliente Teste", phone: uniquePhone(), ...values, email },
   });
   expect(response.status).toBe(201);
 

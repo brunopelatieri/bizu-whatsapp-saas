@@ -259,7 +259,7 @@ portalRoutes.post(
 );
 
 portalRoutes.get("/api/portal/me", authRateLimit, requirePortalAuth, async (c) => {
-  const { id, name, email, phone } = c.get("portalUser");
+  const { id, name, email, phone, phoneNormalized } = c.get("portalUser");
   const session = c.get("portalSession");
   const tenants = await listPortalTenants(id);
   const available = tenants.filter((tenant) => tenant.available);
@@ -275,7 +275,7 @@ portalRoutes.get("/api/portal/me", authRateLimit, requirePortalAuth, async (c) =
 
   return c.json({
     consentRequired: await pendingConsents({ type: "portal_user", id }),
-    user: { id, name, email, phone, hasPassword: await hasPortalPassword(id) },
+    user: { id, name, email, phone, phoneNormalized, hasPassword: await hasPortalPassword(id) },
     tenants: tenants.map(({ id, slug, name, status, available }) => ({
       id,
       slug,

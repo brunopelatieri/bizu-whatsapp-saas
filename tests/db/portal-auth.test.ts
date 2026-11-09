@@ -22,6 +22,7 @@ import {
   createUser,
   type TestUser,
 } from "./tenant-helpers";
+import { phoneRow } from "./phone-helpers";
 
 /**
  * Login do cliente pela API, com Postgres real e e-mail em memória: magic link de uso
@@ -243,9 +244,11 @@ describe("portal: autenticação", () => {
       const email = customerEmail();
       await owner.begin(async (tx) => {
         await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        const ph = phoneRow();
         await tx`
-          insert into customer (tenant_id, name, email, status)
-          values (${other.id}, 'Cliente', ${email}, 'active')
+          insert into customer (tenant_id, name, email, status, phone, phone_normalized, phone_key)
+          values (${other.id}, 'Cliente', ${email}, 'active',
+                  ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
         `;
       });
       await owner`update organization set status = 'suspended' where id = ${other.id}`;
@@ -413,6 +416,7 @@ describe("portal: autenticação", () => {
           email,
           password: PASSWORD,
           org,
+          phone: "11987654321",
           acceptTerms: true,
           termsVersion: "2026-11",
         },
@@ -486,6 +490,42 @@ describe("portal: autenticação", () => {
         tenants: [{ id: tenant.id, status: "lead", available: false }],
       });
       expect((await call("GET", "/api/portal/customer", { cookie })).status).toBe(403);
+
+      await allowSelfSignup(false);
+    });
+
+    it("telefone de outro cliente do tenant: a confirmação responde igual e não cria linha", async () => {
+      await allowSelfSignup(true);
+      const holder = await createCustomer(tenantOwner, { phone: "(11) 95555-1234" });
+      const email = customerEmail();
+
+      const response = await call("POST", "/api/portal/auth-ext/sign-up", {
+        body: {
+          name: "Pessoa Colisao",
+          email,
+          password: PASSWORD,
+          org: tenant.slug,
+          // O mesmo número, escrito com o 9º dígito e sem ele, é a mesma chave.
+          phone: "11 5555-1234",
+          acceptTerms: true,
+          termsVersion: "2026-11",
+        },
+      });
+      expect(response.status).toBe(200);
+      await waitForBackgroundTasks();
+
+      const confirmed = await call("POST", "/api/portal/auth/verify-email", {
+        body: { token: confirmToken(email), org: tenant.slug },
+      });
+      // Mesmo status e corpo de um telefone livre: nada de 500 que revele o número.
+      expect(confirmed.status).toBe(200);
+
+      const rows = await owner.begin(async (tx) => {
+        await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        return tx`select id from customer where tenant_id = ${tenant.id} and email = ${email}`;
+      });
+      expect(rows).toHaveLength(0);
+      expect(holder.id).toBeTruthy();
 
       await allowSelfSignup(false);
     });

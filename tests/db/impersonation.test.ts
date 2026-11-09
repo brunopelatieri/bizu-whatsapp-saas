@@ -214,7 +214,7 @@ describe("personificação", () => {
 
       const response = await call("POST", "/api/customers", {
         cookie,
-        body: { name: "Criado pelo suporte", email: newEmail() },
+        body: { name: "Criado pelo suporte", email: newEmail(), phone: "11987654321" },
       });
       expect(response.status).toBe(201);
 

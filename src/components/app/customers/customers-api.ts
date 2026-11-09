@@ -7,8 +7,10 @@ import { useAuth } from "@/providers/auth-provider";
 export type Customer = {
   id: string;
   name: string;
-  email: string;
+  /** Opcional: sem e-mail o cliente existe, mas não tem conta acessível. */
+  email: string | null;
   phone: string | null;
+  phoneNormalized: string | null;
   document: string | null;
   status: CustomerStatus;
   tags: string[];

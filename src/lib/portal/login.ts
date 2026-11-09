@@ -1,5 +1,6 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { isUniqueViolation } from "@/db/errors";
 import { withTenant } from "@/db/rls";
 import {
   customer,
@@ -75,6 +76,7 @@ export async function requestPortalLogin(email: string, org: string) {
       .select({
         id: customer.id,
         name: customer.name,
+        phone: customer.phone,
         status: customer.status,
         portalUserId: customer.portalUserId,
       })
@@ -86,7 +88,8 @@ export async function requestPortalLogin(email: string, org: string) {
 
   // Ativado por `status`, sem convite: ainda não tem identidade no portal.
   if (!current.portalUserId) {
-    const portalUserId = await ensurePortalUser(email, current.name);
+    if (!current.phone) return;
+    const portalUserId = await ensurePortalUser(email, current.name, current.phone);
 
     await withTenant(tenant.id, (tx) =>
       tx
@@ -129,7 +132,7 @@ async function purgeExpiredPortalSignup(email: string) {
 
 /** Autocadastro, só se o tenant permitir. O `customer` nasce depois da confirmação. */
 export async function requestPortalSignup(
-  { name, email, password, org, termsVersion, marketing }: PortalSignupInput,
+  { name, email, password, phone, org, termsVersion, marketing }: PortalSignupInput,
   meta: ConsentMeta = {},
 ) {
   const tenant = await findOpenTenant(org);
@@ -137,7 +140,7 @@ export async function requestPortalSignup(
 
   await purgeExpiredPortalSignup(email);
   await withSignupConsent(
-    { subjectType: "portal_user", termsVersion, marketing, ...meta },
+    { subjectType: "portal_user", termsVersion, marketing, phone, ...meta },
     () =>
       getPortalAuth().api.signUpEmail({
         headers: new Headers(),
@@ -178,6 +181,10 @@ export async function confirmPortalSignup(email: string, org: string) {
         portalUserId: person.id,
         name: person.name,
         email: person.email,
+        // O telefone do autocadastro, o mesmo da conta (`CHECK`: toda pessoa tem telefone).
+        phone: person.phone,
+        phoneNormalized: person.phoneNormalized,
+        phoneKey: person.phoneKey,
       })
       .onConflictDoUpdate({
         target: [customer.tenantId, customer.email],
@@ -193,5 +200,11 @@ export async function confirmPortalSignup(email: string, org: string) {
       tenantId: tenant.id,
       target: { type: "customer", id: row.id },
     });
+  }).catch((error: unknown) => {
+    // O telefone do autocadastro é de outro cliente do tenant (índice único por `phone_key`).
+    // Quem se cadastrou escolhe o número: responder diferente (500) viraria um oráculo de quem é
+    // cliente do tenant. Sem linha de cliente, a resposta é a mesma de sempre; a equipe cadastra.
+    if (isUniqueViolation(error)) return;
+    throw error;
   });
 }

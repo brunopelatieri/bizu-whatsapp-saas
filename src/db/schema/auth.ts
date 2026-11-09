@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   char,
+  check,
   index,
   integer,
   pgTable,
@@ -10,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { phoneRequired } from "../phone-check";
 import { organization } from "./tenant";
 
 /**
@@ -42,14 +44,22 @@ export const user = pgTable("user", {
   banExpires: timestamptz("ban_expires"),
   // Só o plugin `twoFactor` escreve: vira `true` depois do primeiro código válido.
   twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+  // O que a pessoa digitou. `phone_normalized` (canônico) e `phone_key` (comparação, sem o 9º
+  // dígito) são calculados no servidor por `phoneColumns`; o `CHECK` exige os dois.
   phone: text("phone"),
+  phoneNormalized: text("phone_normalized"),
+  phoneKey: text("phone_key"),
   locale: text("locale"),
   // Sessão nova abre neste tenant, se a pessoa ainda for membro. Não passa pelo Better Auth.
   lastTenantId: uuid("last_tenant_id").references(() => organization.id, {
     onDelete: "set null",
   }),
   ...timestamps,
-});
+}, (table) => [
+  // Não único: dois membros podem dividir o número da empresa.
+  index("user_phone_key_idx").on(table.phoneKey),
+  check("user_phone_required", phoneRequired),
+]);
 
 export const session = pgTable(
   "session",

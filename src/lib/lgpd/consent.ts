@@ -1,9 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { and, desc, eq } from "drizzle-orm";
+import { APIError } from "better-auth/api";
 import { getDb } from "@/db";
 import { consentLog } from "@/db/schema";
 import type { ConsentKind, ConsentSubjectType } from "@/db/schema/lgpd";
 import { hashIp } from "@/lib/audit";
+import { phoneErrorMessage } from "@/lib/phone/br";
+import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
 import {
   LEGAL_VERSIONS,
   REQUIRED_CONSENTS,
@@ -112,6 +115,12 @@ export type SignupConsent = ConsentMeta & {
   subjectType: ConsentSubjectType;
   termsVersion: string;
   marketing?: boolean;
+  /**
+   * Telefone digitado no cadastro, já validado pelo `signupSchema`. Viaja no mesmo contexto e
+   * é gravado pelo hook `user.create.before` (`signupPhoneValues`); nunca vem do corpo do
+   * Better Auth (`additionalFields.phone` tem `input: false`).
+   */
+  phone?: string;
 };
 
 const signupContext = new AsyncLocalStorage<SignupConsent>();
@@ -143,4 +152,25 @@ export async function recordSignupConsent(
   }
 
   await recordConsent(subject, entries, { ip, userAgent });
+}
+
+/**
+ * As colunas de telefone da conta que está nascendo, lidas do contexto do cadastro. Sem
+ * contexto ou sem telefone válido, lança: chamar o Better Auth direto, fora da rota de
+ * cadastro, falha fechada em vez de criar conta sem telefone.
+ */
+export function signupPhoneValues(subjectType: ConsentSubjectType) {
+  const context = signupContext.getStore();
+  if (!context || context.subjectType !== subjectType || !context.phone) {
+    throw new APIError("BAD_REQUEST", { message: "Informe o telefone." });
+  }
+
+  try {
+    return phoneValues(context.phone);
+  } catch (error) {
+    if (error instanceof InvalidPhoneError) {
+      throw new APIError("BAD_REQUEST", { message: phoneErrorMessage(error.reason) });
+    }
+    throw error;
+  }
 }

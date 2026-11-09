@@ -23,6 +23,10 @@ Detalhes:
   - `@/hooks`
 - Icon library: `lucide`.
 
+Componente de formulário próprio: `phone-field.tsx` (`PhoneField`), campo de telefone com seletor
+de país e máscara (`react-phone-number-input/min`), usado em todo formulário de pessoa; o valor que
+sobe é o E.164 com `+` e quem valida é `phoneSchema` (`tech/28-crm-cadastro.md`).
+
 Componentes UI presentes:
 
 - `avatar`

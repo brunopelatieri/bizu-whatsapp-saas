@@ -25,6 +25,7 @@ import {
   type SavedSettings,
 } from "./billing-helpers";
 import { cleanUpPortal, customerEmail } from "./portal-helpers";
+import { phoneRow } from "./phone-helpers";
 
 /**
  * `/api/admin/*`: recusa quem não é da plataforma, separa leitura (suporte) de escrita
@@ -525,14 +526,18 @@ describe("usuários", () => {
 
   it("lista clientes do portal à parte, sem misturar com a equipe", async () => {
     const email = customerEmail();
+    const ph = phoneRow();
     const [person] = await owner<{ id: string }[]>`
-      insert into portal_user (name, email) values ('Cliente', ${email}) returning id
+      insert into portal_user (name, email, phone, phone_normalized, phone_key)
+      values ('Cliente', ${email}, ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey}) returning id
     `;
     await owner.begin(async (tx) => {
       await tx`select set_config('app.bypass_tenant', 'on', true)`;
       await tx`
-        insert into customer (tenant_id, portal_user_id, name, email)
-        values (${tenantId}, ${person?.id ?? ""}, 'Cliente', ${email})
+        insert into customer (tenant_id, portal_user_id, name, email,
+                              phone, phone_normalized, phone_key)
+        values (${tenantId}, ${person?.id ?? ""}, 'Cliente', ${email},
+                ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
       `;
     });
 
@@ -557,9 +562,11 @@ describe("usuários", () => {
 
   it("revoga as sessões do portal; suporte não revoga", async () => {
     const email = customerEmail();
+    const ph = phoneRow();
     const [person] = await owner<{ id: string }[]>`
-      insert into portal_user (name, email, email_verified)
-      values ('Cliente', ${email}, true) returning id
+      insert into portal_user (name, email, email_verified, phone, phone_normalized, phone_key)
+      values ('Cliente', ${email}, true, ${ph.phone}, ${ph.phoneNormalized}, ${ph.phoneKey})
+      returning id
     `;
     const id = person?.id ?? "";
     await owner`

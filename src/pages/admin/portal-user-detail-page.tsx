@@ -26,6 +26,8 @@ type PortalUserDetail = {
     id: string;
     name: string;
     email: string;
+    phone: string | null;
+    phoneNormalized: string | null;
     emailVerified: boolean;
     hasPassword: boolean;
     sessions: number;
@@ -123,7 +125,7 @@ export function AdminPortalUserDetailPage() {
 
             {owner && !detail.deletion ? (
               <PersonEditCard
-                key={`${person.name}:${person.email}`}
+                key={`${person.name}:${person.email}:${person.phoneNormalized}`}
                 path={`/api/admin/portal-users/${id}`}
                 person={person}
                 emailWarning="O e-mail muda em todas as organizações. A senha e as sessões saem: o endereço novo entra por magic link, que prova a posse. O endereço antigo é avisado."
