@@ -8,6 +8,12 @@
 export const channelTypes = ["whatsapp_cloud", "whatsapp_qr"] as const;
 export type ChannelType = (typeof channelTypes)[number];
 
+/** Métrica de `plan.limits` de cada tipo de canal (`src/lib/billing/constants.ts`). */
+export const CHANNEL_LIMIT_METRICS = {
+  whatsapp_cloud: "channels_whatsapp_cloud",
+  whatsapp_qr: "channels_whatsapp_qr",
+} as const satisfies Record<ChannelType, string>;
+
 export const channelStatuses = [
   "disconnected",
   "connecting",

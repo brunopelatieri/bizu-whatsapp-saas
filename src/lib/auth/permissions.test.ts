@@ -39,6 +39,9 @@ const specMatrix: Record<string, [owner: boolean, admin: boolean, member: boolea
   "file:upload": [true, true, true],
   "file:delete": [true, true, false],
   "support:grant": [true, false, false],
+  // docs/specs/whatsapp-canais/spec.md, "Permissões".
+  "channel:read": [true, true, true],
+  "channel:manage": [true, true, false],
 };
 
 describe("catálogo de permissões", () => {

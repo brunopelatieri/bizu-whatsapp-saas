@@ -2,6 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { plan, planPrice } from "@/db/schema";
 import { MANUAL_PROVIDER, type PriceInterval } from "@/lib/billing/constants";
+import { isProviderEnabled } from "@/lib/channels/registry";
+import { CHANNEL_LIMIT_METRICS, channelTypes } from "@/lib/channels/types";
 import { getProviders, isPriceUsable } from "@/lib/payments/registry";
 
 /** O que `/precos` mostra de um plano. Nada de ids de provedor nem de uso interno. */
@@ -35,6 +37,12 @@ export async function listPublicPlans(): Promise<PublicPlan[]> {
     .where(eq(planPrice.active, true));
 
   const manualOnly = getProviders().length === 0;
+  // Limite de um tipo de canal que este servidor não oferece não vai para a página pública.
+  const hiddenMetrics = new Set<string>(
+    channelTypes
+      .filter((type) => !isProviderEnabled(type))
+      .map((type) => CHANNEL_LIMIT_METRICS[type]),
+  );
 
   return plans.map((row) => {
     const own = prices.filter(
@@ -61,7 +69,7 @@ export async function listPublicPlans(): Promise<PublicPlan[]> {
       isFree: row.isFree,
       limits: Object.fromEntries(
         Object.entries(row.limits).flatMap(([metric, value]) =>
-          typeof value === "number" ? [[metric, value]] : [],
+          typeof value === "number" && !hiddenMetrics.has(metric) ? [[metric, value]] : [],
         ),
       ),
       features: row.features,

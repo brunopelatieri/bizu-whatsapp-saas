@@ -154,6 +154,8 @@ export const statements = {
 | `audit:read` | ✓ | ✓ | – | configurável |
 | `file:*` | ✓ | ✓ | upload/read | configurável |
 | `support:grant` | ✓ | – | – | nunca |
+| `channel:read` | ✓ | ✓ | ✓ | configurável |
+| `channel:manage` | ✓ | ✓ | – | configurável |
 
 "Nunca" é garantido por `maximumRolesPerOrganization` + validação no
 `beforeCreateOrgRole`/`beforeUpdateOrgRole` que rejeita permissões reservadas
