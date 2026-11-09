@@ -19,6 +19,7 @@
 | `/app/configuracoes` | organização, papéis personalizados (só owner) e troca de e-mail |
 | `/app/configuracoes/seguranca` | 2FA (QR, confirmar, códigos de backup, desativar); owner exige 2FA da equipe |
 | `/app/configuracoes/sessoes` | lista e encerra sessões |
+| `/app/configuracoes/canais` | números de WhatsApp (`channel:read`): estado, tipo, padrão; conectar, gerenciar e remover com `channel:manage` (`tech/29-canais-whatsapp.md`) |
 | `/app/configuracoes/suporte` | só owner: libera o suporte por 24 h, lista e revoga |
 
 `/admin/**` (proprietário e suporte da plataforma, `tech/22-admin.md`) reaproveita o mesmo

@@ -53,6 +53,7 @@ export default [
       route("configuracoes/sessoes", "routes/app.settings.sessions.tsx"),
       route("configuracoes/etiquetas", "routes/app.settings.tags.tsx"),
       route("configuracoes/campos", "routes/app.settings.fields.tsx"),
+      route("configuracoes/canais", "routes/app.settings.channels.tsx"),
       route("configuracoes/privacidade", "routes/app.settings.privacy.tsx"),
       route("configuracoes/suporte", "routes/app.settings.support.tsx"),
     ]),

@@ -17,6 +17,7 @@ Rotas atuais:
 | GET | `/api/ready` | Prontidão: `{ db, jobs, schema }` (`SELECT 1`, fila `email.send` e migrations do build, timeout 2 s cada); 503 se algum falhar (`src/api/ready.ts`) |
 | POST | `/api/webhooks/email/:provider` | Eventos de entrega, bounce e reclamação do provedor de e-mail (`src/api/webhooks-email.ts`): corpo bruto, assinatura conferida antes do JSON (400 se inválida), 404 se `:provider` não for o configurado; hard bounce e reclamação criam `email_suppression` |
 | POST | `/api/webhooks/payments/:provider` | Eventos do provedor de pagamento (`src/api/webhooks-payments.ts`): corpo bruto até 1 MB, assinatura antes do JSON, 400 + rastro sem corpo se inválida, 429 após 20 erros por IP no minuto, 404 fora de `PAYMENT_PROVIDERS`. Grava `payment_event` e enfileira `webhook.process`; repetido responde 200 `duplicate` |
+| GET, POST | `/api/webhooks/whatsapp/cloud/:key` | Avisos da Meta por canal (`src/api/webhooks-channels.ts`): `GET` confere `hub.verify_token` (403 se errado); `POST` confere `X-Hub-Signature-256` com o segredo do aplicativo daquele canal, corpo cru até 3 MB, 401 sem assinatura válida; grava `channel_event` e enfileira `channel.inbound` |
 | * | `/api/billing/*` | Assinatura do owner, liberada em `read_only` (`tech/24-billing-cobranca.md`) |
 | GET | `/api/me` | Rota privada: `{ user, tenants, permissions, billing, features, limits }`; `billing` traz estado, plano, fim do trial e fim da carência do tenant ativo |
 | GET | `/api/me/invitations` | Convites abertos para o e-mail da sessão |
@@ -115,10 +116,16 @@ deve voltar em escopo controlado.
 
 ## Canais WhatsApp
 
-`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) e, com B2, os webhooks
-`/api/webhooks/whatsapp/*` fora de `sameOrigin` e do CSRF, como os de pagamento. A rota monta
-`Scope` a partir de `requireTenant`; o serviço (`src/lib/channels/service.ts`) abre `withScope`.
-Ver `tech/29-canais-whatsapp.md`.
+`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) monta o `Scope` a
+partir de `requireTenant`; o serviço (`src/lib/channels/service.ts`) abre `withScope`. As rotas de
+cada tipo (`POST /api/channels/whatsapp-cloud`, `/:id/webhook`, `/:id/test`, `/:id/templates`...)
+são declaradas pelo módulo (`ChannelModule.routes`) e montadas aqui com o `ChannelRouteKit`.
+
+`src/api/webhooks-channels.ts` (`GET` e `POST /api/webhooks/whatsapp/<segmento>/:key`) fica antes do
+`csrfGuard`, fora de `sameOrigin`, como os de pagamento: acha o canal pela chave, verifica sobre o
+corpo cru (401; chave desconhecida responde igual; 429 após 20 falhas por IP no minuto; 413 acima
+do teto do módulo), grava `channel_event` e enfileira `channel.inbound`. Ver
+`tech/29-canais-whatsapp.md`.
 
 ## LGPD, arquivos e logs (fase 10)
 

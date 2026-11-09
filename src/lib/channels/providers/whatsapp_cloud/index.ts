@@ -9,6 +9,13 @@ import {
   sendText,
   verifyPhoneNumber,
 } from "@/lib/channels/providers/whatsapp_cloud/graph";
+import { cloudRoutes } from "@/lib/channels/providers/whatsapp_cloud/routes";
+import {
+  CLOUD_WEBHOOK_SEGMENT,
+  cloudHandshake,
+  findCloudWebhookTarget,
+  updateCloudChannel,
+} from "@/lib/channels/providers/whatsapp_cloud/service";
 import { normalizeCloudEvents } from "@/lib/channels/providers/whatsapp_cloud/normalize";
 import { verifyCloudWebhook } from "@/lib/channels/providers/whatsapp_cloud/webhook";
 import type { ChannelModule } from "@/lib/channels/registry";
@@ -114,6 +121,15 @@ export function createCloudProvider(): ChannelProvider {
 const channelModule: ChannelModule = {
   id: "whatsapp_cloud",
   createProvider: () => createCloudProvider(),
+  webhook: {
+    segment: CLOUD_WEBHOOK_SEGMENT,
+    // A Meta agrupa mudanças no mesmo aviso; 3 MB cobre o maior lote com folga.
+    maxBodyBytes: 3 * 1024 * 1024,
+    findTarget: findCloudWebhookTarget,
+    handshake: cloudHandshake,
+  },
+  routes: cloudRoutes,
+  update: updateCloudChannel,
 };
 
 export default channelModule;

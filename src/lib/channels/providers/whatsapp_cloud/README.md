@@ -12,7 +12,11 @@ cifrados (`src/lib/channels/credentials.ts`). Liga-se com `whatsapp_cloud` em
 | `graph.ts` | Cliente da Graph API (`GRAPH_VERSION` em um lugar só), `fetch` injetável, `MetaApiError` |
 | `webhook.ts` | Assinatura `X-Hub-Signature-256` sobre o corpo cru, desafio do `GET`, `dedupe_key` |
 | `normalize.ts` | Aviso da Meta → eventos comuns (função pura) |
-| `index.ts` | Monta o `ChannelProvider` (envio, mídia, `probe`) e exporta o módulo |
+| `service.ts` | Salvar, editar, endereço de webhook (mostrar e gerar novo), diagnóstico, `findTarget` e `handshake` do webhook |
+| `templates.ts` | Lista e sincroniza `message_template` com a Meta |
+| `routes.ts` | Rotas do tipo, montadas por `src/api/channels.ts` com o `ChannelRouteKit` |
+| `index.ts` | Monta o `ChannelProvider` (envio, mídia, `probe`) e exporta o módulo (`webhook`, `routes`, `update`) |
+| `http.db.test.ts`, `events.db.test.ts` | Webhook, rotas e job com Postgres real (`npm run test:db`) |
 
 ## Como obter as credenciais (o que o dono do número faz)
 
@@ -45,6 +49,14 @@ corpo. O segredo do aplicativo **é obrigatório por canal**: sem ele não há c
   teto de tamanho.
 - Modelos: o cursor `after` é usado para paginar; a URL `paging.next` da resposta nunca é seguida.
 - Reação, apagar e tipos novos de mensagem não viram evento (fora do escopo da entrega).
+
+## Pendências (B2)
+
+- **Smoke com conta de teste da Meta** em `/app/configuracoes/canais`: salvar um número, colar o
+  endereço e o token no painel, ver `webhook_verified_at`, receber um `messages`, diagnosticar e
+  sincronizar modelos. Até aqui só houve um envio com token falso (a Meta respondeu `(#190)` e a
+  tela mostrou a recusa).
+- **`GRAPH_VERSION`**: `v26.0` está no código; conferir a vigente contra a conta real no smoke.
 
 ## Não verificado contra a Meta real
 
