@@ -266,22 +266,24 @@ export function createCustomField(scope: Scope, input: CustomFieldInput, actor: 
   });
 }
 
-/** Cadastros do escopo cujo valor no campo usa a opção (lista de uma ou de várias). */
-async function optionUsage(tx: Tx, scope: Scope, fieldId: string, value: string) {
-  if (scope.kind !== "tenant") return 0;
+/**
+ * Quantos cadastros do escopo usam cada opção (lista de uma ou de várias), numa consulta só:
+ * um `count(*) filter` por opção.
+ */
+async function optionsUsage(tx: Tx, scope: Scope, fieldId: string, values: string[]) {
+  if (scope.kind !== "tenant" || values.length === 0) return values.map(() => 0);
 
-  const [row] = await tx
-    .select({ total: count() })
-    .from(customer)
-    .where(
-      and(
-        eq(customer.tenantId, scope.tenantId),
-        // Um escalar contém a si mesmo e um array contém o elemento: serve os dois tipos.
-        sql`(${customer.customFields} -> ${fieldId}::text) @> to_jsonb(${value}::text)`,
-      ),
-    );
+  const columns = Object.fromEntries(
+    values.map((value, n) => [
+      `n${n}`,
+      // Um escalar contém a si mesmo e um array contém o elemento: serve os dois tipos.
+      sql<number>`(count(*) filter (where (${customer.customFields} -> ${fieldId}::text) @> to_jsonb(${value}::text)))::int`,
+    ]),
+  );
 
-  return row?.total ?? 0;
+  const [row] = await tx.select(columns).from(customer).where(eq(customer.tenantId, scope.tenantId));
+
+  return values.map((_, n) => row?.[`n${n}`] ?? 0);
 }
 
 export function updateCustomField(
@@ -314,8 +316,9 @@ export function updateCustomField(
       const removed = current.options.filter(({ value }) => !kept.has(value));
       const inUse: { value: string; label: string; count: number }[] = [];
 
-      for (const option of removed) {
-        const used = await optionUsage(tx, scope, id, option.value);
+      const usage = await optionsUsage(tx, scope, id, removed.map(({ value }) => value));
+      for (const [n, option] of removed.entries()) {
+        const used = usage[n] ?? 0;
         if (used > 0) inUse.push({ ...option, count: used });
       }
       if (inUse.length > 0) {

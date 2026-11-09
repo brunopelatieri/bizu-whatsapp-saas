@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { slugify } from "@/lib/schemas/tenant";
 import {
   CUSTOM_FIELD_KEY_MAX,
   CUSTOM_FIELD_MULTISELECT_MAX,
@@ -34,14 +35,8 @@ const MAX_ABS_NUMBER = 1e15;
 
 /** `Clínica São João` vira `clinica_sao_joao` (até 40, `_` como separador). */
 export function slugifyKey(value: string, max = CUSTOM_FIELD_KEY_MAX) {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, max)
-    .replace(/_+$/, "");
+  // `slugify` (acentos, minúsculas, até 48) já limpa as pontas; aqui só troca o separador.
+  return slugify(value).replaceAll("-", "_").slice(0, max).replace(/_+$/, "");
 }
 
 /** `AAAA-MM-DD` que existe no calendário (31/02 não passa). */
