@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { type Context, Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import { validationError } from "@/api/guards";
+import { blockWhileImpersonating } from "@/api/impersonation";
 import {
   createCloudChannel,
   diagnoseCloudChannel,
@@ -49,7 +50,8 @@ export function cloudRoutes(kit: ChannelRouteKit) {
       ),
   );
 
-  routes.get(`${base}/:id/webhook`, canManage, active, validId, async (c) =>
+  // Lê uma credencial (o token de verificação): o suporte personificando não a vê.
+  routes.get(`${base}/:id/webhook`, canManage, blockWhileImpersonating, active, validId, async (c) =>
     c.json(await webhookOf(kit.scopeOf(c), id(c)), 200, noStore),
   );
 

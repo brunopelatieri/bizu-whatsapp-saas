@@ -110,7 +110,7 @@ antes da transação; falha dele é 503 `PROVIDER_UNAVAILABLE` e o canal fica co
 |---|---|---|
 | `POST /api/channels/whatsapp-cloud` | `channel:manage`, 10/min | `verifyPhoneNumber` → (PIN) `registerPhoneNumber` → `subscribeWabaToApp` → uma transação. 201 `{ channel, webhook: { url, verifyToken } }`; 400 `META_REJECTED` (mensagem da Meta), 403 `PLAN_LIMIT_REACHED`, 409 `PHONE_NUMBER_IN_USE`, 503 `PROVIDER_UNAVAILABLE` |
 | `PATCH /api/channels/:id` | `channel:manage` | Token, segredo e PIN ausentes ou vazios **mantêm** o gravado; token, PIN ou WABA novos são conferidos na Meta antes de gravar |
-| `GET /:id/webhook`, `POST /:id/webhook/rotate` | `channel:manage` | Endereço e token de verificação (`Cache-Control: no-store`); gerar novo troca os dois e zera `webhook_verified_at` |
+| `GET /:id/webhook`, `POST /:id/webhook/rotate` | `channel:manage` | Endereço e token de verificação (`Cache-Control: no-store`; o `GET` também é recusado durante a personificação, por ler credencial); gerar novo troca os dois e zera `webhook_verified_at` |
 | `POST /:id/test` | `channel:manage` | `checks`: `credentials_readable`, `token_valid`, `phone_reachable`, `waba_subscribed`, `webhook_verified`, `last_event_at`. 4xx da Meta marca `error`; 5xx, 429 e timeout não mudam o estado |
 | `GET /:id/templates?status=` | `channel:read` | Modelos do WABA do canal, no escopo |
 | `POST /:id/templates/sync` | `channel:manage`, 5/min | Lê a Meta, cria/atualiza e **apaga** o que sumiu lá |
