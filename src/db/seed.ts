@@ -147,6 +147,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   const {
     account,
     customer,
+    customField,
     invoice,
     member,
     organization,
@@ -468,6 +469,50 @@ export async function runSeed(password: string): Promise<SeedSummary> {
     });
   }
   await seedCustomer(acme.id, { ...lead, ...phoneValues(lead.phone), tenantId: acme.id });
+
+  // Campos adicionais de exemplo do tenant acme (SPEC crm-cadastro, A3): um de lista, um de
+  // data e um de lista múltipla. Idempotente pelo índice único `(tenant_id, entity, key)`.
+  await withTenant(acme.id, (tx) =>
+    tx
+      .insert(customField)
+      .values([
+        {
+          tenantId: acme.id,
+          entity: "customer",
+          key: "origem",
+          label: "Origem do lead",
+          type: "select",
+          options: [
+            { value: "indicacao", label: "Indicação" },
+            { value: "anuncio", label: "Anúncio" },
+            { value: "evento", label: "Evento" },
+          ],
+          position: 1,
+        },
+        {
+          tenantId: acme.id,
+          entity: "customer",
+          key: "nascimento",
+          label: "Data de nascimento",
+          type: "date",
+          position: 2,
+        },
+        {
+          tenantId: acme.id,
+          entity: "customer",
+          key: "interesses",
+          label: "Interesses",
+          type: "multiselect",
+          options: [
+            { value: "consulta", label: "Consulta" },
+            { value: "exame", label: "Exame" },
+            { value: "retorno", label: "Retorno" },
+          ],
+          position: 3,
+        },
+      ])
+      .onConflictDoNothing(),
+  );
 
   // Contas do seed já aceitaram os textos vigentes: sem isso, o primeiro login abriria o
   // modal de re-aceite. O cadastro real grava o aceite pelo hook de `src/lib/lgpd/consent.ts`.

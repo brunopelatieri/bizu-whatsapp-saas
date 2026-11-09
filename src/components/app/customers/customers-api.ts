@@ -15,6 +15,8 @@ export type Customer = {
   document: string | null;
   status: CustomerStatus;
   tags: TagRef[];
+  /** `{ "<id do campo>": valor }`; as definições vêm de `useCustomFields`. */
+  customFields: Record<string, unknown>;
   notes: string | null;
   invitedAt: string | null;
   lastLoginAt: string | null;

@@ -11,6 +11,7 @@ export function SettingsNav() {
     { to: "/app/configuracoes/seguranca", label: "Segurança", show: true },
     { to: "/app/configuracoes/sessoes", label: "Sessões", show: true },
     { to: "/app/configuracoes/etiquetas", label: "Etiquetas", show: can("tag", "manage") },
+    { to: "/app/configuracoes/campos", label: "Campos", show: can("custom_field", "manage") },
     { to: "/app/configuracoes/privacidade", label: "Privacidade", show: true },
     {
       to: "/app/configuracoes/suporte",

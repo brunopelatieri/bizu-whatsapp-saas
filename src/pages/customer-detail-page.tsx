@@ -17,6 +17,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPhoneForDisplay } from "@/lib/phone/br";
 import { TagChip } from "@/components/crm/tag-chip";
 import { TagPicker } from "@/components/crm/tag-picker";
+import { useCustomFields } from "@/components/crm/custom-fields-api";
+import {
+  displayCustomFieldValue,
+  type CustomFieldValues,
+  missingRequired,
+} from "@/lib/crm/values";
 
 /** Etiquetas do cliente: chips para quem lê, seletor para quem edita (`customer:update`). */
 function CustomerTags({ customer }: { customer: Customer }) {
@@ -49,6 +55,43 @@ function CustomerTags({ customer }: { customer: Customer }) {
         }
       />
     </Can>
+  );
+}
+
+/**
+ * Campos adicionais do cliente, das definições ativas; vazio mostra "–". Obrigatório sem
+ * valor aparece como pendente (o cadastro pelo atendimento não traz o bloco e passa).
+ * Quem edita usa o formulário de "Editar".
+ */
+function CustomFieldsCard({ customer }: { customer: Customer }) {
+  const definitions = useCustomFields();
+  const defs = definitions.data ?? [];
+  if (defs.length === 0) return null;
+
+  const pending = missingRequired(defs, customer.customFields as CustomFieldValues);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Campos adicionais</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {pending.length > 0 ? (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            Campos obrigatórios pendentes: {pending.join(", ")}.
+          </p>
+        ) : null}
+        <dl className="space-y-3 text-sm">
+          {defs.map((def) => (
+            <DetailRow
+              key={def.id}
+              label={def.label}
+              value={displayCustomFieldValue(def, customer.customFields[def.id])}
+            />
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -181,6 +224,8 @@ export function CustomerDetailPage() {
                 ) : null}
               </CardContent>
             </Card>
+
+            <CustomFieldsCard customer={customer} />
 
             <PortalAccessCard customer={customer} />
 

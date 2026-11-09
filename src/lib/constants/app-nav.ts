@@ -58,6 +58,7 @@ export const appTitles: Record<string, string> = {
   "/app/configuracoes/seguranca": "Segurança",
   "/app/configuracoes/sessoes": "Sessões",
   "/app/configuracoes/etiquetas": "Etiquetas",
+  "/app/configuracoes/campos": "Campos adicionais",
   "/app/configuracoes/suporte": "Acesso do suporte",
 };
 
