@@ -252,11 +252,13 @@ describe("RBAC", () => {
   describe("área da plataforma", () => {
     const reads = [
       ["GET", "/api/admin/webhooks"],
+      ["GET", "/api/admin/channel-events"],
       ["GET", "/api/admin/subscriptions"],
       ["GET", "/api/admin/audit"],
     ] as const;
     const writes = [
       ["POST", `/api/admin/webhooks/${anyId}/reprocess`],
+      ["POST", `/api/admin/channel-events/${anyId}/reprocess`],
       ["POST", `/api/admin/subscriptions/${anyId}/cancel`],
       ["POST", `/api/admin/subscriptions/${anyId}/sync`],
     ] as const;
