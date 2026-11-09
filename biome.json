@@ -31,7 +31,8 @@
 				"src/api/team.ts",
 				"src/api/roles.ts",
 				"src/api/invitations.ts",
-				"src/api/permissions.ts"
+				"src/api/permissions.ts",
+				"src/api/channels.ts"
 			],
 			"linter": {
 				"rules": {

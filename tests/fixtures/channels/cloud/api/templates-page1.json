@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "id": "400000000000001",
+      "name": "boas_vindas",
+      "language": "pt_BR",
+      "category": "UTILITY",
+      "status": "APPROVED",
+      "components": [
+        {
+          "type": "BODY",
+          "text": "Olá {{1}}"
+        }
+      ]
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "b1",
+      "after": "cursor-pagina-2"
+    },
+    "next": "https://graph.facebook.com/v26.0/100000000000001/message_templates?after=cursor-pagina-2"
+  }
+}

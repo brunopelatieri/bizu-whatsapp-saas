@@ -27,8 +27,13 @@
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
   Evolution Go) e `caixa-de-entrada` (chat e fila); decisões do proprietário no fim do plano.
   **F0 (escopo de plataforma) implementada:** `scopedPolicy()`, `platformOnlyPolicy()`,
-  `withPlatformData`, `withScope` e `Scope`, com teste dos três modos (`tech/07-banco-drizzle.md`);
-  nenhuma tabela nova ainda. Próxima: A1, com a medição B0 em paralelo. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
+  `withPlatformData`, `withScope` e `Scope`, com teste dos três modos (`tech/07-banco-drizzle.md`).
+  **`whatsapp-canais` em andamento (2026-11):** módulos puros de `src/lib/channels/` (tipos,
+  capacidades, registro, Cloud e Evolution, normalizadores, webhook, schemas), permissão
+  `channel:read/manage`, variáveis `CHANNEL_PROVIDERS`/`EVOLUTION_*`, limites de plano e a **B1**
+  (tabelas com RLS, serviço, caixa de avisos, filas `channel.inbound`/`channel.health`, rotas comuns
+  `/api/channels`; `tech/29-canais-whatsapp.md`); as fixtures de `tests/fixtures/channels/` são
+  **simuladas** (a medição B0 real falta); B2 (rotas e webhook da Cloud) é a próxima etapa. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
   válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se
   validado; regra do Brasil só para DDI 55; máscara; único por tenant no cliente) e e-mail
   obrigatório para conta acessível. Projeto novo: sem cadastro anterior, sem backfill nem

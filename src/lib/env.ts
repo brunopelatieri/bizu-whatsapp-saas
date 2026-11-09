@@ -135,6 +135,38 @@ export const envSchema = z
     STRIPE_SECRET_KEY: optionalString,
     STRIPE_WEBHOOK_SECRET: optionalString,
 
+    // Canais de mensagem (`docs/context/tech/29-canais-whatsapp.md`): módulos ativos, como
+    // PAYMENT_PROVIDERS. A Cloud API não tem variável: as credenciais são de cada canal.
+    CHANNEL_PROVIDERS: csvList,
+    EVOLUTION_API_URL: z.preprocess(emptyToUndefined, z.url({ protocol: /^https?$/ }).optional()),
+    EVOLUTION_GLOBAL_API_KEY: optionalString,
+    // Endereço do bizu que o servidor Evolution alcança (padrão: APP_URL).
+    EVOLUTION_WEBHOOK_PUBLIC_URL: z.preprocess(
+      emptyToUndefined,
+      z.url({ protocol: /^https?$/ }).optional(),
+    ),
+    EVOLUTION_INSTANCE_PREFIX: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .regex(/^[a-z0-9]{1,16}$/, "1 a 16 letras minúsculas ou números")
+        .default("bizu"),
+    ),
+    EVOLUTION_MAX_INSTANCES_TOTAL: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).default(20),
+    ),
+    // Origens (`esquema://host[:porta]`) de onde o job aceita baixar `mediaUrl` pré-assinada.
+    EVOLUTION_MEDIA_ORIGINS: csvList,
+    EVOLUTION_REQUEST_TIMEOUT_MS: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1000).default(15_000),
+    ),
+    EVOLUTION_MEDIA_TIMEOUT_MS: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1000).default(60_000),
+    ),
+
     STORAGE_PROVIDER: z.enum(["local", "s3"]).default("local"),
     STORAGE_LOCAL_DIR: z.string().default(".data/storage"),
     S3_BUCKET: optionalString,
@@ -186,6 +218,26 @@ export const envSchema = z
       "obrigatória com stripe em PAYMENT_PROVIDERS",
     );
     requireWhen(
+      env.CHANNEL_PROVIDERS.includes("whatsapp_qr"),
+      ["EVOLUTION_API_URL", "EVOLUTION_GLOBAL_API_KEY"],
+      "obrigatória com whatsapp_qr em CHANNEL_PROVIDERS",
+    );
+    for (const origin of env.EVOLUTION_MEDIA_ORIGINS) {
+      const valid =
+        URL.canParse(origin) &&
+        /^https?:$/.test(new URL(origin).protocol) &&
+        new URL(origin).origin === origin;
+
+      if (!valid) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["EVOLUTION_MEDIA_ORIGINS"],
+          message: "use origens exatas, como https://s3.exemplo.com (sem caminho nem barra final)",
+        });
+        break;
+      }
+    }
+    requireWhen(
       env.STORAGE_PROVIDER === "s3",
       ["S3_BUCKET", "S3_REGION", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"],
       "obrigatória com STORAGE_PROVIDER=s3",
@@ -207,6 +259,13 @@ export const envSchema = z
             message: "use um valor gerado, não o exemplo do .env.example",
           });
         }
+      }
+      if (env.EVOLUTION_GLOBAL_API_KEY?.startsWith(PLACEHOLDER_PREFIX)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["EVOLUTION_GLOBAL_API_KEY"],
+          message: "use o valor gerado no servidor Evolution, não o exemplo do .env.example",
+        });
       }
       for (const key of ["DATABASE_URL", "DIRECT_URL"] as const) {
         const message = databasePasswordProblem(env[key]);

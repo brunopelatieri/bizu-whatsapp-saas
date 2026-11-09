@@ -1,0 +1,21 @@
+{
+  "event": "Message",
+  "instanceId": "11111111-2222-3333-4444-555555555555",
+  "instanceToken": "test-instance-token-0001",
+  "data": {
+    "Info": {
+      "Chat": "226559659127039:11@lid",
+      "Sender": "226559659127039:11@lid",
+      "IsFromMe": false,
+      "IsGroup": false,
+      "ID": "3EB0AAAA0003",
+      "Type": "text",
+      "PushName": "Cliente Teste",
+      "Timestamp": "2026-11-02T10:00:00-03:00",
+      "ServerID": 0
+    },
+    "Message": {
+      "conversation": "Mensagem por LID"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "551199990001",
+              "phone_number_id": "200000000000001"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Cliente Teste"
+                },
+                "wa_id": "5511988880001"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5511988880001",
+                "id": "wamid.CTT0001",
+                "timestamp": "1793620800",
+                "type": "contacts",
+                "contacts": [
+                  {
+                    "name": {
+                      "formatted_name": "Fulano de Tal",
+                      "first_name": "Fulano"
+                    },
+                    "phones": [
+                      {
+                        "phone": "+5511977770001"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

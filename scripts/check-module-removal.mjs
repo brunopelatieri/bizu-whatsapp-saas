@@ -5,6 +5,7 @@
 //   npm run check:module-removal -- stripe   (pagamento: providers/<id>/)
 //   npm run check:module-removal -- sentry   (monitoramento: src/lib/monitoring/sentry/)
 //   npm run check:module-removal -- s3       (arquivos: src/lib/storage/providers/s3/)
+//   npm run check:module-removal -- whatsapp_cloud | whatsapp_qr   (canais: src/lib/channels/providers/<id>/)
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
@@ -12,7 +13,7 @@ import path from "node:path";
 
 const id = process.argv[2] ?? "stripe";
 
-if (!/^[a-z][a-z0-9]*$/.test(id)) {
+if (!/^[a-z][a-z0-9_]*$/.test(id)) {
   console.error(`Id de módulo inválido: ${id}`);
   process.exit(1);
 }
@@ -28,6 +29,14 @@ const OTHER_MODULES = {
     env: { STORAGE_PROVIDER: "local" },
   },
 };
+
+// Canais de mensagem: a pasta sai e CHANNEL_PROVIDERS volta a ficar vazio.
+for (const channel of ["whatsapp_cloud", "whatsapp_qr"]) {
+  OTHER_MODULES[channel] = {
+    dir: path.join("src", "lib", "channels", "providers", channel),
+    env: { CHANNEL_PROVIDERS: "" },
+  };
+}
 
 const other = OTHER_MODULES[id];
 const moduleDir =

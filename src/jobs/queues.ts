@@ -25,6 +25,10 @@ export const QUEUE = {
   lgpdExportDead: "lgpd.export.dead",
   lgpdDelete: "lgpd.delete",
   lgpdDeleteDead: "lgpd.delete.dead",
+  channelInbound: "channel.inbound",
+  channelInboundDead: "channel.inbound.dead",
+  channelHealth: "channel.health",
+  channelHealthDead: "channel.health.dead",
 } as const;
 
 /** Payload de `lgpd.export`: o pedido fica em `data_export`, a fila só leva o id. */
@@ -39,7 +43,11 @@ export type EmailSendJob = {
 /** Payload de `webhook.process`: o evento fica em `payment_event`, não na fila. */
 export type WebhookProcessJob = { paymentEventId: string };
 
+/** Payload de `channel.inbound`: o aviso fica em `channel_event`, a fila só leva o id. */
+export type ChannelInboundJob = { channelEventId: string };
+
 export const EMAIL_RETRY_LIMIT = 5;
+export const CHANNEL_INBOUND_RETRY_LIMIT = 5;
 export const WEBHOOK_RETRY_LIMIT = 5;
 
 const DEAD_LETTER_OPTIONS = {
@@ -80,6 +88,8 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.billingReconcileDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.lgpdExportDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.lgpdDeleteDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.channelInboundDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
     options: {
@@ -146,6 +156,32 @@ export const queueDefinitions: QueueDefinition[] = [
     name: QUEUE.lgpdDelete,
     options: billingJobOptions(QUEUE.lgpdDeleteDead),
   },
+  {
+    // `exclusive`: um job vivo por aviso (`singletonKey` = `channel_event.id`). O estado fica
+    // em `channel_event`; repetir o job só repete o que falhou. Backoff de 30 s a 1 h.
+    name: QUEUE.channelInbound,
+    options: {
+      policy: "exclusive",
+      retryLimit: CHANNEL_INBOUND_RETRY_LIMIT,
+      retryDelay: 30,
+      retryBackoff: true,
+      retryDelayMax: 3600,
+      expireInSeconds: 120,
+      deleteAfterSeconds: 7 * 24 * 3600,
+      deadLetter: QUEUE.channelInboundDead,
+    },
+  },
+  {
+    // Cron de 15 em 15 minutos: uma tentativa a mais basta, a próxima passada refaz o resto.
+    name: QUEUE.channelHealth,
+    options: {
+      retryLimit: 1,
+      retryDelay: 60,
+      expireInSeconds: 600,
+      deleteAfterSeconds: 24 * 3600,
+      deadLetter: QUEUE.channelHealthDead,
+    },
+  },
 ];
 
 export type ScheduleDefinition = { queue: string; cron: string };
@@ -158,4 +194,5 @@ export const scheduleDefinitions: ScheduleDefinition[] = [
   { queue: QUEUE.billingReconcile, cron: "0 4 * * *" },
   { queue: QUEUE.maintenancePrune, cron: "30 4 * * *" },
   { queue: QUEUE.lgpdDelete, cron: "0 5 * * *" },
+  { queue: QUEUE.channelHealth, cron: "*/15 * * * *" },
 ];

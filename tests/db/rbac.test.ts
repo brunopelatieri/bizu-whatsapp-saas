@@ -74,6 +74,10 @@ const endpoints = [
   ["POST", "/api/billing/pause", "billing:manage"],
   ["POST", "/api/billing/change-plan", "billing:manage"],
   ["POST", "/api/billing/portal", "billing:manage"],
+  ["GET", "/api/channels", "channel:read"],
+  ["PATCH", `/api/channels/${anyId}`, "channel:manage"],
+  ["POST", `/api/channels/${anyId}/default`, "channel:manage"],
+  ["DELETE", `/api/channels/${anyId}`, "channel:manage"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

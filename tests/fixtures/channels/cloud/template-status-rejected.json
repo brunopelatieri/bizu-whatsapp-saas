@@ -1,0 +1,20 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "field": "message_template_status_update",
+          "value": {
+            "event": "REJECTED",
+            "message_template_id": 400000000000002,
+            "message_template_name": "promo",
+            "message_template_language": "pt_BR",
+            "reason": "INVALID_FORMAT"
+          }
+        }
+      ]
+    }
+  ]
+}

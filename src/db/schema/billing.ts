@@ -63,6 +63,9 @@ export type PlanLimits = {
   custom_roles?: number | null;
   /** Organizações que o dono pode ter (`src/lib/billing/organizations.ts`). */
   organizations?: number | null;
+  /** Números de WhatsApp por tipo de canal; desativado não conta (`src/lib/channels/`). */
+  channels_whatsapp_cloud?: number | null;
+  channels_whatsapp_qr?: number | null;
 };
 
 export const plan = pgTable(

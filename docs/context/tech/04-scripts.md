@@ -17,7 +17,7 @@
 | `npm run db:migrate` | Aplica migrations |
 | `npm run db:push` | Push direto do schema (só dev) |
 | `npm run db:studio` | Abre Drizzle Studio |
-| `npm run check:module-removal -- <id>` | Tira a pasta do módulo (`stripe` e demais provedores de pagamento, `sentry` ou `s3`), roda typecheck e testes e devolve a pasta |
+| `npm run check:module-removal -- <id>` | Tira a pasta do módulo (`stripe` e demais provedores de pagamento, `sentry`, `s3`, `whatsapp_cloud` ou `whatsapp_qr`), roda typecheck e testes e devolve a pasta |
 | `npm run db:seed` | Dados de dev, idempotente: proprietário (`owner@bizu.local`), suporte, planos `free`/`basic`/`pro`, configurações de trial e o tenant `acme`. Exige `SEED_PASSWORD`; recusa produção sem `SEED_ALLOW_PRODUCTION=1` (`tech/23-billing-planos.md`) |
 | `npm run jobs:install` | Primeiro `start()` do pg-boss com `DIRECT_URL`: tabelas do schema `pgboss`, filas e crons (depois de `db:migrate`; idempotente) |
 | `npm run email:preview` | Renderiza todos os templates de e-mail com dados fictícios em `.tmp/emails/*.html` |

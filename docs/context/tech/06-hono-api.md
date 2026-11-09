@@ -113,6 +113,13 @@ deve voltar em escopo controlado.
 
 ---
 
+## Canais WhatsApp
+
+`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) e, com B2, os webhooks
+`/api/webhooks/whatsapp/*` fora de `sameOrigin` e do CSRF, como os de pagamento. A rota monta
+`Scope` a partir de `requireTenant`; o serviço (`src/lib/channels/service.ts`) abre `withScope`.
+Ver `tech/29-canais-whatsapp.md`.
+
 ## LGPD, arquivos e logs (fase 10)
 
 - `src/api/lgpd.ts` (`lgpdRoutes`, `portalLgpdRoutes`): exportação (`/api/me/export`, `/api/portal/me/export`), exclusão (`DELETE /api/me`, `DELETE /api/portal/me`) e cancelamento. `DELETE /api/tenant` e `POST /api/tenant/deletion/cancel` ficam em `src/api/tenant.ts`; `GET/POST /api/me/consent*` em `src/api/me.ts`.

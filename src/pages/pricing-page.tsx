@@ -18,8 +18,15 @@ const FEATURE_LABELS: Record<string, string> = {
   custom_roles: "Papéis personalizados",
 };
 
+/** Canais de WhatsApp só aparecem com valor no plano (e módulo ativo: o loader filtra). */
+const OPTIONAL_METRICS = new Set<LimitMetric>(["channels_whatsapp_cloud", "channels_whatsapp_qr"]);
+
 function limitLines(plan: PublicPlan) {
-  return limitMetrics.map((metric: LimitMetric) => {
+  const metrics = limitMetrics.filter(
+    (metric) => !OPTIONAL_METRICS.has(metric) || plan.limits[metric] !== undefined,
+  );
+
+  return metrics.map((metric: LimitMetric) => {
     const value = plan.limits[metric];
     const label = LIMIT_LABELS[metric];
 

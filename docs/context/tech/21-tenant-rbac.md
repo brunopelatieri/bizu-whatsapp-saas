@@ -59,6 +59,10 @@ os papéis personalizados do tenant. Quem foi removido ou teve o papel trocado p
 na hora. `requirePermission` e `/api/me` usam a mesma lista, comparada com `hasPermission`
 do plugin em `tests/db/rbac.test.ts`.
 
+`channel:read` (owner, admin e membro) e `channel:manage` (owner e admin; atribuível a papel
+personalizado) valem para os números de WhatsApp (`docs/specs/whatsapp-canais/spec.md`); as rotas
+`/api/channels/*` entram com a etapa B1 e a matriz `tests/db/rbac.test.ts` as cobre então.
+
 Regras além da matriz, em `src/lib/tenant/team.ts`:
 
 - **Só se age sobre quem não tem mais poder que você** (`canActOnRole`). Vale para conceder

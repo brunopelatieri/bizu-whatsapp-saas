@@ -178,6 +178,16 @@ usa `SEED_PASSWORD`. Conteúdo e regras em `tech/23-billing-planos.md`. Roda com
   de tenant roda em `withTenant`. Tabela sem isso reprova `tests/db/rls.test.ts`.
 - Mudança de schema é sempre migration; `db:push` só em dev descartável.
 
+## Tabelas de canal (WhatsApp)
+
+`channel`, `channel_whatsapp_cloud`, `channel_evolution`, `channel_event` e `message_template`
+(`src/db/schema/channels.ts`): `tenant_id` anulável, `scopedPolicy()` e `FORCE` (migrations
+`0022_canais_whatsapp` e `0023_rls_canais`). Unicidade global em `phone_number_id`,
+`remote_instance_name`, `webhook_key` e `webhook_secret_hash`; padrão por escopo e tipo e
+`message_template` por escopo têm dois índices (com `tenant_id` e parcial `WHERE tenant_id IS NULL`).
+Colunas `*_enc` guardam o texto de `encryptSecret`. Teste: `tests/db/channels-schema.test.ts`.
+Detalhes em `tech/29-canais-whatsapp.md`.
+
 ## Tabelas da fase 10
 
 - `consent_log` (sem tenant, sem RLS): aceite e recusa por `subject_type`/`subject_id`, `kind`, `version`, hash de IP.
