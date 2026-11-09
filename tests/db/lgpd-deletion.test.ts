@@ -675,6 +675,21 @@ describe("exclusão da organização", () => {
     );
     expect(await readdir(path.join(storageDir, "tenants", tenant.id))).toHaveLength(1);
 
+    // Anotação da plataforma sobre a organização (crm-cadastro A4): some com a anonimização.
+    const [platformTag] = await asPlatform(
+      owner,
+      (tx) => tx<{ id: string }[]>`
+        insert into tag (tenant_id, name) values (null, ${`lgpd-${tenant.id.slice(0, 8)}`}) returning id
+      `,
+    );
+    await asPlatform(
+      owner,
+      async (tx) => {
+        await tx`insert into organization_tag (organization_id, tag_id) values (${tenant.id}, ${platformTag?.id ?? ""})`;
+        await tx`insert into organization_profile (organization_id, custom_fields) values (${tenant.id}, '{"x": "contato"}'::jsonb)`;
+      },
+    );
+
     await del("/api/tenant", tenantOwner.cookie, { password: PASSWORD });
     const request = await requestOf(tenant.id);
     await makeDue(request?.id ?? "");
@@ -713,6 +728,10 @@ describe("exclusão da organização", () => {
       document: "",
       email: "removido@invalid",
     });
+
+    expect(await countOf("organization_tag", "organization_id", tenant.id)).toBe(0);
+    expect(await countOf("organization_profile", "organization_id", tenant.id)).toBe(0);
+    await asPlatform(owner, (tx) => tx`delete from tag where id = ${platformTag?.id ?? ""}`);
 
     // Fatura (obrigação fiscal), assinatura e auditoria seguem.
     expect(await countOf("invoice", "tenant_id", tenant.id)).toBe(1);

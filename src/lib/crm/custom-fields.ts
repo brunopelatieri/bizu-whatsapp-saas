@@ -1,7 +1,8 @@
 import { and, asc, count, eq, inArray, isNull, isNotNull, type SQL, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { isUniqueViolation } from "@/db/errors";
 import { type Scope, scopeTenantId, type Tx, withScope } from "@/db/rls";
-import { customer, customField } from "@/db/schema";
+import { customer, customField, organizationProfile } from "@/db/schema";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
 import {
   CUSTOM_FIELD_LIMIT,
@@ -67,14 +68,24 @@ const inScope = (scope: Scope) =>
 
 const byId = (scope: Scope, id: string) => and(eq(customField.id, id), inScope(scope));
 
+/** Na plataforma o evento ganha o prefixo `admin.`, com `_` no lugar do ponto. */
+const PLATFORM_ACTIONS = {
+  "custom_field.created": "admin.custom_field_created",
+  "custom_field.updated": "admin.custom_field_updated",
+  "custom_field.archived": "admin.custom_field_archived",
+  "custom_field.deleted": "admin.custom_field_deleted",
+} as const satisfies Partial<Record<AuditAction, AuditAction>>;
+
 function auditOf(
   scope: Scope,
-  action: AuditAction,
+  event: keyof typeof PLATFORM_ACTIONS,
   field: { id: string; key: string },
   actor: CustomFieldActor,
   tx: Tx,
   extra: Record<string, string | number | boolean | null> = {},
 ) {
+  const action: AuditAction = scope.kind === "platform" ? PLATFORM_ACTIONS[event] : event;
+
   return auditInTransaction(tx, action, {
     actor: scope.kind === "platform" ? { type: "platform", id: actor.userId } : { id: actor.userId },
     tenantId: scopeTenantId(scope),
@@ -102,9 +113,11 @@ const toDef = (row: Row): CustomFieldDef => ({
   required: row.required,
 });
 
-/** Quantos clientes têm valor no campo (só tenant; subconsulta correlacionada: colunas com o prefixo da tabela; a plataforma ganha o dela na fase A4). */
+/** Quantos cadastros têm valor no campo (subconsulta correlacionada: colunas com o prefixo da tabela). */
 function usageSql(scope: Scope) {
-  if (scope.kind !== "tenant") return sql<number>`0`;
+  if (scope.kind !== "tenant") {
+    return sql<number>`(select count(*)::int from "organization_profile" where jsonb_exists("organization_profile"."custom_fields", "custom_field"."id"::text))`;
+  }
 
   return sql<number>`(select count(*)::int from "customer" where "customer"."tenant_id" = ${scope.tenantId} and jsonb_exists("customer"."custom_fields", "custom_field"."id"::text))`;
 }
@@ -271,17 +284,21 @@ export function createCustomField(scope: Scope, input: CustomFieldInput, actor: 
  * um `count(*) filter` por opção.
  */
 async function optionsUsage(tx: Tx, scope: Scope, fieldId: string, values: string[]) {
-  if (scope.kind !== "tenant" || values.length === 0) return values.map(() => 0);
+  if (values.length === 0) return values.map(() => 0);
 
+  const column = scope.kind === "tenant" ? customer.customFields : organizationProfile.customFields;
   const columns = Object.fromEntries(
     values.map((value, n) => [
       `n${n}`,
       // Um escalar contém a si mesmo e um array contém o elemento: serve os dois tipos.
-      sql<number>`(count(*) filter (where (${customer.customFields} -> ${fieldId}::text) @> to_jsonb(${value}::text)))::int`,
+      sql<number>`(count(*) filter (where (${column} -> ${fieldId}::text) @> to_jsonb(${value}::text)))::int`,
     ]),
   );
 
-  const [row] = await tx.select(columns).from(customer).where(eq(customer.tenantId, scope.tenantId));
+  const [row] =
+    scope.kind === "tenant"
+      ? await tx.select(columns).from(customer).where(eq(customer.tenantId, scope.tenantId))
+      : await tx.select(columns).from(organizationProfile);
 
   return values.map((_, n) => row?.[`n${n}`] ?? 0);
 }
@@ -409,20 +426,24 @@ export function deleteCustomField(
       );
     }
 
-    let clearedFrom = 0;
-    if (scope.kind === "tenant") {
-      const cleared = await tx
-        .update(customer)
-        .set({ customFields: sql`${customer.customFields} - ${current.id}::text` })
-        .where(
-          and(
-            eq(customer.tenantId, scope.tenantId),
-            sql`jsonb_exists(${customer.customFields}, ${current.id}::text)`,
-          ),
-        )
-        .returning({ id: customer.id });
-      clearedFrom = cleared.length;
-    }
+    const cleared =
+      scope.kind === "tenant"
+        ? await tx
+            .update(customer)
+            .set({ customFields: sql`${customer.customFields} - ${current.id}::text` })
+            .where(
+              and(
+                eq(customer.tenantId, scope.tenantId),
+                sql`jsonb_exists(${customer.customFields}, ${current.id}::text)`,
+              ),
+            )
+            .returning({ id: customer.id })
+        : await tx
+            .update(organizationProfile)
+            .set({ customFields: sql`${organizationProfile.customFields} - ${current.id}::text` })
+            .where(sql`jsonb_exists(${organizationProfile.customFields}, ${current.id}::text)`)
+            .returning({ id: organizationProfile.organizationId });
+    const clearedFrom = cleared.length;
 
     await tx.delete(customField).where(byId(scope, id));
     await auditOf(scope, "custom_field.deleted", current, actor, tx, { clearedFrom });
@@ -445,13 +466,22 @@ export type ResolvedCustomFields = {
  * deadlock com a exclusão do campo). Id desconhecido ou arquivado é 400 `UNKNOWN_FIELD`; valor
  * inválido, 400 `INVALID_FIELD_VALUE`. `null` (ou vazio) vira "remova".
  */
-export async function resolveCustomFields(
+export function resolveCustomFields(
   tx: Tx,
   tenantId: string,
   raw: Record<string, unknown>,
 ): Promise<ResolvedCustomFields> {
+  return resolveCustomFieldsIn(tx, { kind: "tenant", tenantId }, raw);
+}
+
+/** O mesmo, para os dois escopos: a plataforma valida contra os campos `organization`. */
+export async function resolveCustomFieldsIn(
+  tx: Tx,
+  scope: Scope,
+  raw: Record<string, unknown>,
+): Promise<ResolvedCustomFields> {
   // `FOR SHARE`: o campo não é excluído nem perde opção enquanto este cadastro é gravado.
-  const defs = await loadDefs(tx, { kind: "tenant", tenantId }, { lock: true });
+  const defs = await loadDefs(tx, scope, { lock: true });
   const known = new Set(defs.map(({ id }) => id));
 
   if (Object.keys(raw).some((id) => !known.has(id))) {
@@ -507,13 +537,16 @@ export function valuesOf(patch: CustomFieldsPatch): CustomFieldValues {
 }
 
 /** `custom_fields || $set - $removidas`, no mesmo `UPDATE`: o merge por chave é atômico. */
-export function customFieldsMergeSql(patch: CustomFieldsPatch): SQL {
+export function customFieldsMergeSql(
+  patch: CustomFieldsPatch,
+  column: AnyPgColumn = customer.customFields,
+): SQL {
   const set = valuesOf(patch);
   const removed = Object.entries(patch)
     .filter(([, value]) => value === null)
     .map(([id]) => id);
 
-  let expression = sql`${customer.customFields}`;
+  let expression = sql`${column}`;
   if (Object.keys(set).length > 0) {
     // `::text::jsonb`: o driver não serializa o texto de novo como JSON.
     expression = sql`(${expression} || ${JSON.stringify(set)}::text::jsonb)`;

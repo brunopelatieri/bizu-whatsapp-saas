@@ -29,6 +29,8 @@ import {
   type TestUser,
 } from "./tenant-helpers";
 
+const PLATFORM_NOTE = `nota-da-plataforma-${randomUUID().slice(0, 8)}`;
+
 let owner: postgres.Sql;
 let mail: MemoryEmailProvider;
 let storageDir: string;
@@ -110,6 +112,22 @@ describe("exportação de dados da equipe", () => {
       cookie: tenantOwner.cookie,
       body: { customFields: { [created.id]: "indicacao" } },
     });
+
+    // Anotação da plataforma sobre a organização: o owner nunca a recebe (crm-cadastro A4).
+    await asPlatform(async (tx) => {
+      const [platformTag] = await tx<{ id: string }[]>`
+        insert into tag (tenant_id, name) values (null, ${PLATFORM_NOTE}) returning id
+      `;
+      await tx`insert into organization_tag (organization_id, tag_id) values (${tenant.id}, ${platformTag?.id ?? ""})`;
+      await tx`
+        insert into organization_profile (organization_id, custom_fields)
+        values (${tenant.id}, ${tx.json({ nota: PLATFORM_NOTE })})
+      `;
+    });
+  });
+
+  afterAll(async () => {
+    await asPlatform((tx) => tx`delete from tag where tenant_id is null and name = ${PLATFORM_NOTE}`);
   });
 
   it("cria o pedido e recusa um segundo pendente", async () => {
@@ -194,6 +212,10 @@ describe("exportação de dados da equipe", () => {
 
     const audit = JSON.parse(text(files, "auditoria.json")) as Array<{ action: string }>;
     expect(audit.some(({ action }) => action === "tenant.created")).toBe(true);
+    // A anotação da plataforma (etiqueta e campos) é dado da plataforma: fora da exportação do owner.
+    for (const [name, data] of files) {
+      expect(data.toString(), name).not.toContain(PLATFORM_NOTE);
+    }
     // O hash de IP não sai: é identificador derivado do IP.
     expect(text(files, "auditoria.json")).not.toContain("ip_hash");
     expect(text(files, "auditoria.json")).not.toContain("ipHash");

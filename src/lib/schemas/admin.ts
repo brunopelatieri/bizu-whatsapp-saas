@@ -9,6 +9,7 @@ import {
   subscriptionStatusList,
 } from "@/lib/billing/constants";
 import { billingStates } from "@/lib/billing/state";
+import { tagFilterSchema } from "@/lib/schemas/crm";
 import { phoneSchema } from "@/lib/schemas/phone";
 import {
   slugSchema,
@@ -180,6 +181,8 @@ export const tenantsQuerySchema = z.object({
   status: z.enum(billingStates).optional(),
   // admin-crud A: organizações de um plano.
   plan: z.uuid("Plano inválido.").optional(),
+  // crm-cadastro A4: etiquetas da plataforma, qualquer uma (`tags=<id>,<id>`).
+  tags: tagFilterSchema.optional(),
   page,
 });
 

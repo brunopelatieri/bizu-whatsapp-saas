@@ -526,3 +526,151 @@ describe("scopedPolicy e platformOnlyPolicy", () => {
     expect(scopeTenantId({ kind: "platform" })).toBeNull();
   });
 });
+
+/**
+ * `organization_tag` e `organization_profile` (crm-cadastro A4): sem `tenant_id`, só a
+ * plataforma lê e grava. As tabelas reais, nos mesmos modos das provas acima; `tag` e
+ * `custom_field` (escopo anulável) provam que o tenant nunca vê a linha da plataforma.
+ */
+describe("RLS do CRM da plataforma (tabelas reais)", () => {
+  const { organizationTag, organizationProfile, tag, customField } = schema;
+  let owner: postgres.Sql;
+  const marker = randomUUID().slice(0, 8);
+  const orgId = randomUUID();
+  const otherOrgId = randomUUID();
+  let platformTagId: string;
+  let tenantTagId: string;
+  let platformFieldId: string;
+
+  const platformOnlyTables = tables
+    .map((table) => getTableConfig(table))
+    .filter(({ policies }) => policies.some(({ name }) => name === "platform_only"))
+    .map(({ name }) => name)
+    .sort();
+
+  beforeAll(async () => {
+    owner = connectOwner();
+
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`
+        insert into organization (id, name, slug) values
+          (${orgId}, 'CRM A', ${`crm-a-${marker}`}),
+          (${otherOrgId}, 'CRM B', ${`crm-b-${marker}`})
+      `;
+      const [platformTag] = await tx<{ id: string }[]>`
+        insert into tag (tenant_id, name) values (null, ${`plat-${marker}`}) returning id
+      `;
+      const [tenantTag] = await tx<{ id: string }[]>`
+        insert into tag (tenant_id, name) values (${orgId}, ${`tenant-${marker}`}) returning id
+      `;
+      const [field] = await tx<{ id: string }[]>`
+        insert into custom_field (tenant_id, entity, key, label, type)
+        values (null, 'organization', ${`k_${marker}`}, 'Campo', 'text') returning id
+      `;
+      if (!platformTag || !tenantTag || !field) throw new Error("linhas não criadas");
+      platformTagId = platformTag.id;
+      tenantTagId = tenantTag.id;
+      platformFieldId = field.id;
+
+      await tx`insert into organization_tag (organization_id, tag_id) values (${orgId}, ${platformTagId})`;
+      await tx`
+        insert into organization_profile (organization_id, custom_fields)
+        values (${orgId}, ${tx.json({ [platformFieldId]: "x" })})
+      `;
+    });
+  });
+
+  afterAll(async () => {
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`delete from custom_field where tenant_id is null and key = ${`k_${marker}`}`;
+      await tx`delete from tag where name in (${`plat-${marker}`}, ${`tenant-${marker}`})`;
+      await tx`delete from organization where id in (${orgId}, ${otherOrgId})`;
+    });
+    await owner.end();
+  });
+
+  it("só as duas tabelas da plataforma usam platformOnlyPolicy, com RLS forçado", async () => {
+    expect(platformOnlyTables).toEqual(["organization_profile", "organization_tag"]);
+
+    for (const name of platformOnlyTables) {
+      const [row] = await owner<{ relrowsecurity: boolean; relforcerowsecurity: boolean }[]>`
+        select relrowsecurity, relforcerowsecurity from pg_class where oid = ${`public.${name}`}::regclass
+      `;
+      expect(row).toEqual({ relrowsecurity: true, relforcerowsecurity: true });
+    }
+  });
+
+  it("withTenant (inclusive o tenant etiquetado) não lê nem grava as tabelas da plataforma", async () => {
+    const [tags, profiles] = await withTenant(orgId, async (tx) => [
+      await tx.select().from(organizationTag),
+      await tx.select().from(organizationProfile),
+    ]);
+    expect(tags).toEqual([]);
+    expect(profiles).toEqual([]);
+
+    await expect(
+      withTenant(otherOrgId, (tx) =>
+        tx.insert(organizationTag).values({ organizationId: otherOrgId, tagId: platformTagId }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      withTenant(otherOrgId, (tx) => tx.insert(organizationProfile).values({ organizationId: otherOrgId })),
+    ).rejects.toThrow();
+  });
+
+  it("bizu_app cru (sem helper) não lê as tabelas da plataforma", async () => {
+    expect(await getDb().select().from(organizationTag)).toEqual([]);
+    expect(await getDb().select().from(organizationProfile)).toEqual([]);
+  });
+
+  it("withPlatformData lê e grava as duas tabelas", async () => {
+    const [tags, profiles] = await withPlatformData(async (tx) => [
+      await tx.select().from(organizationTag).where(eq(organizationTag.organizationId, orgId)),
+      await tx.select().from(organizationProfile).where(eq(organizationProfile.organizationId, orgId)),
+    ]);
+    expect(tags).toHaveLength(1);
+    expect(profiles).toHaveLength(1);
+
+    await withPlatformData(async (tx) => {
+      await tx.insert(organizationProfile).values({ organizationId: otherOrgId });
+      await tx.delete(organizationProfile).where(eq(organizationProfile.organizationId, otherOrgId));
+    });
+  });
+
+  it("bizu_owner sem bypass nem escopo não lê as tabelas da plataforma", async () => {
+    expect(await owner`select 1 from organization_tag where organization_id = ${orgId}`).toHaveLength(0);
+    expect(await owner`select 1 from organization_profile where organization_id = ${orgId}`).toHaveLength(0);
+  });
+
+  it("tag e custom_field: o tenant não vê a linha da plataforma, e a plataforma não vê a do tenant", async () => {
+    const fromTenant = await withTenant(orgId, async (tx) => ({
+      tags: await tx.select({ id: tag.id }).from(tag).where(like(tag.name, `%${marker}`)),
+      fields: await tx.select({ id: customField.id }).from(customField),
+    }));
+    expect(fromTenant.tags.map(({ id }) => id)).toEqual([tenantTagId]);
+    expect(fromTenant.fields.map(({ id }) => id)).not.toContain(platformFieldId);
+
+    const fromPlatform = await withPlatformData(async (tx) => ({
+      tags: await tx.select({ id: tag.id }).from(tag).where(like(tag.name, `%${marker}`)),
+      fields: await tx.select({ id: customField.id }).from(customField).where(eq(customField.id, platformFieldId)),
+    }));
+    expect(fromPlatform.tags.map(({ id }) => id)).toEqual([platformTagId]);
+    expect(fromPlatform.fields).toHaveLength(1);
+  });
+
+  it("apagar a organização leva organization_tag e organization_profile por cascade", async () => {
+    const doomed = randomUUID();
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`insert into organization (id, name, slug) values (${doomed}, 'CRM C', ${`crm-c-${marker}`})`;
+      await tx`insert into organization_tag (organization_id, tag_id) values (${doomed}, ${platformTagId})`;
+      await tx`insert into organization_profile (organization_id) values (${doomed})`;
+      await tx`delete from organization where id = ${doomed}`;
+
+      expect(await tx`select 1 from organization_tag where organization_id = ${doomed}`).toHaveLength(0);
+      expect(await tx`select 1 from organization_profile where organization_id = ${doomed}`).toHaveLength(0);
+    });
+  });
+});

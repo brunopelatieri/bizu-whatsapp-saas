@@ -132,6 +132,11 @@ export const customFieldsQuerySchema = z.object({
   usage: z.enum(["true", "false"]).default("false"),
 });
 
+/** Na plataforma o padrão é a entidade `organization` (o tenant só tem `customer`). */
+export const adminCustomFieldsQuerySchema = customFieldsQuerySchema.extend({
+  entity: z.enum(customFieldEntities).default("organization"),
+});
+
 export const customFieldOrderSchema = z.object({
   entity: z.enum(customFieldEntities),
   ids: z
@@ -150,3 +155,17 @@ export const deleteCustomFieldSchema = z.object({ confirm: z.string().max(100) }
 export const customFieldValuesSchema = z
   .record(z.uuid("Campo inválido."), z.unknown())
   .refine((values) => Object.keys(values).length <= 100, "Campos demais.");
+
+/**
+ * `PUT /api/admin/tenants/:id/profile`: o que a plataforma anota sobre a organização. `tagIds`
+ * substitui o conjunto; `customFields` é merge por chave (`null` remove), como no cliente.
+ */
+export const organizationProfileSchema = z
+  .object({
+    tagIds: tagIdsSchema.optional(),
+    customFields: customFieldValuesSchema.optional(),
+  })
+  .refine((body) => body.tagIds !== undefined || body.customFields !== undefined, {
+    message: "Nada para alterar.",
+  });
+export type OrganizationProfileInput = z.infer<typeof organizationProfileSchema>;

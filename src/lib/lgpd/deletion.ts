@@ -16,7 +16,9 @@ import {
   invitation,
   member,
   organization,
+  organizationProfile,
   organizationRole,
+  organizationTag,
   portalAccount,
   portalSession,
   portalTwoFactor,
@@ -839,6 +841,10 @@ async function anonymizeTenant(tx: Tx, id: string, now: Date): Promise<Anonymize
   await tx.delete(organizationRole).where(eq(organizationRole.organizationId, id));
   await tx.delete(tenantPaymentCredential).where(eq(tenantPaymentCredential.tenantId, id));
   await tx.delete(impersonationGrant).where(eq(impersonationGrant.tenantId, id));
+  // Anotação da plataforma sobre a organização (etiquetas e campos, `crm-cadastro` A4): a linha da
+  // organização fica, então o `cascade` não dispara; texto livre dela pode citar gente.
+  await tx.delete(organizationTag).where(eq(organizationTag.organizationId, id));
+  await tx.delete(organizationProfile).where(eq(organizationProfile.organizationId, id));
   await tx.update(customer).set(anonymizedCustomer).where(eq(customer.tenantId, id));
 
   await tx

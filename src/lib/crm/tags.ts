@@ -1,7 +1,7 @@
 import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { isUniqueViolation } from "@/db/errors";
 import { type Scope, scopeTenantId, type Tx, withScope } from "@/db/rls";
-import { customer, customerTag, tag } from "@/db/schema";
+import { customer, customerTag, organizationTag, tag } from "@/db/schema";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
 import { CUSTOMER_TAG_LIMIT, DEFAULT_TAG_COLOR, TAG_LIMIT } from "@/lib/crm/constants";
 import type { TagInput, UpdateTagInput } from "@/lib/schemas/crm";
@@ -28,7 +28,22 @@ const inScope = (scope: Scope) =>
 
 const byId = (scope: Scope, id: string) => and(eq(tag.id, id), inScope(scope));
 
-function auditOf(scope: Scope, action: AuditAction, tagId: string, actor: TagActor, tx: Tx) {
+/** Na plataforma o evento ganha o prefixo `admin.`, com `_` no lugar do ponto. */
+const PLATFORM_ACTIONS = {
+  "tag.created": "admin.tag_created",
+  "tag.updated": "admin.tag_updated",
+  "tag.deleted": "admin.tag_deleted",
+} as const satisfies Partial<Record<AuditAction, AuditAction>>;
+
+function auditOf(
+  scope: Scope,
+  event: keyof typeof PLATFORM_ACTIONS,
+  tagId: string,
+  actor: TagActor,
+  tx: Tx,
+) {
+  const action: AuditAction = scope.kind === "platform" ? PLATFORM_ACTIONS[event] : event;
+
   return auditInTransaction(tx, action, {
     actor: scope.kind === "platform" ? { type: "platform", id: actor.userId } : { id: actor.userId },
     tenantId: scopeTenantId(scope),
@@ -39,12 +54,12 @@ function auditOf(scope: Scope, action: AuditAction, tagId: string, actor: TagAct
 
 export type TagView = { id: string; name: string; color: string; usage: number };
 
-/** Quantos clientes (ou organizações, na plataforma) usam a etiqueta. */
+/** Quantos clientes (ou organizações, na plataforma) usam a etiqueta. Subconsulta correlacionada: tabelas com prefixo. */
 function usageOf(scope: Scope) {
   if (scope.kind === "tenant") {
     return sql<number>`(select count(*)::int from ${customerTag} where ${customerTag.tagId} = ${tag.id})`;
   }
-  return sql<number>`0`;
+  return sql<number>`(select count(*)::int from ${organizationTag} where ${organizationTag.tagId} = ${tag.id})`;
 }
 
 export function listTags(scope: Scope): Promise<TagView[]> {
@@ -122,15 +137,15 @@ export function updateTag(scope: Scope, id: string, patch: UpdateTagInput, actor
 /** Apaga a etiqueta e, por `cascade`, o vínculo com os clientes. Devolve em quantos estava. */
 export function deleteTag(scope: Scope, id: string, actor: TagActor) {
   return withScope(scope, async (tx) => {
-    const removedFrom =
+    // O vínculo cai por `cascade`; a contagem vem antes, da tabela do escopo.
+    const [usage] =
       scope.kind === "tenant"
-        ? ((
-            await tx
-              .select({ total: count() })
-              .from(customerTag)
-              .where(eq(customerTag.tagId, id))
-          )[0]?.total ?? 0)
-        : 0;
+        ? await tx.select({ total: count() }).from(customerTag).where(eq(customerTag.tagId, id))
+        : await tx
+            .select({ total: count() })
+            .from(organizationTag)
+            .where(eq(organizationTag.tagId, id));
+    const removedFrom = usage?.total ?? 0;
 
     const [removed] = await tx.delete(tag).where(byId(scope, id)).returning({ id: tag.id });
     if (!removed) throw notFound(NOT_FOUND);

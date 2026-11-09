@@ -6,7 +6,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { tenantPolicy } from "../tenant-policy";
+import { scopedPolicy } from "../tenant-policy";
 import { organization } from "./tenant";
 
 export const auditActorTypes = [
@@ -43,6 +43,7 @@ export const auditLog = pgTable(
   (table) => [
     index("audit_log_tenant_created_idx").on(table.tenantId, table.createdAt),
     index("audit_log_actor_id_idx").on(table.actorId),
-    tenantPolicy(),
+    // Evento da plataforma (`tenant_id` nulo) grava e lê dentro de `withPlatformData`.
+    scopedPolicy(),
   ],
 ).enableRLS();

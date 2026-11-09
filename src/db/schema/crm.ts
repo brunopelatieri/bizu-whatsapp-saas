@@ -19,7 +19,7 @@ import {
   customFieldTypes,
   DEFAULT_TAG_COLOR,
 } from "../../lib/crm/constants";
-import { scopedPolicy, tenantPolicy } from "../tenant-policy";
+import { platformOnlyPolicy, scopedPolicy, tenantPolicy } from "../tenant-policy";
 import { user } from "./auth";
 import { customer } from "./customer";
 import { organization } from "./tenant";
@@ -84,6 +84,29 @@ export const customerTag = pgTable(
   ],
 ).enableRLS();
 
+/**
+ * Etiqueta que a **plataforma** aplicou a uma organização (`tag` com `tenant_id` nulo). Sem
+ * `tenant_id`: é dado da plataforma sobre o tenant, e o owner nunca o alcança (`platformOnlyPolicy()`:
+ * só `withPlatformData` lê e grava; `withTenant` e o `bizu_app` cru leem vazio).
+ */
+export const organizationTag = pgTable(
+  "organization_tag",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tag.id, { onDelete: "cascade" }),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.organizationId, table.tagId] }),
+    index("organization_tag_tag_idx").on(table.tagId),
+    platformOnlyPolicy(),
+  ],
+).enableRLS();
+
 /** Opção de um campo de lista: `value` é estável (guardado no cliente); `label` é editável. */
 export type CustomFieldOption = { value: string; label: string };
 
@@ -133,6 +156,32 @@ export const customField = pgTable(
       sql`(${table.entity} = 'organization' and ${table.tenantId} is null) or (${table.entity} = 'customer' and ${table.tenantId} is not null)`,
     ),
     scopedPolicy(),
+  ],
+).enableRLS();
+
+/**
+ * Valores dos campos da plataforma (`custom_field` com `entity = 'organization'`) de uma
+ * organização, em jsonb chaveado pelo **id** do campo. Mesmo isolamento de `organization_tag`.
+ */
+export const organizationProfile = pgTable(
+  "organization_profile",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    customFields: jsonb("custom_fields")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    updatedBy: uuid("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: timestamptz("updated_at")
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  () => [
+    check("organization_profile_object", sql`jsonb_typeof(custom_fields) = 'object'`),
+    platformOnlyPolicy(),
   ],
 ).enableRLS();
 

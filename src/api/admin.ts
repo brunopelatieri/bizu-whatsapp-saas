@@ -38,6 +38,25 @@ import {
   revokePortalSessions,
 } from "@/lib/admin/users";
 import { type AuditAction, audit } from "@/lib/audit";
+import {
+  createCustomField,
+  deleteCustomField,
+  listCustomFields,
+  reorderCustomFields,
+  updateCustomField,
+} from "@/lib/crm/custom-fields";
+import { getOrganizationAnnotation, setOrganizationProfile } from "@/lib/crm/organization-profile";
+import { createTag, deleteTag, listTags, updateTag } from "@/lib/crm/tags";
+import {
+  adminCustomFieldsQuerySchema,
+  customFieldOrderSchema,
+  customFieldSchema,
+  deleteCustomFieldSchema,
+  organizationProfileSchema,
+  tagSchema,
+  updateCustomFieldSchema,
+  updateTagSchema,
+} from "@/lib/schemas/crm";
 import { listPlatformAudit } from "@/lib/audit-log";
 import { getAuth } from "@/lib/auth/server";
 import {
@@ -161,9 +180,13 @@ adminRoutes.get("/api/admin/tenants/:id", validId, async (c) => {
   const { id } = c.req.valid("param");
   const detail = await getTenantDetail(id);
   const { allowed, policy, grant } = await impersonationAccess(id);
+  // Anotação da plataforma sobre a organização: só `/api/admin/*` a devolve.
+  const { tags, customFields } = await getOrganizationAnnotation(id);
 
   return c.json({
     ...detail,
+    tags,
+    customFields,
     impersonation: { allowed, policy, grantExpiresAt: grant?.expiresAt ?? null },
   });
 });
@@ -765,3 +788,147 @@ adminRoutes.post(
     return c.json({ ok: true });
   },
 );
+
+// crm-cadastro A4: etiquetas, campos e anotação da plataforma sobre as organizações.
+// Mesmos serviços do tenant (`src/lib/crm/`), com `Scope = platform` (`withPlatformData`).
+// Leitura: plataforma. Escrita: `platform_owner`, fora de personificação, antes da validação.
+// Nenhuma rota de tenant lê `organization_tag` nem `organization_profile`.
+
+const platformScope = { kind: "platform" } as const;
+
+adminRoutes.get("/api/admin/crm/tags", async (c) =>
+  c.json({ tags: await listTags(platformScope) }),
+);
+
+adminRoutes.post(
+  "/api/admin/crm/tags",
+  ownerOnly,
+  blockWhileImpersonating,
+  zValidator("json", tagSchema, validationError),
+  async (c) => {
+    const tag = await createTag(platformScope, c.req.valid("json"), crmActor(c));
+    return c.json({ tag }, 201);
+  },
+);
+
+adminRoutes.patch(
+  "/api/admin/crm/tags/:id",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  zValidator("json", updateTagSchema, validationError),
+  async (c) => {
+    const tag = await updateTag(
+      platformScope,
+      c.req.valid("param").id,
+      c.req.valid("json"),
+      crmActor(c),
+    );
+    return c.json({ tag });
+  },
+);
+
+adminRoutes.delete(
+  "/api/admin/crm/tags/:id",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  async (c) => {
+    const { removedFrom } = await deleteTag(platformScope, c.req.valid("param").id, crmActor(c));
+    return c.json({ ok: true, removedFrom });
+  },
+);
+
+adminRoutes.get(
+  "/api/admin/crm/custom-fields",
+  zValidator("query", adminCustomFieldsQuerySchema, validationError),
+  async (c) => {
+    const { entity, archived, usage } = c.req.valid("query");
+
+    return c.json({
+      fields: await listCustomFields(platformScope, { entity, archived, usage: usage === "true" }),
+    });
+  },
+);
+
+adminRoutes.post(
+  "/api/admin/crm/custom-fields",
+  ownerOnly,
+  blockWhileImpersonating,
+  zValidator("json", customFieldSchema, validationError),
+  async (c) => {
+    const field = await createCustomField(platformScope, c.req.valid("json"), crmActor(c));
+    return c.json({ field }, 201);
+  },
+);
+
+// Antes de `/:id`, para `order` nunca ser lido como id.
+adminRoutes.put(
+  "/api/admin/crm/custom-fields/order",
+  ownerOnly,
+  blockWhileImpersonating,
+  zValidator("json", customFieldOrderSchema, validationError),
+  async (c) => {
+    const { entity, ids } = c.req.valid("json");
+
+    await reorderCustomFields(platformScope, entity, ids);
+    return c.json({ ok: true });
+  },
+);
+
+adminRoutes.patch(
+  "/api/admin/crm/custom-fields/:id",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  zValidator("json", updateCustomFieldSchema, validationError),
+  async (c) => {
+    const field = await updateCustomField(
+      platformScope,
+      c.req.valid("param").id,
+      c.req.valid("json"),
+      crmActor(c),
+    );
+    return c.json({ field });
+  },
+);
+
+adminRoutes.delete(
+  "/api/admin/crm/custom-fields/:id",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  zValidator("json", deleteCustomFieldSchema, validationError),
+  async (c) => {
+    const { clearedFrom } = await deleteCustomField(
+      platformScope,
+      c.req.valid("param").id,
+      c.req.valid("json").confirm,
+      crmActor(c),
+    );
+    return c.json({ ok: true, clearedFrom });
+  },
+);
+
+/** Etiquetas (substitui o conjunto) e campos (merge por chave) da organização. */
+adminRoutes.put(
+  "/api/admin/tenants/:id/profile",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  zValidator("json", organizationProfileSchema, validationError),
+  async (c) => {
+    const annotation = await setOrganizationProfile(
+      c.req.valid("param").id,
+      c.req.valid("json"),
+      crmActor(c),
+    );
+
+    return c.json(annotation);
+  },
+);
+
+// biome-ignore lint/suspicious/noExplicitAny: o handler passa o contexto com o seu path e entradas validadas.
+function crmActor(c: Context<AuthEnv, any, any>) {
+  return { userId: c.get("user").id, ip: clientKey(c) };
+}

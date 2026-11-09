@@ -79,6 +79,13 @@ describe("acesso", () => {
     ["GET", "/api/admin/users"],
     ["PATCH", "/api/admin/settings"],
     ["POST", "/api/admin/plans"],
+    // crm-cadastro A4: catálogo da plataforma e anotação da organização.
+    ["GET", "/api/admin/crm/tags"],
+    ["GET", "/api/admin/crm/custom-fields"],
+    ["POST", "/api/admin/crm/tags"],
+    ["POST", "/api/admin/crm/custom-fields"],
+    ["PUT", "/api/admin/crm/custom-fields/order"],
+    ["PUT", "/api/admin/tenants/00000000-0000-4000-8000-000000000000/profile"],
   ] as const;
 
   it.each(routes)("%s %s sem sessão responde 401", async (method, path) => {

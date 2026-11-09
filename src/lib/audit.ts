@@ -98,6 +98,16 @@ export type AuditAction =
   | "custom_field.updated"
   | "custom_field.archived"
   | "custom_field.deleted"
+  // crm-cadastro A4: catálogo e anotação da plataforma sobre organizações (`actor_type = platform`,
+  // sem `tenant_id`: o owner nunca vê). Só ids e `key` em `metadata`.
+  | "admin.tag_created"
+  | "admin.tag_updated"
+  | "admin.tag_deleted"
+  | "admin.custom_field_created"
+  | "admin.custom_field_updated"
+  | "admin.custom_field_archived"
+  | "admin.custom_field_deleted"
+  | "admin.tenant_profile_updated"
   | "platform.impersonation_requested"
   | "platform.impersonation_started"
   | "platform.impersonation_stopped"

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or, type SQL, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
 import { withPlatformScope } from "@/db/rls";
 import {
@@ -22,6 +22,7 @@ import { appLink } from "@/lib/auth/links";
 import { sendEmail } from "@/lib/email/send";
 import { tenantSuspendedTemplate } from "@/lib/email/templates/tenant-suspended";
 import { isUniqueViolation } from "@/db/errors";
+import { organizationIdsWithTags, tagsOfOrganizationPage, type OrgTagView } from "@/lib/crm/organization-profile";
 import { PAGE_SIZE, type UpdateTenantInput } from "@/lib/schemas/admin";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -51,8 +52,18 @@ export async function listTenants(input: {
   q?: string;
   status?: BillingState;
   plan?: string;
+  tags?: string[];
   page: number;
 }) {
+  // As etiquetas são dado da plataforma: lidas em `withPlatformData`, nunca no bypass da lista.
+  let taggedIds: string[] | null = null;
+  if (input.tags && input.tags.length > 0) {
+    taggedIds = await organizationIdsWithTags(input.tags);
+    if (taggedIds.length === 0) {
+      return { items: [], total: 0, pageSize: PAGE_SIZE };
+    }
+  }
+
   const term = input.q ? `%${escapeLike(input.q)}%` : null;
   const filters: SQL[] = [];
 
@@ -64,10 +75,11 @@ export async function listTenants(input: {
   if (input.status) filters.push(sql`${stateSql} = ${input.status}`);
   // admin-crud A: "+N" de /admin/planos leva às organizações do plano.
   if (input.plan) filters.push(eq(subscription.planId, input.plan));
+  if (taggedIds) filters.push(inArray(organization.id, taggedIds));
 
   const where = filters.length ? and(...filters) : undefined;
 
-  return withPlatformScope("admin: lista tenants", async (tx) => {
+  const page = await withPlatformScope("admin: lista tenants", async (tx) => {
     const base = tx
       .select({
         id: organization.id,
@@ -98,6 +110,16 @@ export async function listTenants(input: {
 
     return { items, total: totalRow?.total ?? 0, pageSize: PAGE_SIZE };
   });
+
+  const tags = await tagsOfOrganizationPage(page.items.map(({ id }) => id));
+
+  return {
+    ...page,
+    items: page.items.map((item): AdminTenantRow & { tags: OrgTagView[] } => ({
+      ...item,
+      tags: tags.get(item.id) ?? [],
+    })),
+  };
 }
 
 export async function getTenantDetail(tenantId: string) {
