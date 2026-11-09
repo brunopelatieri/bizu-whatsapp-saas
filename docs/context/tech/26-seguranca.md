@@ -97,6 +97,11 @@ os 4 últimos caracteres; segredo com menos de 8 não mostra nenhum.
    `app.bypass_tenant` ligado.
 5. Remova `CREDENTIALS_ENCRYPTION_KEY_PREVIOUS` e suba de novo. Só depois descarte a chave antiga.
 
+Os segredos de canal (`channel_whatsapp_cloud` e `channel_evolution`: token, segredo do aplicativo, token
+de verificação, token da instância e segredo do webhook) usam o mesmo anel de chaves, com `aad =
+channel:<id>:<campo>` (`src/lib/channels/credentials.ts`). `rotateCredentials()` recifra também essas
+duas tabelas na mesma transação; confira `key_version` nelas com `app.bypass_tenant` ligado.
+
 A rotação cobre uma versão por vez. Perder a chave atual significa recadastrar as credenciais: guarde-a
 fora do banco e do backup do banco.
 

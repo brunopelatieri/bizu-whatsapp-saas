@@ -13,6 +13,7 @@ Mecânica (consentimento, exportação, exclusão, arquivos): `tech/27-lgpd-arqu
 | Sessões (equipe e portal) | `session`, `portal_session` | até expirar (7 dias) | `maintenance.prune` | Execução de contrato (manter o login) |
 | Tokens de verificação e reset | `verification`, `portal_verification` | até expirar | `maintenance.prune` | Execução de contrato |
 | Eventos de pagamento já tratados | `payment_event` | 90 dias | `maintenance.prune` (`processed`, `ignored`, `duplicate`) | Execução de contrato; o pendente ou falho fica para reprocessar |
+| Avisos de canal de WhatsApp já tratados | `channel_event` | 30 dias | `maintenance.prune` (`processed`, `ignored`, `failed`) | Execução de contrato; o `raw` tem telefone, nome e texto de mensagem e só existe para reprocessar; o pendente fica; apagar o canal ou a organização o apaga em cascata |
 | Registro de e-mail enviado | `email_message` | 180 dias | `maintenance.prune` | Legítimo interesse (diagnóstico de entrega); só hash do destinatário, nunca o corpo |
 | Auditoria | `audit_log` | `platform_setting.audit_retention_days` (padrão **365**, mínimo 30) | `maintenance.prune` | Legítimo interesse (segurança e suporte); só ids e enums, sem texto livre |
 | Exportação de dados | `data_export` e o zip no armazenamento | **7 dias** (arquivo) e mais 7 (registro) | `maintenance.prune` | Atender o titular |

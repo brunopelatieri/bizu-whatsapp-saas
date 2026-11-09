@@ -18,6 +18,7 @@ estão nas rules e no cabeçalho de cada arquivo.
 | Login, sessão, provedor de autenticação, verificação de e-mail opcional | `tech/08-auth.md` |
 | 2FA, sessões, personificação, CSP, CSRF, rate limit, criptografia de credenciais, leitura da auditoria | `tech/26-seguranca.md` |
 | LGPD: consentimento, `/legal/*`, exportação, exclusão com carência, retenção, arquivos (`StorageProvider`), logs, Sentry, backup | `tech/27-lgpd-arquivos.md`, `lgpd.md` |
+| Canais WhatsApp: `src/lib/channels/`, módulos `whatsapp_cloud` e `whatsapp_qr`, `channel_event`, webhooks de canal, jobs `channel.*`, limites por plano | `tech/29-canais-whatsapp.md` e `docs/specs/whatsapp-canais/spec.md` |
 | Tenant, equipe, convite, papéis, permissões, auditoria | `tech/21-tenant-rbac.md` |
 | Admin da plataforma: `/admin`, `/api/admin/*`, suspender, banir, planos na tela (excluir e arquivar), editar organização, detalhe e edição de usuários, exclusão (agendada ou imediata) de organização, usuário e pessoa do portal | `tech/22-admin.md` |
 | Planos, preços, trial, limites (inclusive organizações por dono), features, estado `read_only`, `checkLimit`, seed | `tech/23-billing-planos.md` |
