@@ -4,7 +4,6 @@ import type postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { type Tx, withPlatformScope, withScope } from "@/db/rls";
 import { channel, channelEvolution, channelWhatsappCloud } from "@/db/schema";
-import { SecretDecryptError } from "@/lib/crypto/secrets";
 import { ProviderError } from "@/lib/channels/errors";
 import { setProvidersForTests } from "@/lib/channels/registry";
 import {
@@ -20,7 +19,7 @@ import {
   setDefaultChannel,
 } from "@/lib/channels/service";
 import type { ChannelProvider } from "@/lib/channels/types";
-import { TenantRuleError } from "@/lib/tenant/errors";
+import type { TenantRuleError } from "@/lib/tenant/errors";
 import { cleanUpBilling, createPlanRow, ensureSubscription } from "./billing-helpers";
 import {
   cleanUpChannels,
@@ -362,7 +361,6 @@ describe("serviço de canais", () => {
       await expect(removeChannel(scopeA(), seeded.id, "Ilegível", actor)).resolves.toEqual({
         outcome: "deleted",
       });
-      expect(SecretDecryptError).toBeDefined();
     });
 
     it("plataforma: remove com auditoria sem tenant", async () => {

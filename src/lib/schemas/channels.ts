@@ -49,6 +49,9 @@ export const createCloudChannelSchema = z.strictObject({
 });
 export type CreateCloudChannelInput = z.infer<typeof createCloudChannelSchema>;
 
+/** Só renomear: os campos de cada tipo entram com o módulo (`updateChannelSchema`). */
+export const renameChannelSchema = z.strictObject({ name: nameSchema });
+
 export const createQrChannelSchema = z.strictObject({ name: nameSchema });
 export type CreateQrChannelInput = z.infer<typeof createQrChannelSchema>;
 
