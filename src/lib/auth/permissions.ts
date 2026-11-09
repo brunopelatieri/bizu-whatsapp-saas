@@ -47,6 +47,7 @@ export const statements = {
   support: ["grant"],
   channel: ["read", "manage"],
   tag: ["manage"],
+  custom_field: ["manage"],
 } as const;
 
 export type Resource = keyof typeof statements;
@@ -77,6 +78,7 @@ export const tenantRoles = {
     file: ["read", "upload", "delete"],
     channel: ["read", "manage"],
     tag: ["manage"],
+    custom_field: ["manage"],
   }),
   member: tenantAccessControl.newRole({
     customer: ["read", "create", "update", "invite"],

@@ -23,6 +23,7 @@ import { createZip, type ZipEntry } from "@/lib/lgpd/zip";
 import { EXPORT_LINK_TTL_MS, signExportLink } from "@/lib/lgpd/link";
 import { getStorage, newStorageKey } from "@/lib/storage";
 import { TenantRuleError } from "@/lib/tenant/errors";
+import { allCustomFields, labelledCustomFields } from "@/lib/crm/custom-fields";
 import { tagsOfCustomers } from "@/lib/crm/tags";
 
 export type ExportSubject = { type: ConsentSubjectType; id: string };
@@ -211,6 +212,7 @@ const customerColumns = {
   document: customer.document,
   status: customer.status,
   notes: customer.notes,
+  customFields: customer.customFields,
   createdAt: customer.createdAt,
 };
 
@@ -265,9 +267,14 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
     const customers = await withTenant(owned.tenantId, async (tx) => {
       const rows = await tx.select(customerColumns).from(customer).orderBy(customer.createdAt);
       const tags = await tagsOfCustomers(tx, rows.map(({ id }) => id));
+      const defs = await allCustomFields(tx, { kind: "tenant", tenantId: owned.tenantId });
 
-      // Rótulo (nome) das etiquetas: o id não diz nada a quem lê o arquivo.
-      return rows.map((row) => ({ ...row, etiquetas: (tags.get(row.id) ?? []).map(({ name }) => name) }));
+      // Rótulo (nome) das etiquetas e dos campos: o id não diz nada a quem lê o arquivo.
+      return rows.map(({ customFields, ...row }) => ({
+        ...row,
+        etiquetas: (tags.get(row.id) ?? []).map(({ name }) => name),
+        camposAdicionais: labelledCustomFields(defs, customFields),
+      }));
     });
 
     entries.push({

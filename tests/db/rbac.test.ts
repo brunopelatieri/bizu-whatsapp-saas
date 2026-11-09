@@ -84,6 +84,11 @@ const endpoints = [
   ["DELETE", `/api/tags/${anyId}`, "tag:manage"],
   ["PUT", `/api/customers/${anyId}/tags/${anyId}`, "customer:update"],
   ["DELETE", `/api/customers/${anyId}/tags/${anyId}`, "customer:update"],
+  ["GET", "/api/custom-fields", "customer:read"],
+  ["POST", "/api/custom-fields", "custom_field:manage"],
+  ["PUT", "/api/custom-fields/order", "custom_field:manage"],
+  ["PATCH", `/api/custom-fields/${anyId}`, "custom_field:manage"],
+  ["DELETE", `/api/custom-fields/${anyId}`, "custom_field:manage"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

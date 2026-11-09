@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
+  integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -9,7 +12,13 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { DEFAULT_TAG_COLOR } from "../../lib/crm/constants";
+import {
+  type CustomFieldEntity,
+  type CustomFieldType,
+  customFieldEntities,
+  customFieldTypes,
+  DEFAULT_TAG_COLOR,
+} from "../../lib/crm/constants";
 import { scopedPolicy, tenantPolicy } from "../tenant-policy";
 import { user } from "./auth";
 import { customer } from "./customer";
@@ -74,3 +83,58 @@ export const customerTag = pgTable(
     tenantPolicy(),
   ],
 ).enableRLS();
+
+/** Opção de um campo de lista: `value` é estável (guardado no cliente); `label` é editável. */
+export type CustomFieldOption = { value: string; label: string };
+
+const inList = (values: readonly string[]) =>
+  sql.raw(values.map((value) => `'${value}'`).join(", "));
+
+/**
+ * Definição de campo adicional. `tenant_id` nulo é campo da plataforma (`entity =
+ * 'organization'`, fase A4); o tenant só tem `entity = 'customer'`. O valor fica no
+ * `customer.custom_fields` (jsonb chaveado pelo **id** do campo): `key` e `type` não mudam.
+ */
+export const customField = pgTable(
+  "custom_field",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
+    entity: text("entity", { enum: customFieldEntities }).notNull(),
+    key: text("key").notNull(),
+    label: text("label").notNull(),
+    type: text("type", { enum: customFieldTypes }).notNull(),
+    options: jsonb("options").$type<CustomFieldOption[]>().notNull().default([]),
+    required: boolean("required").notNull().default(false),
+    position: integer("position").notNull().default(0),
+    archivedAt: timestamptz("archived_at"),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at")
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // `key` única por escopo e entidade; com `tenant_id` nulo a plataforma tem o próprio índice.
+    uniqueIndex("custom_field_tenant_key_idx")
+      .on(table.tenantId, table.entity, table.key)
+      .where(sql`${table.tenantId} is not null`),
+    uniqueIndex("custom_field_platform_key_idx")
+      .on(table.entity, table.key)
+      .where(sql`${table.tenantId} is null`),
+    index("custom_field_scope_idx").on(table.tenantId, table.entity, table.position),
+    check("custom_field_key_format", sql`${table.key} ~ '^[a-z0-9_]{1,40}$'`),
+    check("custom_field_label_length", sql`char_length(${table.label}) between 1 and 60`),
+    check("custom_field_type_known", sql`${table.type} in (${inList(customFieldTypes)})`),
+    check("custom_field_options_array", sql`jsonb_typeof(${table.options}) = 'array'`),
+    check(
+      "custom_field_entity_scope",
+      sql`(${table.entity} = 'organization' and ${table.tenantId} is null) or (${table.entity} = 'customer' and ${table.tenantId} is not null)`,
+    ),
+    scopedPolicy(),
+  ],
+).enableRLS();
+
+export type CustomFieldRow = typeof customField.$inferSelect;
+export type { CustomFieldEntity, CustomFieldType };

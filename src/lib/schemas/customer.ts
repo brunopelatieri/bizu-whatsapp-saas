@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { tagFilterSchema, tagIdsSchema } from "@/lib/schemas/crm";
+import { customFieldValuesSchema, tagFilterSchema, tagIdsSchema } from "@/lib/schemas/crm";
 import { phoneSchema } from "@/lib/schemas/phone";
 import { customerStatuses } from "@/lib/tenant/customer-constants";
 
@@ -36,6 +36,8 @@ export const customerSchema = z.object({
   status: z.enum(customerStatuses).optional(),
   /** Substitui o conjunto de etiquetas do cliente. */
   tagIds: tagIdsSchema.optional(),
+  /** `{ "<id do campo>": valor | null }`: mescla por chave; o tipo de cada valor é conferido no servidor. */
+  customFields: customFieldValuesSchema.optional(),
   notes: optionalText(z.string().trim().max(2000, "Observação muito longa.")),
 });
 export type CustomerInput = z.infer<typeof customerSchema>;

@@ -18,7 +18,14 @@ import {
   type CustomersQuery,
   type UpdateCustomerInput,
 } from "@/lib/schemas/customer";
+import {
+  assertRequiredFilled,
+  customFieldsMergeSql,
+  resolveCustomFields,
+  valuesOf,
+} from "@/lib/crm/custom-fields";
 import { replaceCustomerTags, tagsOfCustomers, type CustomerTagView } from "@/lib/crm/tags";
+import { type CustomFieldValues, mergeCustomFields } from "@/lib/crm/values";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
@@ -176,10 +183,18 @@ export async function createCustomer(
     return await withTenant(tenantId, async (tx) => {
       await assertPhoneFree(tx, tenantId, phone.phoneKey, actor);
 
-      const { tagIds, ...fields } = input;
+      const { tagIds, customFields, ...fields } = input;
+      // `required` só vale quando o corpo traz `customFields`.
+      let values: CustomFieldValues = {};
+      if (customFields) {
+        const resolved = await resolveCustomFields(tx, tenantId, customFields);
+        values = valuesOf(resolved.patch);
+        assertRequiredFilled(resolved.defs, values);
+      }
+
       const [created] = await tx
         .insert(customer)
-        .values({ ...fields, ...phone, tenantId })
+        .values({ ...fields, ...phone, tenantId, customFields: values })
         .returning();
       if (!created) throw new Error("cliente não criado");
 
@@ -240,12 +255,26 @@ export async function updateCustomer(
       const status =
         patch.status ?? (emailChanged ? fallbackStatus : current.status);
 
-      const { tagIds, ...fields } = patch;
+      const { tagIds, customFields, ...fields } = patch;
+      // Merge por chave no mesmo `UPDATE`: `null` remove, ausente não muda. `required` vale
+      // sobre o estado final, e só quando o corpo trouxe `customFields`.
+      let customFieldsSet = {};
+      if (customFields) {
+        const resolved = await resolveCustomFields(tx, tenantId, customFields);
+        const merged = mergeCustomFields(
+          current.customFields as CustomFieldValues,
+          resolved.patch,
+        );
+        assertRequiredFilled(resolved.defs, merged);
+        customFieldsSet = { customFields: customFieldsMergeSql(resolved.patch) };
+      }
+
       const [row] = await tx
         .update(customer)
         .set({
           ...fields,
           ...(phone ?? {}),
+          ...customFieldsSet,
           status,
           ...(emailChanged
             ? { portalUserId: null, invitedAt: null, lastLoginAt: null }

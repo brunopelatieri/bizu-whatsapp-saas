@@ -95,7 +95,21 @@ describe("exportação de dados da equipe", () => {
       insert into member (organization_id, user_id, role)
       values (${tenant.id}, ${colleague.id}, 'member')
     `;
-    await createCustomer(tenantOwner, { name: "Cliente da Exporta" });
+    const exported = await createCustomer(tenantOwner, { name: "Cliente da Exporta" });
+    const field = await call("POST", "/api/custom-fields", {
+      cookie: tenantOwner.cookie,
+      body: {
+        entity: "customer",
+        label: "Origem do lead",
+        type: "select",
+        options: [{ label: "Indicação" }],
+      },
+    });
+    const { field: created } = (await field.json()) as { field: { id: string } };
+    await call("PATCH", `/api/customers/${exported.id}`, {
+      cookie: tenantOwner.cookie,
+      body: { customFields: { [created.id]: "indicacao" } },
+    });
   });
 
   it("cria o pedido e recusa um segundo pendente", async () => {
@@ -167,8 +181,13 @@ describe("exportação de dados da equipe", () => {
       expect.objectContaining({ tenantId: tenant.id, roles: "owner" }),
     ]);
     expect(JSON.parse(text(files, `clientes-${tenant.slug}.json`))).toEqual([
-      expect.objectContaining({ name: "Cliente da Exporta" }),
+      expect.objectContaining({
+        name: "Cliente da Exporta",
+        // Rótulo e valor legíveis; o id do campo não sai.
+        camposAdicionais: [{ rotulo: "Origem do lead", chave: "origem_do_lead", valor: "Indicação" }],
+      }),
     ]);
+    expect(text(files, `clientes-${tenant.slug}.json`)).not.toContain("customFields");
 
     const consents = JSON.parse(text(files, "consentimentos.json")) as Array<{ kind: string }>;
     expect(consents.map(({ kind }) => kind)).toEqual(expect.arrayContaining(["terms", "privacy"]));

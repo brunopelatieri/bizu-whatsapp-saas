@@ -22,3 +22,42 @@ export const TAG_COLOR_PRESETS = [
   "#8b5cf6",
   "#ec4899",
 ] as const;
+
+/** Campos adicionais ativos por entidade e escopo; arquivado não conta. */
+export const CUSTOM_FIELD_LIMIT = 12;
+
+/** Opções de um campo de lista (`select` e `multiselect`). */
+export const CUSTOM_FIELD_OPTION_LIMIT = 50;
+
+export const CUSTOM_FIELD_LABEL_MAX = 60;
+export const CUSTOM_FIELD_KEY_MAX = 40;
+
+/** Tamanho máximo do valor de texto e de uma lista `multiselect`. */
+export const CUSTOM_FIELD_TEXT_MAX = 500;
+export const CUSTOM_FIELD_MULTISELECT_MAX = 20;
+
+export const customFieldTypes = [
+  "text",
+  "number",
+  "date",
+  "boolean",
+  "select",
+  "multiselect",
+] as const;
+export type CustomFieldType = (typeof customFieldTypes)[number];
+
+/** Tipos que carregam a lista de opções. */
+export const listFieldTypes: readonly CustomFieldType[] = ["select", "multiselect"];
+
+/** `customer` é do tenant; `organization` é da plataforma (fase A4). */
+export const customFieldEntities = ["customer", "organization"] as const;
+export type CustomFieldEntity = (typeof customFieldEntities)[number];
+
+export const CUSTOM_FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
+  text: "Texto",
+  number: "Número",
+  date: "Data",
+  boolean: "Sim ou não",
+  select: "Lista (uma opção)",
+  multiselect: "Lista (várias opções)",
+};

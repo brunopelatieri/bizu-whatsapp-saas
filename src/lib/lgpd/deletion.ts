@@ -773,6 +773,8 @@ const anonymizedCustomer = {
   phoneKey: null,
   document: null,
   notes: null,
+  // Valor de campo adicional é dado pessoal em potencial.
+  customFields: {},
   status: "blocked" as const,
   portalUserId: null,
 };

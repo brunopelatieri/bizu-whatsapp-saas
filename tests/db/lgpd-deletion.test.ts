@@ -492,7 +492,11 @@ describe("exclusão da conta do portal", () => {
     });
     expect(reuse.status).toBe(400);
 
-    // O job anonimiza a pessoa e o cadastro dela na organização.
+    // O job anonimiza a pessoa e o cadastro dela na organização (campos adicionais inclusive).
+    await asPlatform(
+      owner,
+      (tx) => tx`update customer set custom_fields = '{"x": "valor pessoal"}'::jsonb where id = ${record.id}`,
+    );
     const request = await requestOf(portalId);
     await makeDue(request?.id ?? "");
     expect(await executeDeletion(request?.id ?? "")).toBe("executed");
@@ -513,6 +517,11 @@ describe("exclusão da conta do portal", () => {
       status: "blocked",
       portal_user_id: null,
     });
+    const [anonymizedFields] = await asPlatform(
+      owner,
+      (tx) => tx<{ custom_fields: unknown }[]>`select custom_fields from customer where id = ${record.id}`,
+    );
+    expect(anonymizedFields?.custom_fields).toEqual({});
     expect(await countOf("portal_session", "user_id", portalId)).toBe(0);
     expect(await countOf("portal_account", "user_id", portalId)).toBe(0);
   });

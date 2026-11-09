@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -47,6 +48,11 @@ export const customer = pgTable(
       .notNull()
       .default("lead"),
     notes: text("notes"),
+    /** `{ "<id do campo>": valor }`: valores dos campos adicionais (`custom_field`). */
+    customFields: jsonb("custom_fields")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     invitedAt: timestamptz("invited_at"),
     lastLoginAt: timestamptz("last_login_at"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
@@ -63,6 +69,7 @@ export const customer = pgTable(
       .on(table.tenantId, table.phoneKey)
       .where(sql`${table.phoneKey} IS NOT NULL`),
     check("customer_phone_required", phoneRequired),
+    check("customer_custom_fields_object", sql`jsonb_typeof(${table.customFields}) = 'object'`),
     tenantPolicy(),
   ],
 ).enableRLS();
