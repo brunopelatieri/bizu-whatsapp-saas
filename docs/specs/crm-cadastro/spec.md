@@ -403,17 +403,20 @@ Componentes compartilhados em `src/components/crm/`, reaproveitados pelo atendim
 
 ## Verificação
 
-- [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`, `npm run build`
-- [ ] Testes de cada etapa acima
+- [x] `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`, `npm run build` (verde ao fim da A4)
+- [x] Testes de cada etapa acima
 - [ ] Smoke de telefone: `/cadastro` recusa sem telefone, com DDD `10` e com celular sem o 9;
   aceita `+55 (11) 98765-4321`; fixo `(11) 3456-7890` é aceito com o aviso; a máscara aparece ao digitar; cliente sem e-mail e com
   telefone salva e "Enviar acesso" fica desabilitado; celular antigo `(11) 9876-5432` é aceito
   com o aviso de conferir o 9; `+1 415 555 2671` com o país EUA é aceito
 - [ ] Smoke com o seed (`acme`): criar etiquetas e campos, aplicar em `julia@cliente.local`,
   filtrar, renomear, excluir; cliente só com telefone; em `/admin`, etiquetar `acme` e conferir
-  que `acme.owner` não vê
+  que `acme.owner` não vê (A4 verificada com usuários de teste e um tenant criado para o smoke, em vez do
+  seed `acme`: a senha do seed não estava disponível; plataforma etiquetou a organização, o filtro `tags=`
+  achou, e o owner do tenant não recebeu nada em `/api/tenant`, `/api/me`, `/api/tags`, `/api/custom-fields`,
+  `/api/customers` nem `/api/audit`)
 - [ ] Cada critério de aceite do PRD marcado
-- [ ] `/code-review`; `/security-review` em A1 e A4
+- [x] `/code-review`; `/security-review` em A1 e A4 (A4: um achado de correção, dois de limpeza e um teste corrigidos; `/security-review` sem achado)
 
 ## Atualização de contexto
 
