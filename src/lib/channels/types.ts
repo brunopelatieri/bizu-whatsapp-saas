@@ -23,6 +23,12 @@ export const channelStatuses = [
 ] as const;
 export type ChannelStatus = (typeof channelStatuses)[number];
 
+export const channelEventKinds = ["message", "status", "connection", "template", "other"] as const;
+export type ChannelEventKind = (typeof channelEventKinds)[number];
+
+export const channelEventStatuses = ["pending", "processed", "ignored", "failed"] as const;
+export type ChannelEventStatus = (typeof channelEventStatuses)[number];
+
 /** O que o canal sabe fazer. O código pergunta à capacidade, nunca ao tipo. */
 export type ChannelCapabilities = {
   /** Modelos de mensagem aprovados (só a Cloud API). */
