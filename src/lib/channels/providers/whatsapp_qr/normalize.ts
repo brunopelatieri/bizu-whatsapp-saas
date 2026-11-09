@@ -86,7 +86,7 @@ export function isEncryptedWhatsappUrl(url: string) {
   }
 }
 
-const MEDIA_KEYS: Array<[string, NormalizedMedia["kind"]]> = [
+export const MEDIA_KEYS: Array<[string, NormalizedMedia["kind"]]> = [
   ["imageMessage", "image"],
   ["videoMessage", "video"],
   ["audioMessage", "audio"],
@@ -100,12 +100,36 @@ type Content = {
   media: NormalizedMedia | null;
 };
 
-/** O base64 decifrado é **irmão** do proto dentro de `Message`; `data.base64` é alternativa. */
+/** Referência gravada pelo webhook no lugar do base64: `{ storageKey, mime, size }`. */
+export function isStoredRef(value: unknown): value is NonNullable<NormalizedMedia["storage"]> {
+  const record = asRecord(value);
+
+  return typeof record?.storageKey === "string" && typeof record.size === "number";
+}
+
+/**
+ * O conteúdo decifrado é **irmão** do proto dentro de `Message`; `data.base64` é alternativa.
+ * Depois do webhook, o que está ali é a referência ao `StorageProvider` (o base64 nunca vai ao
+ * `raw`); o texto base64 só aparece aqui em aviso que não passou pelo webhook (testes, fixtures).
+ */
 function mediaSource(
   proto: JsonRecord,
-  fallbackBase64: string | null,
-): Pick<NormalizedMedia, "base64" | "mediaUrl"> {
-  const base64 = pickString(proto, "base64", "data") ?? fallbackBase64;
+  fallback: unknown,
+): Pick<NormalizedMedia, "base64" | "mediaUrl" | "storage"> {
+  const embedded = pickKey(proto, "base64") ?? fallback;
+
+  if (isStoredRef(embedded)) {
+    return {
+      storage: {
+        storageKey: embedded.storageKey,
+        mime: typeof embedded.mime === "string" ? embedded.mime : null,
+        size: embedded.size,
+      },
+    };
+  }
+
+  const base64 =
+    pickString(proto, "base64", "data") ?? (typeof fallback === "string" && fallback ? fallback : null);
   if (base64) return { base64 };
 
   // `mediaUrl` é o objeto em claro do S3; `directPath` é relativo ao CDN e continua cifrado.
@@ -118,7 +142,7 @@ function mediaSource(
   return {};
 }
 
-function contentOf(message: JsonRecord, fallbackBase64: string | null): Content | null {
+function contentOf(message: JsonRecord, fallback: unknown): Content | null {
   const conversation = pickString(message, "conversation");
   if (conversation) return { messageType: "text", text: conversation, media: null };
 
@@ -136,7 +160,7 @@ function contentOf(message: JsonRecord, fallbackBase64: string | null): Content 
         kind,
         mime: pickString(proto, "mimetype", "mimeType"),
         filename: pickString(proto, "fileName", "filename", "title"),
-        ...mediaSource(proto, fallbackBase64),
+        ...mediaSource(proto, fallback),
       },
     };
   }
@@ -183,7 +207,7 @@ function normalizeMessage(
     return null;
   }
 
-  const content = contentOf(message, pickString(message, "base64") ?? pickString(data, "base64"));
+  const content = contentOf(message, pickKey(message, "base64") ?? pickKey(data, "base64"));
   if (!content) return null;
 
   const quoted = pickString(
