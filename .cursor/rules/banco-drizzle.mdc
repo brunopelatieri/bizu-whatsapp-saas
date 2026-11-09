@@ -22,6 +22,7 @@ alwaysApply: false
 - `drizzle-kit` é devDependency: rode pelos scripts `db:*`, sem instalar globalmente.
 - Toda tabela com `tenant_id` tem `.enableRLS()`, `tenantPolicy()` e `FORCE ROW LEVEL SECURITY` em migration customizada; `tests/db/rls.test.ts` reprova quem esquecer.
 - Toda query de tenant roda em `withTenant(tenantId, fn)`; jobs e `/api/admin/*` usam `withPlatformScope(reason, fn)` (`src/db/rls.ts`). Fora disso, `bizu_app` lê vazio.
+- Tabela que serve tenant e plataforma (WhatsApp CRM) tem `tenant_id` anulável e `scopedPolicy()`; tabela só da plataforma, `platformOnlyPolicy()`. Os serviços recebem `Scope` e abrem `withScope`; `tenant_id` vem de `scopeTenantId(scope)`, nunca do corpo. O dado da plataforma se lê com `withPlatformData`, não com `withPlatformScope`.
 - Rotas de tenant não importam `@/db`: os dados passam por `src/lib/tenant/`.
 - Permissões são validadas no servidor, com `requireAuth` + `requireTenant` + `requirePermission`.
 - Loaders acessam o banco direto, sem chamada HTTP interna.

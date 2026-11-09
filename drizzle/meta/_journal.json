@@ -159,8 +159,22 @@
     {
       "idx": 22,
       "version": "7",
-      "when": 1794254530207,
-      "tag": "0022_telefone_email_opcional",
+      "when": 1794256754931,
+      "tag": "0022_canais_whatsapp",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794256761203,
+      "tag": "0023_rls_canais",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794260545720,
+      "tag": "0024_telefone_email_opcional",
       "breakpoints": true
     }
   ]

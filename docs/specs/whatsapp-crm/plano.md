@@ -8,7 +8,7 @@
 
 > Este arquivo é o índice do programa. Guarda só o que vale para as três features: escopos,
 > decisões transversais, ordem das fases e modelo recomendado. O detalhe fica no PRD e na SPEC
-> de cada feature. Nada aqui foi implementado.
+> de cada feature. Implementado até agora: **F0** (2026-11-09).
 
 ## Features
 
@@ -65,7 +65,7 @@ Cada fase cabe em um PR revisável e termina com `npm run lint`, `typecheck`, `t
 
 | # | Fase | Feature | Depende de | Entrega | LLM |
 |---|---|---|---|---|---|
-| F0 | Escopo de plataforma | todas | – | `scopedPolicy()`, `platformOnlyPolicy()`, `withPlatformData`, `withScope`, tipo `Scope`, teste de isolamento dos três modos | Opus + `/security-review` |
+| F0 | Escopo de plataforma (**implementada**) | todas | – | `scopedPolicy()`, `platformOnlyPolicy()`, `withPlatformData`, `withScope`, tipo `Scope`, teste de isolamento dos três modos | Opus + `/security-review` |
 | A1 | Telefone obrigatório e e-mail do cliente opcional | cadastro | – | `src/lib/phone/`, `PhoneField`, `phone_normalized` e `phone_key` em `customer`, `user` e `portal_user` com `CHECK` de telefone obrigatório, telefone exigido no cadastro de conta (`/cadastro`, autocadastro e convite do portal), no perfil, no `/admin` e no cliente, e-mail do cliente anulável e os ajustes de portal, LGPD e admin (sem backfill: projeto novo) | Sonnet na biblioteca, no campo e no cliente; **Opus** no hook de cadastro (Better Auth) e na revisão, com `/security-review` (toca auth e portal) |
 | A2 | Etiquetas do tenant | cadastro | F0 | `tag`, `customer_tag`, remoção de `customer.tags` (sem migração: projeto novo), API, tela de configuração, seletor e filtro em `/app/clientes` | Sonnet |
 | A3 | Campos adicionais do tenant | cadastro | F0 | `custom_field`, `customer.custom_fields`, validação dinâmica, tela de configuração, formulário e detalhe do cliente | Sonnet |
@@ -143,11 +143,11 @@ export function withScope<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<
 **Teste (`tests/db/rls.test.ts`)**, com uma tabela de exemplo criada no próprio teste e depois
 com cada tabela nova:
 
-- [ ] `withTenant(A)` lê e grava linha de A; não lê linha de B nem da plataforma; não grava linha com `tenant_id` nulo.
-- [ ] `withPlatformData` lê e grava linha da plataforma; não lê linha de tenant nenhum; não grava linha com `tenant_id` preenchido.
-- [ ] Sem helper (`bizu_app` cru), zero linhas e escrita recusada.
-- [ ] `withPlatformScope` lê tudo.
-- [ ] `platformOnlyPolicy()`: `withTenant` não lê nem grava; `withPlatformData` sim.
+- [x] `withTenant(A)` lê e grava linha de A; não lê linha de B nem da plataforma; não grava linha com `tenant_id` nulo.
+- [x] `withPlatformData` lê e grava linha da plataforma; não lê linha de tenant nenhum; não grava linha com `tenant_id` preenchido.
+- [x] Sem helper (`bizu_app` cru), zero linhas e escrita recusada.
+- [x] `withPlatformScope` lê tudo.
+- [x] `platformOnlyPolicy()`: `withTenant` não lê nem grava; `withPlatformData` sim.
 
 ## Verificação final do programa
 

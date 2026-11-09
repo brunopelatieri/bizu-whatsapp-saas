@@ -1,6 +1,6 @@
 import { and, count, eq, gt, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { customer, invitation, member, organizationRole } from "@/db/schema";
+import { channel, customer, invitation, member, organizationRole } from "@/db/schema";
 import type { PlanLimits } from "@/db/schema/billing";
 import { LIMIT_LABELS, type LimitMetric } from "@/lib/billing/constants";
 import { withTenant } from "@/db/rls";
@@ -99,6 +99,19 @@ export const databaseLimitSource: LimitSource = {
       case "customers": {
         const [row] = await withTenant(tenantId, (tx) =>
           tx.select({ total: count() }).from(customer),
+        );
+
+        return row?.total ?? 0;
+      }
+      case "channels_whatsapp_cloud":
+      case "channels_whatsapp_qr": {
+        // Canal desativado não conta (`docs/specs/whatsapp-canais/spec.md`).
+        const type = metric === "channels_whatsapp_cloud" ? "whatsapp_cloud" : "whatsapp_qr";
+        const [row] = await withTenant(tenantId, (tx) =>
+          tx
+            .select({ total: count() })
+            .from(channel)
+            .where(and(eq(channel.type, type), ne(channel.status, "disabled"))),
         );
 
         return row?.total ?? 0;

@@ -71,6 +71,9 @@ recusar a subida.
 | `billing.period_end` | cron de hora em hora | 3x, 5 min com backoff | encerra cancelamentos e aplica downgrades vencidos (`runBillingPeriodEnd`) |
 | `billing.reconcile` | cron diário 04:00 UTC | 3x, 5 min com backoff | compara com o provedor, corrige e alerta; devolve à fila eventos `pending` há mais de 10 min (`runBillingReconcile`) |
 
+| `channel.inbound` | webhooks de canal | 5x, backoff de 30 s a 1 h | `exclusive`, `singletonKey = channel_event.id`; aplica o aviso gravado (`processChannelEvent`); na última tentativa o aviso vira `failed`; dead letter `channel.inbound.dead` (14 dias) |
+| `channel.health` | cron a cada 15 min | 1x | `probe` de cada canal não desativado, grava o estado, avisa os owners na queda e devolve à fila avisos `pending` há mais de 10 min (`tech/29-canais-whatsapp.md`) |
+
 Detalhes das filas de cobrança em `tech/24-billing-cobranca.md`. As de LGPD entram na fase 10: acrescente em `queueDefinitions` (a
 dead letter `<fila>.dead` antes da fila), em `scheduleDefinitions` se tiver cron, e o
 handler em `registerWorkers` (`index.ts`); depois `npm run jobs:install`.
@@ -111,6 +114,6 @@ cobrança; `billing-queue.test.ts` confere filas, crons e a política `exclusive
 | `lgpd.export` | `POST /api/me/export`, `/api/portal/me/export` | 3x, backoff | `exclusive`, `singletonKey` = `data_export.id`; na última tentativa o pedido vira `failed`; dead letter `lgpd.export.dead` |
 | `lgpd.delete` | cron diário 05:00 UTC | 3x | executa `deletion_request` vencidas, cada uma em transação; dead letter `lgpd.delete.dead` |
 
-`maintenance.prune` (cron diário 04:30) agora cobre `payment_event` tratado (90 dias), sessões e verificações vencidas das duas instâncias, exportações vencidas, `audit_log` além de `audit_retention_days`, `email_message` (180 dias) e buckets de rate limit. Tabela em `docs/context/lgpd.md`.
+`maintenance.prune` (cron diário 04:30) agora cobre `payment_event` tratado (90 dias), `channel_event` tratado (30 dias), sessões e verificações vencidas das duas instâncias, exportações vencidas, `audit_log` além de `audit_retention_days`, `email_message` (180 dias) e buckets de rate limit. Tabela em `docs/context/lgpd.md`.
 
 Quem só **enfileira** (`JOBS_MODE=off|worker` no web) precisa que as filas já existam: o worker as cria ao subir (`registerQueues`).

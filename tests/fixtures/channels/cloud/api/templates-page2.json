@@ -1,0 +1,23 @@
+{
+  "data": [
+    {
+      "id": "400000000000002",
+      "name": "promo",
+      "language": "pt_BR",
+      "category": "MARKETING",
+      "status": "REJECTED",
+      "components": [
+        {
+          "type": "BODY",
+          "text": "Promoção"
+        }
+      ]
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "b2",
+      "after": "a2"
+    }
+  }
+}

@@ -104,6 +104,9 @@ export const limitMetrics = [
   "storage_mb",
   "custom_roles",
   "organizations",
+  // Números de WhatsApp por tipo de canal (`docs/specs/whatsapp-canais/spec.md`).
+  "channels_whatsapp_cloud",
+  "channels_whatsapp_qr",
 ] as const;
 export type LimitMetric = (typeof limitMetrics)[number];
 
@@ -113,6 +116,8 @@ export const LIMIT_LABELS: Record<LimitMetric, string> = {
   storage_mb: "armazenamento (MB)",
   custom_roles: "papéis personalizados",
   organizations: "organizações",
+  channels_whatsapp_cloud: "números oficiais de WhatsApp",
+  channels_whatsapp_qr: "números de WhatsApp por QR Code",
 };
 
 export function formatMoney(cents: number, currency = "BRL") {

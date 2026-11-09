@@ -1,0 +1,47 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "100000000000001",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "551199990001",
+              "phone_number_id": "200000000000001"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Cliente Teste"
+                },
+                "wa_id": "5511988880001"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5511988880001",
+                "id": "wamid.INT0001",
+                "timestamp": "1793620800",
+                "type": "interactive",
+                "context": {
+                  "from": "551199990001",
+                  "id": "wamid.OUT0001"
+                },
+                "interactive": {
+                  "type": "button_reply",
+                  "button_reply": {
+                    "id": "btn_sim",
+                    "title": "Sim, quero"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "event": "HistorySync",
+  "instanceId": "11111111-2222-3333-4444-555555555555",
+  "instanceToken": "test-instance-token-0001",
+  "data": {
+    "Data": {}
+  }
+}

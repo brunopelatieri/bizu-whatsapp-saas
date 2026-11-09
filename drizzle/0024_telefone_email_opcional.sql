@@ -12,7 +12,7 @@ BEGIN
   INTO pending;
 
   IF pending > 0 THEN
-    RAISE EXCEPTION 'Migration 0022: % cadastro(s) sem telefone. O telefone passou a ser obrigatorio e nao ha backfill; em desenvolvimento, recrie o banco local e rode db:migrate e db:seed.', pending;
+    RAISE EXCEPTION 'Migration 0024: % cadastro(s) sem telefone. O telefone passou a ser obrigatorio e nao ha backfill; em desenvolvimento, recrie o banco local e rode db:migrate e db:seed.', pending;
   END IF;
 END $$;--> statement-breakpoint
 ALTER TABLE "customer" ALTER COLUMN "email" DROP NOT NULL;--> statement-breakpoint

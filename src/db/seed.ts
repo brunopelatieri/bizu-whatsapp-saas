@@ -34,7 +34,13 @@ export const SEED_PLANS = [
     slug: "free",
     name: "Gratuito",
     description: "Para conhecer o produto, sem prazo.",
-    limits: { members: 2, customers: 20, organizations: 1 },
+    limits: {
+      members: 2,
+      customers: 20,
+      organizations: 1,
+      channels_whatsapp_cloud: 1,
+      channels_whatsapp_qr: 1,
+    },
     features: [],
     isFree: true,
     sortOrder: 0,
@@ -44,7 +50,13 @@ export const SEED_PLANS = [
     slug: "basic",
     name: "Básico",
     description: "Para equipes pequenas.",
-    limits: { members: 5, customers: 200, organizations: 2 },
+    limits: {
+      members: 5,
+      customers: 200,
+      organizations: 2,
+      channels_whatsapp_cloud: 2,
+      channels_whatsapp_qr: 2,
+    },
     features: [],
     isFree: false,
     sortOrder: 1,
@@ -54,7 +66,13 @@ export const SEED_PLANS = [
     slug: "pro",
     name: "Pro",
     description: "Para quem precisa de mais pessoas, clientes e recursos.",
-    limits: { members: 15, customers: 5000, organizations: 5 },
+    limits: {
+      members: 15,
+      customers: 5000,
+      organizations: 5,
+      channels_whatsapp_cloud: 3,
+      channels_whatsapp_qr: 3,
+    },
     features: ["audit_export", "custom_roles"],
     isFree: false,
     sortOrder: 2,
@@ -152,20 +170,26 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   const { password: hashPassword } = await getAuth().$context;
   const passwordHash = await hashPassword.hash(password);
 
-  // Planos: só os que faltam. Plano já existente ganha só a chave `organizations`, se não a
-  // tiver: o resto do que foi editado em /admin fica como está.
+  // Planos: só os que faltam. Plano já existente ganha só as chaves `organizations` e de
+  // canais, se não as tiver: o resto do que foi editado em /admin fica como está.
   for (const { prices, ...values } of SEED_PLANS) {
     await db
       .insert(plan)
       .values({ ...values, features: [...values.features] })
       .onConflictDoNothing({ target: plan.slug });
 
-    await db
-      .update(plan)
-      .set({
-        limits: sql`${plan.limits} || jsonb_build_object('organizations', ${values.limits.organizations}::int)`,
-      })
-      .where(and(eq(plan.slug, values.slug), sql`not (${plan.limits} ? 'organizations')`));
+    for (const metric of [
+      "organizations",
+      "channels_whatsapp_cloud",
+      "channels_whatsapp_qr",
+    ] as const) {
+      await db
+        .update(plan)
+        .set({
+          limits: sql`${plan.limits} || jsonb_build_object(${metric}::text, ${values.limits[metric]}::int)`,
+        })
+        .where(and(eq(plan.slug, values.slug), sql`not (${plan.limits} ? ${metric}::text)`));
+    }
 
     const [row] = await db.select({ id: plan.id }).from(plan).where(eq(plan.slug, values.slug));
     if (!row) throw new Error(`plano ${values.slug} não foi criado`);

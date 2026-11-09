@@ -1,0 +1,7 @@
+{
+  "data": {
+    "qrcode": "data:image/png;base64,iVBORw0KGgo=",
+    "code": "2@fakeqrcode,fake,fake"
+  },
+  "message": "success"
+}

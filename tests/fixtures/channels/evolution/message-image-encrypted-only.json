@@ -1,0 +1,25 @@
+{
+  "event": "Message",
+  "instanceId": "11111111-2222-3333-4444-555555555555",
+  "instanceToken": "test-instance-token-0001",
+  "data": {
+    "Info": {
+      "Chat": "5511988880001@s.whatsapp.net",
+      "Sender": "5511988880001@s.whatsapp.net",
+      "IsFromMe": false,
+      "IsGroup": false,
+      "ID": "3EB0AAAA0007",
+      "Type": "media",
+      "PushName": "Cliente Teste",
+      "Timestamp": "2026-11-02T10:00:00-03:00",
+      "ServerID": 0
+    },
+    "Message": {
+      "imageMessage": {
+        "URL": "https://mmg.whatsapp.net/v/t62.7118-24/fake.enc",
+        "mimetype": "image/jpeg",
+        "caption": "sem conteúdo utilizável"
+      }
+    }
+  }
+}

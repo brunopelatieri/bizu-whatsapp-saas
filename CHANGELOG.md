@@ -65,7 +65,7 @@ Cobrança manual e verificação opcional:
    valor em `/admin/planos/:id` (o seed preenche os planos dele).
 4. Cadastre um preço `Manual` nos planos pagos para registrar pagamentos sem provedor.
 
-Telefone obrigatório (migration `0022_telefone_email_opcional`):
+Telefone obrigatório (migration `0024_telefone_email_opcional`):
 
 1. A migration **aborta** se houver conta ou cliente já cadastrado (não há backfill de telefone). Em
    projeto novo, nada a fazer; em base de desenvolvimento, recrie o banco e rode `db:migrate` e

@@ -34,6 +34,8 @@ export const planLimitsSchema = z.strictObject({
   storage_mb: optionalLimit,
   custom_roles: optionalLimit,
   organizations: optionalLimit,
+  channels_whatsapp_cloud: optionalLimit,
+  channels_whatsapp_qr: optionalLimit,
 });
 
 const featureSchema = z

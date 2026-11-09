@@ -1,0 +1,14 @@
+{
+  "event": "Receipt",
+  "instanceId": "11111111-2222-3333-4444-555555555555",
+  "instanceToken": "test-instance-token-0001",
+  "data": {
+    "Chat": "5511988880001@s.whatsapp.net",
+    "Sender": "5511988880001@s.whatsapp.net",
+    "MessageIDs": [
+      "3EB0OUT00001"
+    ],
+    "Timestamp": "2026-11-02T10:02:00-03:00"
+  },
+  "state": "Read"
+}

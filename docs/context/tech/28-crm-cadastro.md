@@ -40,7 +40,7 @@
   'deleted+%@invalid'`; o `coalesce` fecha o buraco do cliente sem e-mail). Índice único parcial
   `customer_tenant_phone_key_idx (tenant_id, phone_key)`: telefone **único por tenant** no
   cliente, também na variante com ou sem o 9º dígito. Em `user` e `portal_user` o índice não é
-  único (duas pessoas podem dividir o número). A migration `0022` aborta com mensagem clara se
+  único (duas pessoas podem dividir o número). A migration `0024` aborta com mensagem clara se
   houver cadastro anterior (o projeto é novo: sem backfill); em desenvolvimento, recrie o banco.
 - **Cliente (`src/lib/tenant/customers.ts`):** `PHONE_IN_USE` (409, com `customerId` e, só para
   quem tem `customer:read`, o `name`) antes de gravar e `23505` do índice como rede de segurança;

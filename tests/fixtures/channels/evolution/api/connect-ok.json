@@ -1,0 +1,8 @@
+{
+  "data": {
+    "eventString": "MESSAGE,SEND_MESSAGE,READ_RECEIPT,CONNECTION,QRCODE",
+    "jid": "",
+    "webhookUrl": "https://app.test/api/webhooks/whatsapp/evolution/segredo"
+  },
+  "message": "success"
+}
