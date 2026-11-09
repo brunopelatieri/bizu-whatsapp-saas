@@ -23,10 +23,17 @@
 
 ## Programas em planejamento
 
-- **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs em rascunho para
-  `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
-  Evolution Go) e `caixa-de-entrada` (chat e fila). Aguarda aprovação dos PRDs; nenhuma linha
-  de código foi escrita. Primeira fase proposta: F0 e A1, com a medição B0 em paralelo.
+- **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
+  para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
+  Evolution Go) e `caixa-de-entrada` (chat e fila); decisões do proprietário no fim do plano.
+  Nenhuma linha de código foi escrita. Primeira fase proposta: F0 e A1, com a medição B0 em
+  paralelo. Telefone obrigatório em todos os cadastros, também no banco (celular ou fixo com DDD
+  válido, fixo com aviso de que não recebe WhatsApp; celular antigo de 8 dígitos aceito se
+  validado; regra do Brasil só para DDI 55; máscara; único por tenant no cliente) e e-mail
+  obrigatório para conta acessível. Projeto novo: sem cadastro anterior, sem backfill nem
+  migração de dados. Dúvidas resolvidas seguindo o `zap-crm-br-client` (teto de 20 instâncias,
+  mídia em S3 privado com URL pré-assinada). O S3 de produção é o SeaweedFS externo. Nenhuma
+  pergunta em aberto.
 
 ## Estado atual do código
 

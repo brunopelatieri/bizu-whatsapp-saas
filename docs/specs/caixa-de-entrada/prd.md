@@ -1,6 +1,6 @@
 # PRD: Caixa de entrada (chat e fila de atendimento)
 
-- **Status:** rascunho
+- **Status:** aprovado
 - **Data:** 2026-11-09
 - **Responsável:** Bruno Pelatieri
 - **Programa:** `docs/specs/whatsapp-crm/plano.md`
@@ -20,8 +20,7 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 
 - **Objetivo:** a equipe do owner atende pelo WhatsApp dentro do sistema, com uma fila de
   conversas sem dono, conversas atribuídas a cada pessoa e o cadastro do cliente ao lado do
-  chat. O proprietário da plataforma atende owners, equipes e clientes numa caixa única, sem
-  fila.
+  chat. O proprietário da plataforma atende owners e equipes numa caixa única, sem fila.
 - **Métrica:** mensagem recebida aparece na tela de quem está com a caixa aberta em até 3
   segundos. Nenhuma conversa é assumida por duas pessoas. Com dois atendentes, o tempo até a
   primeira resposta de uma conversa na fila fica visível e cai em relação ao celular
@@ -33,7 +32,7 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 |---|---|
 | Membro do tenant | Ver a fila e as próprias conversas, assumir, responder, devolver à fila, encerrar e reabrir |
 | Admin e owner do tenant | Tudo isso, mais ver as conversas de todos e transferir para outra pessoa |
-| Proprietário e suporte da plataforma | Ver e responder todas as conversas da plataforma, sem fila |
+| Proprietário e suporte da plataforma | Ver e responder todas as conversas da plataforma, sem fila (o suporte responde; só o proprietário configura canal, etiquetas e campos) |
 | Cliente do owner, equipe do owner | Nada muda: continuam usando o WhatsApp normal |
 
 ## Escopo
@@ -59,6 +58,8 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 - Exportação de conversa e retenção automática de mensagens.
 - Grupos do WhatsApp e status.
 - Conversa da equipe entre si dentro do sistema (chat interno).
+- A plataforma iniciar conversa com os clientes dos owners ou consultar o cadastro deles
+  (decisão do proprietário: o cliente é do owner e a plataforma é operadora).
 
 ## Requisitos funcionais
 
@@ -72,7 +73,7 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 | RF-06 | Responder uma conversa da fila a assume; responder a conversa de outro atendente (admin) não a toma | Must |
 | RF-07 | O atendente devolve a própria conversa à fila; só quem tem permissão transfere para outra pessoa | Must |
 | RF-08 | Membro comum não vê as conversas de outros atendentes, nem por link direto | Must |
-| RF-09 | A conversa pode ser marcada como pendente, encerrada ou reaberta; mensagem nova do contato reabre a conversa encerrada | Must |
+| RF-09 | A conversa pode ser marcada como pendente, encerrada ou reaberta; mensagem nova do contato reabre a conversa encerrada e a devolve à fila, sem dono. Reabrir à mão só muda a situação e mantém o dono | Must |
 | RF-10 | A conversa mostra as mensagens em ordem, agrupadas por dia, carregando as antigas sob demanda | Must |
 | RF-11 | Cada mensagem enviada mostra o estado: enviando, enviada, entregue, lida ou falhou, com o motivo da falha | Must |
 | RF-12 | Mensagem que falhou continua na conversa e pode ser reenviada com um clique | Must |
@@ -91,7 +92,7 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 | RF-25 | Membro removido da equipe tem as conversas devolvidas à fila | Must |
 | RF-26 | A caixa da plataforma mostra todas as conversas a quem é da plataforma, sem fila nem dono | Must |
 | RF-27 | Na plataforma, o painel mostra a pessoa, as organizações a que pertence e as etiquetas e campos de cada organização | Must |
-| RF-28 | A plataforma inicia conversa com owner e equipe de qualquer organização; com clientes dos owners, só se a configuração permitir | Must |
+| RF-28 | A plataforma inicia conversa com owner e equipe de qualquer organização. Não inicia conversa com clientes dos owners nem consulta o cadastro deles | Must |
 | RF-29 | Sessão de suporte personificando um usuário lê as conversas do tenant, mas não envia mensagem | Must |
 | RF-30 | Assumir, transferir, devolver, encerrar e reabrir ficam registrados, com quem fez | Should |
 
@@ -114,7 +115,7 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 - [ ] Dados dois atendentes clicando em "Assumir" ao mesmo tempo, quando as chamadas chegam, então um assume e o outro recebe o aviso de que já tem dono.
 - [ ] Dado um membro comum, quando abre o link de uma conversa atribuída a outro, então recebe "não encontrada".
 - [ ] Dado um membro comum, quando tenta transferir a própria conversa para um colega, então recebe 403.
-- [ ] Dada uma conversa encerrada, quando o contato escreve, então ela volta a "aberta" e aparece para o dono ou na fila.
+- [ ] Dada uma conversa encerrada, quando o contato escreve, então ela volta a "aberta", sem dono, e aparece na fila (inclusive se o dono anterior ainda for da equipe).
 - [ ] Dado um número oficial e a última mensagem do contato há 25 horas, quando o atendente tenta enviar texto, então a tela bloqueia e a API responde 409; enviar modelo funciona.
 - [ ] Dado um envio que o provedor recusa, quando a resposta chega, então a mensagem fica "falhou" com o motivo e o botão de reenviar.
 - [ ] Dada uma imagem recebida, quando o atendente abre a conversa, então a imagem aparece; outro tenant com o endereço da mídia recebe 404.
@@ -123,7 +124,10 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 - [ ] Dado um membro removido da equipe, quando a remoção termina, então as conversas dele estão na fila.
 - [ ] Dado o suporte personificando um membro, quando tenta enviar mensagem, então recebe 403.
 - [ ] Dado o proprietário da plataforma, quando abre `/admin/atendimento`, então vê todas as conversas da plataforma e nenhuma de tenant.
-- [ ] Dada a opção de falar com clientes dos owners desligada, quando a plataforma tenta iniciar conversa com um cliente, então a ação não existe na tela e a API responde 403.
+- [ ] Dado o suporte da plataforma, quando responde uma conversa de `/admin/atendimento`, então a mensagem é enviada; quando tenta criar ou editar canal, etiqueta ou campo, então recebe 403.
+- [ ] Dado o telefone de um cliente de um owner que escreve para um número da plataforma, quando a mensagem chega, então a conversa aparece como "não identificado" (ou ligada a um `user`, se for o caso) e nenhum dado de `customer` de tenant é lido ou mostrado.
+- [ ] Dado o proprietário da plataforma, quando tenta iniciar conversa com um `customerId` pela API, então a rota não aceita o campo (400).
+- [ ] Dado um membro comum, quando abre "Fila", então vê todas as conversas sem dono do tenant, de qualquer número.
 
 ## Riscos e dependências
 
@@ -133,15 +137,18 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
   em modo transaction não funciona (mesma restrição da fila de jobs).
 - **Identificador oculto do WhatsApp (LID)** no canal por QR Code: mensagem de quem só tem LID
   conhecido não pode ser ligada a um telefone e é descartada.
-- **Plataforma falando com clientes dos owners:** risco jurídico (LGPD), tratado no plano.
+- **Plataforma e clientes dos owners:** risco jurídico (LGPD) evitado por decisão: fora do
+  escopo (ver o plano). Reabrir o tema exige base legal e cláusula nos termos.
 - Depende de `crm-cadastro` (telefone, etiquetas, campos) e de `whatsapp-canais`.
 
-## Perguntas em aberto
+## Decisões do proprietário (2026-11-09)
 
-- Nome do item no menu: "Atendimento" ou "Caixa de entrada"? Proposta: "Atendimento". Decide:
-  proprietário.
-- `platform_support` pode responder na caixa da plataforma? Proposta: sim. Decide: proprietário.
-- Conversa encerrada que reabre volta para o antigo dono ou para a fila? Proposta: antigo dono,
-  se ainda for da equipe; senão, fila. Decide: proprietário.
-- Membro comum vê a fila inteira ou só a dos números que lhe forem liberados? Proposta: fila
-  inteira nesta entrega. Decide: proprietário.
+- **Nome no menu:** "Atendimento".
+- **`platform_support` responde na caixa da plataforma:** sim (RF-26). Configurar canal,
+  etiquetas e campos continua só com `platform_owner`.
+- **Conversa encerrada que reabre por mensagem do contato:** volta para a fila, sem dono
+  (RF-09). A reabertura manual mantém o dono, como na origem (`zap-crm-br-client`), onde mudar o
+  status não mexe na atribuição.
+- **Membro comum e a fila:** vê a fila inteira, de todos os números, e as próprias conversas
+  (RF-04, RF-08).
+- **Plataforma e clientes dos owners:** fora do escopo (RF-28).

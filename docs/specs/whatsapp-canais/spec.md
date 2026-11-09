@@ -1,6 +1,6 @@
 # SPEC: Canais WhatsApp (Cloud API e Evolution Go)
 
-- **Status:** rascunho
+- **Status:** aprovada
 - **PRD:** `docs/specs/whatsapp-canais/prd.md`
 - **Programa:** `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T3, T8 a T10, T12, T14)
 - **Contexto carregado:** `core.md`, `tech/06-hono-api.md`, `tech/07-banco-drizzle.md`,
@@ -52,8 +52,8 @@ Arquivo `src/db/schema/channels.ts`. Todas com `scopedPolicy()` + `FORCE` (plano
   `FORCE`. Aditiva; sem backfill.
 - **Limites do plano:** `plan.limits` ganha `channels_whatsapp_cloud` e `channels_whatsapp_qr`.
   A convenção não muda (ausente ou `null` = ilimitado), então o seed e a tela `/admin/planos`
-  passam a preencher os dois: `free` 0 e 1, `basic` 1 e 1, `pro` 3 e 3 (PRD, pergunta aberta).
-  Canal `disabled` não conta.
+  passam a preencher os dois (oficial e QR): `free` 1 e 1, `basic` 2 e 2, `pro` 3 e 3 (decisão do
+  proprietário, PRD). Canal `disabled` não conta.
 
 ## Módulos de canal
 
@@ -190,6 +190,28 @@ do recibo + estado, ou sha256 do corpo (conexão).
 `inbound/<chave aleatória>` e trocado no `raw` por `{ storageKey, mime, size }`. Evento que
 termina `ignored` ou `failed` definitivo apaga o objeto.
 
+**Aviso com `mediaUrl`** (servidor Evolution gravando mídia em um S3): em vez do base64, o
+evento traz o endereço do objeto, e o job baixa e copia para o `StorageProvider` do bizu, no
+mesmo formato `{ storageKey, mime, size }`. A URL vem de um aviso e nunca é confiável (SSRF),
+então o download só acontece se a **origem** dela (esquema + host + porta, comparados exatos,
+depois de resolver a URL) estiver em `EVOLUTION_MEDIA_ORIGINS` (lista separada por vírgula, por
+exemplo `https://s3.exemplo.com`); `http:` só é aceito se a própria entrada da lista for
+`http:`. Não segue redirecionamento, respeita `EVOLUTION_MEDIA_TIMEOUT_MS` e o mesmo teto de
+tamanho do base64. Origem fora da lista → evento `ignored`; resposta 403 ou 404 (URL vencida ou
+sem acesso) → `failed`, com o motivo no evento. Sem a variável, só o caminho base64 existe.
+
+**Armazenamento (`StorageProvider`):** o do bizu é o `s3` já existente, em produção apontando
+para o **SeaweedFS externo** (`S3_ENDPOINT`, `S3_BUCKET`, chaves; endereçamento por caminho).
+Se o servidor Evolution gravar no mesmo SeaweedFS, usa um **bucket próprio, privado** (sem
+leitura anônima), com credencial só dele; o bizu nunca recebe essa credencial. A `mediaUrl`
+só serve se for **pré-assinada** (assinatura S3 com validade curta, minutos): o bizu baixa com
+ela e nada mais. Se a Evolution Go só souber gerar URL pública do objeto, o caminho `mediaUrl`
+**não é usado** e a instância fica no base64: abrir leitura anônima no bucket exporia fotos,
+áudios e documentos do WhatsApp (dado pessoal) a quem tivesse o endereço, fora do controle de
+acesso e da LGPD do bizu. A B0 confirma a compatibilidade do SeaweedFS com a configuração S3 da
+Evolution Go, se a `mediaUrl` vem pré-assinada e a validade dela; o `infra-deploy.md` registra
+a política do bucket (privado, ciclo de vida curto para os objetos da Evolution).
+
 ## Jobs
 
 | Fila | Gatilho | Retry | Observação |
@@ -266,6 +288,7 @@ Em `src/lib/env.ts` e `.env.example`:
 | `EVOLUTION_WEBHOOK_PUBLIC_URL` | `APP_URL` | Endereço que o servidor Evolution alcança |
 | `EVOLUTION_INSTANCE_PREFIX` | `bizu` | Prefixo do nome da instância |
 | `EVOLUTION_MAX_INSTANCES_TOTAL` | `20` | Teto do servidor, somando todos os escopos |
+| `EVOLUTION_MEDIA_ORIGINS` | vazio | Origens (`esquema://host[:porta]`, separadas por vírgula) de onde o job aceita baixar `mediaUrl` pré-assinada: a do S3 onde a Evolution grava (o SeaweedFS). Vazio = só base64 |
 | `EVOLUTION_REQUEST_TIMEOUT_MS`, `EVOLUTION_MEDIA_TIMEOUT_MS` | `15000`, `60000` | Timeouts |
 
 A Cloud API não tem variável: as credenciais são de cada canal.
@@ -359,6 +382,8 @@ A Cloud API não tem variável: as credenciais são de cada canal.
   (variáveis, servidor Evolution, limite de corpo no Caddy)
 - [ ] `lgpd.md`: retenção de `channel_event`
 - [ ] `.env.example`, `docker/.env.prod.example`, `status.md`
+- [ ] `tech/27-lgpd-arquivos.md` e `infra-deploy.md`: SeaweedFS externo como S3 de produção
+  (`S3_ENDPOINT` por caminho, bucket e credenciais), sem container novo no compose do bizu
 - [ ] Rules novas `canais.md` com `paths: src/lib/channels/**`, em `.claude/rules/` e
   `.cursor/rules/`; skill `ctx-canais`
 

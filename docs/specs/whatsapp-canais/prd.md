@@ -1,6 +1,6 @@
 # PRD: Canais WhatsApp (Cloud API e Evolution Go)
 
-- **Status:** rascunho
+- **Status:** aprovado
 - **Data:** 2026-11-09
 - **Responsável:** Bruno Pelatieri
 - **Programa:** `docs/specs/whatsapp-crm/plano.md`
@@ -127,11 +127,23 @@ como ter caixa de entrada.
 - Depende de F0 (escopo de plataforma), do módulo de arquivos e da fila de jobs.
 - A caixa de entrada (`docs/specs/caixa-de-entrada/`) é quem transforma os avisos em conversas.
 
-## Perguntas em aberto
+## Decisões do proprietário (2026-11-09)
 
-- Quantos números por plano? Proposta: `free` 0 oficial e 1 QR; `basic` 1 e 1; `pro` 3 e 3.
-  Decide: proprietário.
-- Teto global de instâncias no servidor Evolution? Proposta: 20, por variável. Decide: quem
-  opera a VPS.
-- O servidor Evolution entrega mídia por base64 ou por armazenamento próprio (MinIO)? A SPEC
-  aceita os dois. Decide: quem opera a VPS.
+- **Números por plano (oficial e QR Code):** `free` 1 e 1, `basic` 2 e 2, `pro` 3 e 3 (RF-13).
+
+## Decisões por seguir o `zap-crm-br-client` (2026-11-09)
+
+Sem resposta explícita, o proprietário mandou seguir o projeto de origem.
+
+- **Teto global de instâncias no servidor Evolution:** 20, por `EVOLUTION_MAX_INSTANCES_TOTAL`
+  (é o valor da origem). O limite do plano continua valendo por baixo dele.
+- **Mídia da Evolution:** armazenamento S3 é o recomendado, porque o aviso traz `mediaUrl` e o
+  corpo fica pequeno (na origem, MinIO com `MINIO_ENABLED=true`); base64 segue aceito como
+  alternativa, com teto de tamanho e recusa explícita. A SPEC aceita os dois. O caminho S3 só
+  vale com bucket **privado** e `mediaUrl` **pré-assinada**; se a Evolution só gerar URL
+  pública, fica o base64 (bucket público exporia a mídia das conversas). A medição B0 confirma
+  o que o servidor entrega e se ele grava no mesmo S3.
+- **S3 do bizu:** o bizu já traz o `StorageProvider` `s3`. Em produção ele aponta para um
+  **serviço externo, o SeaweedFS** (código aberto, com a API S3 sobre o Filer), por `S3_ENDPOINT`
+  em endereçamento por caminho. Não entra container de armazenamento no compose do bizu. O
+  MinIO do `docker-compose.yml` continua só como atalho de teste local.
