@@ -10,7 +10,7 @@ import {
   evolutionCredentials,
   openSecret,
 } from "@/lib/channels/credentials";
-import { findProvider } from "@/lib/channels/registry";
+import { type ChannelActor, findModule, findProvider } from "@/lib/channels/registry";
 import {
   CHANNEL_LIMIT_METRICS,
   type ChannelContext,
@@ -19,6 +19,7 @@ import {
   channelTypes,
 } from "@/lib/channels/types";
 import { SecretDecryptError } from "@/lib/crypto/secrets";
+import type { UpdateChannelInput } from "@/lib/schemas/channels";
 import { maskSecret } from "@/lib/tenant/credentials";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -30,7 +31,7 @@ import { notFound, TenantRuleError } from "@/lib/tenant/errors";
  * Nenhuma coluna `*_enc` sai deste arquivo: `ChannelView` não as tem.
  */
 
-export type ChannelActor = { userId: string | null; ip?: string };
+export type { ChannelActor };
 
 type ChannelRow = typeof channel.$inferSelect;
 type CloudRow = typeof channelWhatsappCloud.$inferSelect;
@@ -374,6 +375,35 @@ export async function renameChannel(scope: Scope, id: string, name: string, acto
     await tx.update(channel).set({ name }).where(eq(channel.id, id));
     await record("channel.updated", { id, type: row.type });
   });
+}
+
+/**
+ * `PATCH /:id`. Só o nome é comum a todos os tipos; os outros campos são do módulo do canal
+ * (`ChannelModule.update`), que também grava o nome, na mesma transação.
+ */
+export async function updateChannel(
+  scope: Scope,
+  id: string,
+  input: UpdateChannelInput,
+  actor: ChannelActor,
+) {
+  const { name, ...specific } = input;
+  const hasSpecific = Object.values(specific).some((value) => value !== undefined);
+
+  if (!hasSpecific) {
+    if (name === undefined) {
+      throw new TenantRuleError(400, "NOTHING_TO_UPDATE", "Informe o que mudar.");
+    }
+    return renameChannel(scope, id, name, actor);
+  }
+
+  const row = await withScope(scope, (tx) => requireChannelRow(tx, scope, id));
+  const update = findModule(row.type)?.update;
+
+  if (!update) {
+    throw new TenantRuleError(400, "UNSUPPORTED_FIELDS", "Este número só aceita trocar o nome.");
+  }
+  await update(scope, id, input, actor);
 }
 
 // ---------------------------------------------------------------------------

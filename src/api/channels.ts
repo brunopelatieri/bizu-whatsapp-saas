@@ -13,17 +13,17 @@ import { blockMutationsWhileImpersonating } from "@/api/impersonation";
 import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
-import { isProviderEnabled } from "@/lib/channels/registry";
+import { type ChannelRouteKit, getModules, isProviderEnabled } from "@/lib/channels/registry";
 import {
   type ChannelActor,
   channelLimits,
   listChannels,
   removeChannel,
-  renameChannel,
   setDefaultChannel,
+  updateChannel,
 } from "@/lib/channels/service";
 import { channelTypes } from "@/lib/channels/types";
-import { deleteChannelSchema, renameChannelSchema } from "@/lib/schemas/channels";
+import { deleteChannelSchema, updateChannelSchema } from "@/lib/schemas/channels";
 import type { Context } from "hono";
 
 /**
@@ -46,8 +46,15 @@ channelRoutes.use(
 const canRead = requirePermission("channel", "read");
 const canManage = requirePermission("channel", "manage");
 
+const userKey = (c: Context) => (c as Context<TenantEnv>).get("user").id;
+
 /** Demais ações: 30 por minuto, por usuário (criar instância e QR têm limites próprios). */
-const writeLimit = rateLimit({ name: "channel-write", limit: 30, windowMs: MINUTE });
+const writeLimit = rateLimit({
+  name: "channel-write",
+  limit: 30,
+  windowMs: MINUTE,
+  key: userKey,
+});
 
 const scopeOf = (c: Context<TenantEnv>) => ({
   kind: "tenant" as const,
@@ -81,9 +88,9 @@ channelRoutes.patch(
   canManage,
   writeLimit,
   validId,
-  zValidator("json", renameChannelSchema, validationError),
+  zValidator("json", updateChannelSchema, validationError),
   async (c) => {
-    await renameChannel(scopeOf(c), c.req.valid("param").id, c.req.valid("json").name, actorOf(c));
+    await updateChannel(scopeOf(c), c.req.valid("param").id, c.req.valid("json"), actorOf(c));
 
     return c.json({ ok: true });
   },
@@ -112,3 +119,24 @@ channelRoutes.delete(
     return c.json(result);
   },
 );
+
+/**
+ * Rotas de cada tipo (criar, diagnosticar, modelos, QR...): o módulo as declara em
+ * `ChannelModule.routes` e este arquivo só entrega o escopo e a autorização. As pastas são
+ * montadas todas; cada rota confere se o módulo está ativo (`CHANNEL_PROVIDERS`).
+ */
+const kit: ChannelRouteKit = {
+  base: "/api/channels",
+  canRead,
+  canManage,
+  writeLimit,
+  limit: (name, perMinute) =>
+    rateLimit({ name, limit: perMinute, windowMs: MINUTE, key: userKey }),
+  validId,
+  scopeOf: (c) => scopeOf(c as Context<TenantEnv>),
+  actorOf: (c) => actorOf(c as Context<TenantEnv>),
+};
+
+for (const module of getModules()) {
+  if (module.routes) channelRoutes.route("/", module.routes(kit));
+}
