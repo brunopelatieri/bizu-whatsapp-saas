@@ -53,7 +53,9 @@ importa o registro: com `await` no topo o import dinâmico esperaria por ele mes
 
 Contrato `ChannelProvider`: `verifyWebhook` (nunca lança por assinatura errada), `normalizeEvents`
 (pura, testada com fixtures), `sendText`, `sendMedia`, `sendTemplate?`, `fetchMedia?`, `probe`,
-`destroy?`. READMEs dos módulos: o que foi medido, o que não foi e como remover.
+`destroy?`. **C5:** `SendMedia.content?` (função que lê o anexo: a Cloud sobe com `uploadMedia` e envia pelo id; a
+Evolution usa `url` e nunca a chama), `quotedProviderMessageId` também no `/send/media` da Evolution e `sendChannelTemplate`
+(`src/lib/channels/send.ts`; `ChannelCapabilityError` se o módulo não tem `sendTemplate`). READMEs dos módulos: o que foi medido, o que não foi e como remover.
 
 ## Avisos (`channel_event`) e jobs
 

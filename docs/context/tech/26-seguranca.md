@@ -173,6 +173,13 @@ personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota
   `META_REJECTED` dos canais); nunca vai a log.
 - Mídia recebida nunca por URL pública do armazenamento: rota autenticada, tipo pelo conteúdo, `inline`
   só para imagem, áudio e vídeo, `nosniff`.
+- **Upload e token da C5** (`tech/30-caixa-de-entrada.md`, "Anexo de saída"): o anexo (`multipart`, 16 MB, 20/min por
+  pessoa) tem limite de corpo próprio antes de ler o arquivo, o tipo decidido **pelo conteúdo** (lista fechada, sem SVG,
+  HTML, GIF, WebM nem executável) e nada é gravado em qualquer recusa. `GET /api/inbox/media-out/:token` é a única rota
+  do atendimento **sem sessão**: HMAC-SHA256 com `BETTER_AUTH_SECRET` e rótulo próprio sobre `<arquivo>.<prazo>`, um
+  arquivo, 5 minutos, comparação em tempo constante, só mídia de mensagem enviada pela equipe, 404 igual para qualquer
+  recusa, 120/min por IP, `nosniff` e `no-store`. Testes em `inbox-media-send.test.ts` e `media-out.test.ts`. Limite
+  conhecido: quem tem o endereço (o servidor Evolution, ou um log dele) baixa o arquivo por até 5 minutos; não é de uso único.
 - Conteúdo de mensagem, telefone e nome não vão a log, auditoria nem Sentry; erro de provedor só por
   `logChannelError`. Detalhes em `tech/30-caixa-de-entrada.md`.
 
