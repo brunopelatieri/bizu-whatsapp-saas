@@ -47,6 +47,12 @@
   (suporte lê, só o proprietário escreve, sem limite de plano) e a tela
   `/admin/configuracoes/canais`. **Pendente:** os mesmos smokes reais de B2 e B3, agora também com
   um número da plataforma.
+  **`caixa-de-entrada` C1 (dados e ingestão) implementada:** `chat_contact`, `chat_contact_identity`,
+  `conversation` e `message` com `scopedPolicy()`, `file` com `tenant_id` anulável, ingestão de
+  mensagens e status em `applyChannelEvent` (contato por `phone_key`, vínculo automático só com
+  correspondência única, reabertura sem dono, eco, LID, idempotência) e o job `inbox.media`
+  (`tech/30-caixa-de-entrada.md`). **Pendente:** C2 em diante (API, visibilidade, envio, telas, tempo
+  real) e a LGPD das conversas (C7: exportação e exclusão ainda não cobrem as tabelas novas).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

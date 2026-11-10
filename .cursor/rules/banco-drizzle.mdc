@@ -27,7 +27,8 @@ alwaysApply: false
 - Permissões são validadas no servidor, com `requireAuth` + `requireTenant` + `requirePermission`.
 - Loaders acessam o banco direto, sem chamada HTTP interna.
 - Migrations rodam fora do container da aplicação. O `bizu_app` lê `drizzle.__drizzle_migrations` (migration `0019`) para conferir o build na subida.
-- `consent_log` (sem tenant), `deletion_request` e `data_export` (RLS; linha sem tenant só com `withPlatformScope`) e `file` (tenant) são da fase 10; pedido pendente é um por assunto (índice único parcial).
+- `consent_log` (sem tenant), `deletion_request` e `data_export` (RLS; linha sem tenant só com `withPlatformScope`) e `file` são da fase 10; pedido pendente é um por assunto (índice único parcial). `file` usa `scopedPolicy()` desde a caixa de entrada: `tenant_id` nulo é mídia da plataforma.
+- Caixa de entrada (`chat_contact`, `conversation`, `message`): só `src/lib/inbox/` as consulta; `conversation.channel_id` é imutável (gatilho) e `restrict` (`docs/context/tech/30-caixa-de-entrada.md`).
 - `customer`, `user` e `portal_user` têm `CHECK` de telefone obrigatório (`src/db/phone-check.ts`; só a linha anonimizada fica sem) e `phone_key` (sem o 9º dígito); no cliente, único por tenant. Nunca grave só `phone`: use `phoneValues` (`src/lib/phone/columns.ts`).
 - Etiqueta é `tag` (escopo de tenant ou plataforma, `scopedPolicy()`) e `customer_tag`; use `src/lib/crm/tags.ts`, que recebe `Scope`. Nunca volte a guardar etiqueta como texto no cliente.
 - A anotação da plataforma sobre a organização é `organization_tag` e `organization_profile` (sem `tenant_id`, `platformOnlyPolicy()` + `FORCE`): só `withPlatformData` as lê e grava, só `/api/admin/*` as importa (`src/lib/crm/organization-profile.ts`), e nenhuma rota de tenant, `/api/me`, `/api/tenant`, exportação nem auditoria do tenant as devolve. Auditoria da plataforma (`admin.*`, `actor_type = platform`) vai **sem `tenant_id`** (o `audit_log` usa `scopedPolicy()`).

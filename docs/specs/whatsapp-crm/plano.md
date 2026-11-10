@@ -75,7 +75,7 @@ Cada fase cabe em um PR revisável e termina com `npm run lint`, `typecheck`, `t
 | B2 | Módulo WhatsApp Cloud | canais | B1 | Configuração, diagnóstico, webhook assinado, modelos sincronizados, tela em `/app/configuracoes/canais` | Opus (webhook) e Sonnet (tela) |
 | B3 | Módulo Evolution Go | canais | B1, B0 | Instância, QR Code e código de pareamento, ciclo de vida, webhook | Sonnet com as fixtures; revisão Opus |
 | B4 | Canais da plataforma | canais | B2, B3 | As mesmas telas em `/admin/configuracoes/canais` | Sonnet |
-| C1 | Dados e ingestão | inbox | A1, B1 | `chat_contact`, `conversation`, `message`, ingestão de mensagens, status, eco e mídia | Opus |
+| C1 | Dados e ingestão (**implementada**) | inbox | A1, B1 | `chat_contact`, `conversation`, `message`, ingestão de mensagens, status, eco e mídia | Opus |
 | C2 | API do atendimento | inbox | C1 | Leitura paginada, envio de texto, fila, assumir, transferir, encerrar, janela de 24 h, visibilidade | Opus + `/security-review` |
 | C3 | Tela do atendimento (tenant) | inbox | C2, A2, A3 | `/app/atendimento`: lista, conversa, composer, painel do contato | Sonnet |
 | C4 | Tempo real | inbox | C2 | SSE, `NOTIFY`, ressincronização e contador de não lidas no menu | Opus |
