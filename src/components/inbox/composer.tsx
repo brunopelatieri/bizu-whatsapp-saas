@@ -9,7 +9,6 @@ import {
 } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { useCan } from "@/components/auth/can";
 import { formatFileSize } from "@/components/inbox/format";
 import {
   type ConversationResponse,
@@ -21,6 +20,7 @@ import {
   useSendMessage,
 } from "@/components/inbox/inbox-api";
 import { TemplateDialog } from "@/components/inbox/template-dialog";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { can as channelCan } from "@/lib/channels/capabilities";
@@ -62,13 +62,14 @@ type Block = {
  * conectado, a permissão e a personificação em todo envio.
  */
 function useBlock(detail: ConversationResponse): Block {
-  const can = useCan();
+  const can = useInboxCan();
+  const inbox = useInboxScope();
   const { user, billing } = useAuth();
   const hard = (reason: ReactNode): Block => ({ reason, windowClosed: false });
 
   if (user?.impersonatedBy) return hard("Sessão de suporte: você só pode ler as conversas.");
   if (!can("inbox", "reply")) return hard("Você não tem permissão para responder.");
-  if (billing?.state === "read_only") {
+  if (inbox.mode === "tenant" && billing?.state === "read_only") {
     return hard(
       <>
         A organização está em modo somente leitura.{" "}
@@ -83,7 +84,7 @@ function useBlock(detail: ConversationResponse): Block {
       <>
         O número {detail.conversation.channel.name} está desconectado.{" "}
         {can("channel", "read") ? (
-          <Link to="/app/configuracoes/canais" className="font-medium underline">
+          <Link to={inbox.channelsRoute} className="font-medium underline">
             Ver números
           </Link>
         ) : (
@@ -106,8 +107,9 @@ export function Composer({
   replyTo,
   onClearReply,
 }: ComposerProps) {
-  const { tenant, user } = useAuth();
-  const draftKey = `${tenant?.id}:${user?.id}:${conversationId}`;
+  const { user } = useAuth();
+  const { key: scopeKey } = useInboxScope();
+  const draftKey = `${scopeKey}:${user?.id}:${conversationId}`;
   const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
   const [attachment, setAttachment] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);

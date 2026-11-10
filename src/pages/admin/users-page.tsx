@@ -9,6 +9,9 @@ import {
 import { OrgList, type OrgRef } from "@/components/admin/org-list";
 import { Pager } from "@/components/admin/pager";
 import { PortalUsersCard } from "@/components/admin/portal-users-card";
+import { InboxModeProvider } from "@/components/inbox/inbox-scope";
+import { StartConversationButton } from "@/components/inbox/new-conversation-dialog";
+import type { PhoneKind } from "@/lib/phone/br";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +38,8 @@ type AdminUser = {
   emailVerified: boolean;
   banned: boolean;
   banReason: string | null;
+  /** Tipo do telefone (`null` sem telefone); o número não sai da API. */
+  phoneKind: PhoneKind | null;
   organizations: OrgRef[];
   more: number;
 };
@@ -155,7 +160,18 @@ export function AdminUsersPage() {
                             }
                           />
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="space-x-2 text-right">
+                          {/* "Conversar": papel que responde e telefone preenchido (o servidor confere). */}
+                          {user.banned || user.id === me?.id ? null : (
+                            <InboxModeProvider value="platform">
+                              <StartConversationButton
+                                target={{ userId: user.id }}
+                                name={user.name}
+                                phoneKind={user.phoneKind}
+                                size="sm"
+                              />
+                            </InboxModeProvider>
+                          )}
                           {owner && user.platformRole === "user" && user.id !== me?.id ? (
                             user.banned ? (
                               <Button

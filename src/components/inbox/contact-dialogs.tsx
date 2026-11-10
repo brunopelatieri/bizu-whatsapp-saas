@@ -7,6 +7,7 @@ import { CustomFieldInput } from "@/components/crm/custom-field-input";
 import { useCustomFields } from "@/components/crm/custom-fields-api";
 import { TagPicker } from "@/components/crm/tag-picker";
 import { type ContactView, errorText, invalidateInbox } from "@/components/inbox/inbox-api";
+import { useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,18 +30,21 @@ import { Link } from "react-router";
 /** Vincular o contato a um cliente (ou membro) ou desfazer; relê a caixa e os clientes no fim. */
 export function useLinkContact(contactId: string) {
   const queryClient = useQueryClient();
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useMutation({
-    mutationFn: (body: { customerId: string | null; userId: string | null } | { userId: string }) =>
-      apiFetch(`/api/inbox/contacts/${contactId}/link`, {
+    // Na plataforma só há `userId` (ou `null` para desfazer): o cliente é do owner.
+    mutationFn: (
+      body: { customerId: string | null; userId: string | null } | { userId: string | null },
+    ) =>
+      apiFetch(`${scope.api}/contacts/${contactId}/link`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
     onError: (error) => toast.error(errorText(error)),
     onSettled: () =>
       Promise.all([
-        invalidateInbox(queryClient, tenant?.id),
+        invalidateInbox(queryClient, scope.key),
         queryClient.invalidateQueries({ queryKey: ["customers"] }),
       ]),
   });

@@ -2,7 +2,6 @@ import { MessageSquare, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { QueryState } from "@/components/admin/query-state";
-import { useCan } from "@/components/auth/can";
 import { Composer } from "@/components/inbox/composer";
 import { ContactPanel } from "@/components/inbox/contact-panel";
 import { ConversationHeader } from "@/components/inbox/conversation-header";
@@ -15,19 +14,35 @@ import {
 } from "@/components/inbox/inbox-api";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { NewConversationDialog } from "@/components/inbox/new-conversation-dialog";
+import {
+  type InboxMode,
+  InboxModeProvider,
+  useInboxCan,
+  useInboxScope,
+} from "@/components/inbox/inbox-scope";
 import { useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
 /**
- * Atendimento do tenant: lista, conversa e painel do contato. Em tela larga as três colunas
+ * Atendimento (do tenant em `/app`, da plataforma em `/admin` com `mode="platform"`): lista, conversa e
+ * painel do contato. Em tela larga as três colunas
  * aparecem juntas (o painel a partir de `xl`); em tela estreita, uma de cada vez (lista → conversa
  * → painel), com "voltar". Sem `loader`: tudo vem pela API, atualizado pelo SSE
  * (`use-inbox-events.ts`, montado no layout) ou, sem ele, por polling de 20 s com o aviso no topo.
  */
-export function InboxPage() {
+export function InboxPage({ mode = "tenant" }: { mode?: InboxMode }) {
+  return (
+    <InboxModeProvider value={mode}>
+      <InboxScreen />
+    </InboxModeProvider>
+  );
+}
+
+function InboxScreen() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
+  const { route } = useInboxScope();
   const [panelOpen, setPanelOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const realtime = useInboxRealtimeMode();
@@ -66,7 +81,7 @@ export function InboxPage() {
             panelOpen={panelOpen}
             onOpenPanel={() => setPanelOpen(true)}
             onClosePanel={() => setPanelOpen(false)}
-            onBack={() => navigate("/app/atendimento")}
+            onBack={() => navigate(route)}
           />
         ) : (
           <div className="hidden min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-muted/30 text-center text-muted-foreground lg:flex">
@@ -96,7 +111,8 @@ function ConversationView({
   onClosePanel,
   onBack,
 }: ConversationViewProps) {
-  const can = useCan();
+  const can = useInboxCan();
+  const { api, route } = useInboxScope();
   const query = useConversation(conversationId);
   const [sending, setSending] = useState<SendingMessage[]>([]);
   // A mensagem que a próxima resposta cita; some ao trocar de conversa.
@@ -129,8 +145,8 @@ function ConversationView({
     const marker = `${conversationId}:${unread}`;
     if (lastRead.current === marker) return;
     lastRead.current = marker;
-    markRead({ path: `/api/inbox/conversations/${conversationId}/read`, method: "POST" });
-  }, [conversationId, unread, markRead]);
+    markRead({ path: `${api}/conversations/${conversationId}/read`, method: "POST" });
+  }, [conversationId, unread, markRead, api]);
 
   // Só o erro sem dados troca a tela: uma releitura que falha no polling mantém o que já está aberto.
   if (query.isError && !detail) {
@@ -151,7 +167,7 @@ function ConversationView({
               Tentar novamente
             </button>
           )}
-          <Link to="/app/atendimento" className="font-medium text-primary hover:underline">
+          <Link to={route} className="font-medium text-primary hover:underline">
             Voltar ao atendimento
           </Link>
         </div>

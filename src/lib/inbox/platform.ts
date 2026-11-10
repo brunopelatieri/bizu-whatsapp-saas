@@ -12,6 +12,7 @@ import {
   requireVisibleContact,
 } from "@/lib/inbox/contact-actions";
 import { conversationItem, permissionDenied } from "@/lib/inbox/conversations";
+import { platformReplyRoles } from "@/lib/inbox/constants";
 import { notifyInbox } from "@/lib/inbox/notify";
 import type { InboxActor, InboxCapabilities } from "@/lib/inbox/visibility";
 import { normalizePhone, phoneErrorMessage } from "@/lib/phone/br";
@@ -26,7 +27,7 @@ import { notFound, TenantRuleError } from "@/lib/tenant/errors";
  */
 
 /** Quem responde: o proprietário e o suporte da plataforma (decisão do proprietário). */
-export const PLATFORM_REPLY_ROLES: readonly PlatformRole[] = ["platform_owner", "platform_support"];
+export const PLATFORM_REPLY_ROLES: readonly PlatformRole[] = platformReplyRoles;
 
 /** Leitura é de qualquer papel de plataforma; enviar e mudar a situação, de `PLATFORM_REPLY_ROLES`. */
 export function platformCapabilities(role: PlatformRole): InboxCapabilities {

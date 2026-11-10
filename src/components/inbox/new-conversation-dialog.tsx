@@ -5,9 +5,10 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useTeam } from "@/components/app/team/team-api";
 import { useCustomers } from "@/components/app/customers/customers-api";
-import { useCan } from "@/components/auth/can";
+import { type Page, useAdminQuery } from "@/components/admin/admin-api";
 import { type Channel, useChannels } from "@/components/channels/channels-api";
 import { errorText, invalidateInbox } from "@/components/inbox/inbox-api";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,7 +33,11 @@ import { apiFetch } from "@/lib/api/client";
 import { canWhatsApp, formatPhoneForDisplay, normalizePhone, type PhoneKind } from "@/lib/phone/br";
 import { useAuth } from "@/providers/auth-provider";
 
+/** Na plataforma não há `customerId`: o cliente é do owner (a API recusa). */
 export type StartTarget = { customerId: string } | { userId: string } | { phone: string };
+
+/** O que a lista de usuários de `/api/admin/users` traz para escolher com quem conversar. */
+type PlatformUserRow = { id: string; name: string; email: string; banned: boolean; phoneKind: PhoneKind | null };
 
 /** Tipo do telefone guardado (`phone_normalized`, dígitos com DDI); `null` sem telefone. */
 export function phoneKindOf(phoneNormalized: string | null | undefined): PhoneKind | null {
@@ -50,18 +55,18 @@ export function connectedChannels(channels: Channel[] | undefined) {
 export function useStartConversation(onDone?: () => void, silent = false) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useMutation({
     mutationFn: (body: { channelId: string } & StartTarget) =>
-      apiFetch<{ conversation: { id: string } }>("/api/inbox/conversations", {
+      apiFetch<{ conversation: { id: string } }>(`${scope.api}/conversations`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
     onSuccess: async ({ conversation }) => {
-      await invalidateInbox(queryClient, tenant?.id);
+      await invalidateInbox(queryClient, scope.key);
       onDone?.();
-      navigate(`/app/atendimento/${conversation.id}`);
+      navigate(`${scope.route}/${conversation.id}`);
     },
     onError: (error) => {
       if (!silent) toast.error(errorText(error));
@@ -79,8 +84,10 @@ type NewConversationDialogProps = {
 };
 
 export function NewConversationDialog({ open, onClose, preset }: NewConversationDialogProps) {
-  const can = useCan();
-  const channels = useChannels();
+  const can = useInboxCan();
+  const scope = useInboxScope();
+  const platform = scope.mode === "platform";
+  const channels = useChannels(scope.channelsPath);
   const usable = useMemo(() => connectedChannels(channels.data?.channels), [channels.data]);
   const [channelId, setChannelId] = useState<string | undefined>();
   const [mode, setMode] = useState<Mode>(can("customer", "read") ? "customer" : "member");
@@ -110,14 +117,24 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
       : (usable.find(({ isDefault }) => isDefault) ?? usable[0])?.id;
 
   const customers = useCustomers({ q, page: 1 }, open && !preset && mode === "customer" && can("customer", "read"));
-  const team = useTeam(open && !preset && mode === "member");
+  const team = useTeam(open && !preset && mode === "member" && !platform);
+  const platformUsers = useAdminQuery<Page<PlatformUserRow>>(
+    "/api/admin/users",
+    { q, page: 1, scope: "team" },
+    open && !preset && mode === "member" && platform,
+  );
 
   const customerRows = (customers.data?.items ?? []).filter(
     (customer) => canWhatsApp(phoneKindOf(customer.phoneNormalized) ?? "landline"),
   );
-  const memberRows = (team.data?.members ?? [])
-    .filter((member) => member.phoneKind && canWhatsApp(member.phoneKind))
-    .filter((member) => !q || member.name.toLowerCase().includes(q.toLowerCase()));
+  const memberRows = platform
+    ? (platformUsers.data?.items ?? [])
+        .filter((row) => row.phoneKind && canWhatsApp(row.phoneKind) && !row.banned)
+        .map((row) => ({ id: row.id, userId: row.id, name: row.name }))
+    : (team.data?.members ?? [])
+        .filter((member) => member.phoneKind && canWhatsApp(member.phoneKind))
+        .filter((member) => !q || member.name.toLowerCase().includes(q.toLowerCase()));
+  const membersLoaded = platform ? platformUsers.isSuccess : team.isSuccess;
 
   function begin(target: StartTarget) {
     if (!effectiveChannel) return;
@@ -182,7 +199,7 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
             <Tabs value={mode} onValueChange={(next) => setMode(next as Mode)}>
               <TabsList className="w-full">
                 {can("customer", "read") ? <TabsTrigger value="customer">Cliente</TabsTrigger> : null}
-                <TabsTrigger value="member">Equipe</TabsTrigger>
+                <TabsTrigger value="member">{platform ? "Usuário" : "Equipe"}</TabsTrigger>
                 <TabsTrigger value="phone">Telefone</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -217,7 +234,7 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder={mode === "customer" ? "Buscar cliente" : "Buscar na equipe"}
+                  placeholder={mode === "customer" ? "Buscar cliente" : platform ? "Buscar usuário" : "Buscar na equipe"}
                   aria-label="Buscar"
                   maxLength={100}
                   autoComplete="off"
@@ -259,9 +276,9 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
                     Nenhum cliente com telefone de WhatsApp{q ? " para esta busca" : ""}.
                   </p>
                 ) : null}
-                {mode === "member" && team.isSuccess && memberRows.length === 0 ? (
+                {mode === "member" && membersLoaded && memberRows.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Ninguém da equipe com telefone de WhatsApp{q ? " para esta busca" : ""}.
+                    {platform ? "Nenhum usuário" : "Ninguém da equipe"} com telefone de WhatsApp{q ? " para esta busca" : ""}.
                   </p>
                 ) : null}
               </div>
@@ -296,14 +313,16 @@ export function StartConversationButton({
   phoneKind: PhoneKind | null;
   size?: "default" | "sm";
 }) {
-  const can = useCan();
+  const can = useInboxCan();
+  const scope = useInboxScope();
   const { user, billing } = useAuth();
-  const channels = useChannels();
+  const channels = useChannels(scope.channelsPath);
   const [choosing, setChoosing] = useState(false);
   const start = useStartConversation();
   const usable = connectedChannels(channels.data?.channels);
 
-  if (!can("inbox", "reply") || user?.impersonatedBy || billing?.state === "read_only") return null;
+  const tenantReadOnly = scope.mode === "tenant" && billing?.state === "read_only";
+  if (!can("inbox", "reply") || user?.impersonatedBy || tenantReadOnly) return null;
   if ("customerId" in target && !can("customer", "read")) return null;
   if (!phoneKind) return null;
 

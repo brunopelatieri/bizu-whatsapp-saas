@@ -79,3 +79,10 @@ export const OUTBOUND_MIME: Readonly<Record<string, OutboundKind>> = {
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
   "text/plain": "document",
 };
+
+/**
+ * Papéis de plataforma que respondem no atendimento de `/admin` (decisão do proprietário): o
+ * proprietário e o suporte. Leitura é de qualquer papel de plataforma. A tela só esconde botões; o
+ * servidor confere (`src/lib/inbox/platform.ts`).
+ */
+export const platformReplyRoles = ["platform_owner", "platform_support"] as const;

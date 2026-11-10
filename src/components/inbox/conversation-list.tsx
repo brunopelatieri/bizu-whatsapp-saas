@@ -2,7 +2,6 @@ import { Inbox, Loader2, MessageSquarePlus, Search, Tags } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { QueryState } from "@/components/admin/query-state";
-import { useCan } from "@/components/auth/can";
 import { useChannels } from "@/components/channels/channels-api";
 import { TagChip } from "@/components/crm/tag-chip";
 import { useTags } from "@/components/crm/tags-api";
@@ -13,6 +12,7 @@ import {
   useConversations,
   useInboxUnread,
 } from "@/components/inbox/inbox-api";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { CONVERSATION_STATUS_LABELS } from "@/components/inbox/labels";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,10 +73,13 @@ type ConversationListProps = {
  * busca com espera e rolagem infinita por cursor. O servidor decide o que cada aba devolve.
  */
 export function ConversationList({ selectedId, onNewConversation, className }: ConversationListProps) {
-  const can = useCan();
+  const can = useInboxCan();
+  const inbox = useInboxScope();
+  // Na plataforma só existe a lista: sem abas Fila, Minhas e Todas nem filtro de atendente.
+  const tenantMode = inbox.mode === "tenant";
   const canSupervise = can("inbox", "supervise");
   const canFilterTags = can("customer", "read");
-  const [tab, setTab] = useState<ConversationTab>("queue");
+  const [tab, setTab] = useState<ConversationTab>(tenantMode ? "queue" : "all");
   const [status, setStatus] = useState<ConversationStatus | undefined>();
   const [unread, setUnread] = useState(false);
   const [channelId, setChannelId] = useState<string | undefined>();
@@ -85,10 +88,11 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
   const [search, setSearch] = useState("");
   const q = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS);
 
-  const channels = useChannels();
+  const channels = useChannels(inbox.channelsPath);
   const tags = useTags(canFilterTags);
   const assignees = useAssignees(canSupervise && can("inbox", "assign"));
   const unreadCounts = useInboxUnread();
+  const unreadTotal = (unreadCounts.data?.queue ?? 0) + (unreadCounts.data?.mine ?? 0);
 
   const filters: ConversationFilters = useMemo(
     () => ({
@@ -162,7 +166,17 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
     <section className={cn("flex min-h-0 flex-col bg-background", className)} aria-label="Conversas">
       <div className="space-y-2 border-b border-border p-3">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-base font-semibold text-foreground">Atendimento</h1>
+          <h1 className="flex items-center gap-2 text-base font-semibold text-foreground">
+            Atendimento
+            {!tenantMode && unreadTotal > 0 ? (
+              <span
+                className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground"
+                title="Conversas com mensagens não lidas"
+              >
+                {unreadTotal}
+              </span>
+            ) : null}
+          </h1>
           {can("inbox", "reply") ? (
             <Button size="sm" variant="outline" onClick={onNewConversation}>
               <MessageSquarePlus />
@@ -171,23 +185,25 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
           ) : null}
         </div>
 
-        <Tabs
-          value={tab}
-          onValueChange={(next) => {
-            setTab(next as ConversationTab);
-            // O filtro de atendente só existe em "Todas".
-            if (next !== "all") setAssignedTo(undefined);
-          }}
-        >
-          <TabsList className="w-full">
-            {tabs.map((value) => (
-              <TabsTrigger key={value} value={value}>
-                {TAB_LABELS[value]}
-                {tabBadge(value)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {tenantMode ? (
+          <Tabs
+            value={tab}
+            onValueChange={(next) => {
+              setTab(next as ConversationTab);
+              // O filtro de atendente só existe em "Todas".
+              if (next !== "all") setAssignedTo(undefined);
+            }}
+          >
+            <TabsList className="w-full">
+              {tabs.map((value) => (
+                <TabsTrigger key={value} value={value}>
+                  {TAB_LABELS[value]}
+                  {tabBadge(value)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : null}
 
         <div className="relative">
           <Search
@@ -312,6 +328,8 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
               filtering={filtering}
               noConnectedChannel={channels.isSuccess && usableChannels.length === 0}
               canSeeChannels={can("channel", "read")}
+          channelsRoute={inbox.channelsRoute}
+          platform={!tenantMode}
             />
           ) : (
             <>
@@ -321,7 +339,7 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
                   item={item}
                   selected={item.id === selectedId}
                   showChannel={channelList.length > 1}
-                  showOwner={tab === "all"}
+                  showOwner={tenantMode && tab === "all"}
                 />
               ))}
               {hasNextPage ? (
@@ -350,11 +368,15 @@ function EmptyList({
   filtering,
   noConnectedChannel,
   canSeeChannels,
+  channelsRoute,
+  platform,
 }: {
   tab: ConversationTab;
   filtering: boolean;
   noConnectedChannel: boolean;
   canSeeChannels: boolean;
+  channelsRoute: string;
+  platform: boolean;
 }) {
   if (filtering) {
     return (
@@ -368,7 +390,7 @@ function EmptyList({
         <Inbox className="size-8" aria-hidden />
         <p>Nenhum número de WhatsApp conectado.</p>
         {canSeeChannels ? (
-          <Link to="/app/configuracoes/canais" className="font-medium text-primary hover:underline">
+          <Link to={channelsRoute} className="font-medium text-primary hover:underline">
             Conectar um número
           </Link>
         ) : (
@@ -382,11 +404,13 @@ function EmptyList({
     <div className="flex flex-col items-center gap-2 p-6 text-center text-sm text-muted-foreground">
       <Inbox className="size-8" aria-hidden />
       <p>
-        {tab === "queue"
-          ? "Nenhuma conversa na fila."
-          : tab === "mine"
-            ? "Você não tem conversas atribuídas."
-            : "Nenhuma conversa ainda."}
+        {platform
+          ? "Nenhuma conversa ainda."
+          : tab === "queue"
+            ? "Nenhuma conversa na fila."
+            : tab === "mine"
+              ? "Você não tem conversas atribuídas."
+              : "Nenhuma conversa ainda."}
       </p>
     </div>
   );

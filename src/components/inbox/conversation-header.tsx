@@ -1,5 +1,4 @@
 import { ArrowLeft, ChevronDown, Hand, PanelRight, Undo2, UserRoundCog } from "lucide-react";
-import { useCan } from "@/components/auth/can";
 import { ChannelBadge } from "@/components/channels/channel-badge";
 import { contactLabel, initialsOf } from "@/components/inbox/format";
 import {
@@ -7,6 +6,7 @@ import {
   useAssignees,
   useInboxMutation,
 } from "@/components/inbox/inbox-api";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,10 +44,14 @@ const STATUS_ACTIONS: Record<ConversationStatus, { to: ConversationStatus; label
 
 export function ConversationHeader({ detail, onBack, onOpenPanel }: ConversationHeaderProps) {
   const { user, billing } = useAuth();
-  const can = useCan();
+  const can = useInboxCan();
+  const inbox = useInboxScope();
+  // Só o tenant tem fila, dono, assumir e transferir; a plataforma tem só a lista.
+  const tenantMode = inbox.mode === "tenant";
   const { conversation, contact } = detail;
-  const base = `/api/inbox/conversations/${conversation.id}`;
-  const readOnly = Boolean(user?.impersonatedBy) || billing?.state === "read_only";
+  const base = `${inbox.api}/conversations/${conversation.id}`;
+  const readOnly =
+    Boolean(user?.impersonatedBy) || (tenantMode && billing?.state === "read_only");
   const canReply = can("inbox", "reply") && !readOnly;
   const canAssign = can("inbox", "assign") && !readOnly;
   const owner = conversation.assignedTo;
@@ -102,11 +106,13 @@ export function ConversationHeader({ detail, onBack, onOpenPanel }: Conversation
         <Badge variant={conversation.status === "closed" ? "outline" : "secondary"}>
           {CONVERSATION_STATUS_LABELS[conversation.status]}
         </Badge>
-        <span className="text-xs text-muted-foreground">
-          {owner ? (mine ? "Com você" : `Com ${owner.name}`) : "Na fila"}
-        </span>
+        {tenantMode ? (
+          <span className="text-xs text-muted-foreground">
+            {owner ? (mine ? "Com você" : `Com ${owner.name}`) : "Na fila"}
+          </span>
+        ) : null}
 
-        {canReply && !owner ? (
+        {tenantMode && canReply && !owner ? (
           <Button
             size="sm"
             disabled={busy}
