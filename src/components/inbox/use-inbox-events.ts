@@ -2,7 +2,12 @@ import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { INBOX_SEND_KEY, inboxKeys } from "@/components/inbox/inbox-api";
+import {
+  type ConversationChange,
+  INBOX_SEND_KEY,
+  inboxKeys,
+  invalidateInboxChanges,
+} from "@/components/inbox/inbox-api";
 import { setInboxRealtimeMode } from "@/components/inbox/realtime-mode";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -15,7 +20,8 @@ import { useAuth } from "@/providers/auth-provider";
  * - Falhou ao abrir (503 sem `LISTEN`, 429 com abas demais, rede): modo `polling` (20 s, com o
  *   aviso na tela) e nova tentativa com espera crescente, até 60 s.
  * - Caiu depois de aberto (o servidor encerra a cada 15 min): reconecta em 1 s, sem trocar de modo.
- * - Ao reconectar e ao voltar o foco, relê a lista e o contador (eventos podem ter se perdido).
+ *   Tentativa sem resposta em 10 s conta como falha.
+ * - A cada abertura e ao voltar o foco, relê tudo da caixa (eventos podem ter se perdido no meio).
  * - Atribuição feita por outra pessoa (`a = eu`, `p ≠ eu`, `u ≠ eu`) vira toast.
  *
  * Montado uma vez no layout do `/app` (`InboxEvents`), para o ponto do menu andar em toda tela.
@@ -24,6 +30,8 @@ import { useAuth } from "@/providers/auth-provider";
 export const INBOX_EVENTS_URL = "/api/inbox/events";
 /** Reconexão depois de um fluxo que chegou a abrir. */
 const RECONNECT_AFTER_OPEN_MS = 1_000;
+/** Tentativa sem resposta: passado isto, conta como falha (o servidor espera até 3 s pela escuta). */
+const OPEN_TIMEOUT_MS = 10_000;
 /** Espera entre tentativas que falharam ao abrir. */
 const RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 30_000, 60_000];
 /** Junta os eventos de uma rajada numa releitura só. */
@@ -104,8 +112,8 @@ export function connectInboxEvents(options: InboxEventsOptions) {
 
   let source: EventSourceLike | undefined;
   let timer: unknown;
+  let openTimer: unknown;
   let failures = 0;
-  let everOpened = false;
   let stopped = false;
 
   function schedule(ms: number) {
@@ -117,28 +125,19 @@ export function connectInboxEvents(options: InboxEventsOptions) {
     }, ms);
   }
 
+  function clearOpenTimer() {
+    if (openTimer !== undefined) timers.clearTimeout(openTimer);
+    openTimer = undefined;
+  }
+
   function open() {
     if (stopped) return;
     const current = createSource(url);
     source = current;
     let opened = false;
 
-    current.addEventListener("open", () => {
-      if (source !== current) return;
-      opened = true;
-      failures = 0;
-      options.onMode("live");
-      if (everOpened) options.onResync();
-      everOpened = true;
-    });
-
-    current.addEventListener("inbox", (event) => {
-      if (source !== current) return;
-      const data = parseInboxEvent(event.data);
-      if (data) options.onEvent(data);
-    });
-
-    current.addEventListener("error", () => {
+    const fail = () => {
+      clearOpenTimer();
       current.close();
       if (source !== current) return;
       source = undefined;
@@ -153,7 +152,30 @@ export function connectInboxEvents(options: InboxEventsOptions) {
       const base = RETRY_DELAYS_MS[Math.min(failures, RETRY_DELAYS_MS.length - 1)] as number;
       failures += 1;
       schedule(Math.round(base * (1 + random() * 0.2)));
+    };
+
+    // Tentativa que não abre nem falha (rede parada) conta como falha: sem isso o modo ficaria
+    // `live` sem polling e a tela congelaria sem aviso.
+    openTimer = timers.setTimeout(fail, OPEN_TIMEOUT_MS);
+
+    current.addEventListener("open", () => {
+      if (source !== current) return;
+      clearOpenTimer();
+      opened = true;
+      failures = 0;
+      options.onMode("live");
+      // A cada abertura, inclusive a primeira: o que mudou entre a última leitura (carga da tela,
+      // polling ou o fluxo anterior) e esta assinatura não vem em evento.
+      options.onResync();
     });
+
+    current.addEventListener("inbox", (event) => {
+      if (source !== current) return;
+      const data = parseInboxEvent(event.data);
+      if (data) options.onEvent(data);
+    });
+
+    current.addEventListener("error", fail);
   }
 
   open();
@@ -166,6 +188,7 @@ export function connectInboxEvents(options: InboxEventsOptions) {
     },
     close() {
       stopped = true;
+      clearOpenTimer();
       if (timer !== undefined) timers.clearTimeout(timer);
       timer = undefined;
       source?.close();
@@ -175,26 +198,22 @@ export function connectInboxEvents(options: InboxEventsOptions) {
 }
 
 /** Releitura acumulada de uma rajada de eventos. */
-type PendingFlush = { conversations: Map<string, boolean> };
+type PendingFlush = { lists: boolean; conversations: Map<string, ConversationChange> };
 
-function flushInvalidation(queryClient: QueryClient, tenantId: string, pending: PendingFlush) {
-  const keys: (readonly unknown[])[] = [inboxKeys.conversations(tenantId), inboxKeys.unread(tenantId)];
-
-  for (const [conversationId, messages] of pending.conversations) {
-    keys.push(inboxKeys.conversation(tenantId, conversationId));
-    if (messages) keys.push(inboxKeys.messages(tenantId, conversationId));
-  }
-  pending.conversations.clear();
-
-  for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey });
+/**
+ * O que cada tipo de aviso muda. `message`: lista (prévia, não lidas), detalhe e mensagens;
+ * `conversation` (dono, situação, lida, contato): lista e detalhe; `status` de entrega e mídia: só as
+ * mensagens.
+ */
+export function changeOf(kind: InboxEventData["k"]): { lists: boolean } & ConversationChange {
+  if (kind === "status") return { lists: false, detail: false, messages: true };
+  if (kind === "conversation") return { lists: true, detail: true, messages: false };
+  return { lists: true, detail: true, messages: true };
 }
 
-/** Lista e contador: o que se relê ao reconectar e ao voltar o foco. */
-function resyncLists(queryClient: QueryClient, tenantId: string) {
-  void queryClient.invalidateQueries({ queryKey: inboxKeys.conversations(tenantId) });
-  void queryClient.invalidateQueries({ queryKey: inboxKeys.unread(tenantId) });
-  // Detalhes abertos também: a conversa pode ter mudado de dono enquanto estava fora.
-  void queryClient.invalidateQueries({ queryKey: [...inboxKeys.all(tenantId), "conversation"] });
+/** Tudo da caixa do tenant (lista, contador, detalhes e mensagens): ao reconectar e ao voltar o foco. */
+function resyncAll(queryClient: QueryClient, tenantId: string) {
+  void queryClient.invalidateQueries({ queryKey: inboxKeys.all(tenantId) });
 }
 
 export function useInboxEvents(enabled: boolean) {
@@ -213,7 +232,7 @@ export function useInboxEvents(enabled: boolean) {
       return;
     }
 
-    const pending: PendingFlush = { conversations: new Map() };
+    const pending: PendingFlush = { lists: false, conversations: new Map() };
     let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
     const flush = () => {
@@ -222,15 +241,23 @@ export function useInboxEvents(enabled: boolean) {
         flushTimer = setTimeout(flush, SEND_WAIT_MS);
         return;
       }
-      flushInvalidation(queryClient, tenantId, pending);
+      const changes = { lists: pending.lists, conversations: [...pending.conversations] };
+      pending.lists = false;
+      pending.conversations.clear();
+      void invalidateInboxChanges(queryClient, tenantId, changes);
     };
 
     const connection = connectInboxEvents({
       onMode: setInboxRealtimeMode,
-      onResync: () => resyncLists(queryClient, tenantId),
+      onResync: () => resyncAll(queryClient, tenantId),
       onEvent: (event) => {
-        const messages = event.k !== "conversation";
-        pending.conversations.set(event.c, (pending.conversations.get(event.c) ?? false) || messages);
+        const change = changeOf(event.k);
+        const previous = pending.conversations.get(event.c);
+        pending.lists ||= change.lists;
+        pending.conversations.set(event.c, {
+          detail: change.detail || Boolean(previous?.detail),
+          messages: change.messages || Boolean(previous?.messages),
+        });
         flushTimer ??= setTimeout(flush, FLUSH_DELAY_MS);
 
         if (assignedToMeByOther(event, me)) {
@@ -250,7 +277,7 @@ export function useInboxEvents(enabled: boolean) {
       if (document.visibilityState !== "visible") return;
       if (Date.now() - lastResync < 2_000) return;
       lastResync = Date.now();
-      resyncLists(queryClient, tenantId);
+      resyncAll(queryClient, tenantId);
       connection.retryNow();
     };
     document.addEventListener("visibilitychange", onVisible);

@@ -156,10 +156,34 @@ export const inboxKeys = {
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
 };
 
+/** O que uma mudança afeta em uma conversa: o detalhe e/ou as mensagens. */
+export type ConversationChange = { detail: boolean; messages: boolean };
+
 /**
- * Invalida o que um evento da caixa afeta: sempre a lista e o contador. Com `conversationId`, o detalhe
+ * Fonte única das chaves que uma mudança afeta. `lists` = lista e contador; por conversa, o detalhe e
+ * as mensagens conforme `ConversationChange`. Usada pelas escritas da tela (`invalidateInbox`) e pelos
+ * eventos do SSE (`use-inbox-events.ts`, que junta uma rajada numa chamada só).
+ */
+export function invalidateInboxChanges(
+  queryClient: QueryClient,
+  tenantId: TenantId,
+  changes: { lists: boolean; conversations?: Iterable<[string, ConversationChange]> },
+) {
+  const keys: (readonly unknown[])[] = [];
+
+  if (changes.lists) keys.push(inboxKeys.conversations(tenantId), inboxKeys.unread(tenantId));
+  for (const [conversationId, change] of changes.conversations ?? []) {
+    if (change.detail) keys.push(inboxKeys.conversation(tenantId, conversationId));
+    if (change.messages) keys.push(inboxKeys.messages(tenantId, conversationId));
+  }
+
+  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+}
+
+/**
+ * Invalida o que uma escrita da tela afeta: sempre a lista e o contador. Com `conversationId`, o detalhe
  * e (salvo `messages: false`) as mensagens daquela conversa; sem ele, o detalhe de todas e nenhuma
- * mensagem. A C4 chama isto com os ids do evento SSE (nunca escreve o evento no cache).
+ * mensagem. Nunca escreve no cache.
  */
 export function invalidateInbox(
   queryClient: QueryClient,
@@ -167,25 +191,26 @@ export function invalidateInbox(
   scope: { conversationId?: string; messages?: boolean } = {},
 ) {
   const { conversationId, messages = true } = scope;
-  const keys: (readonly unknown[])[] = [
-    inboxKeys.conversations(tenantId),
-    inboxKeys.unread(tenantId),
-  ];
 
   if (!conversationId) {
-    keys.push([INBOX_KEY, tenantId, "conversation"]);
-  } else {
-    keys.push(inboxKeys.conversation(tenantId, conversationId));
-    if (messages) keys.push(inboxKeys.messages(tenantId, conversationId));
+    return Promise.all([
+      invalidateInboxChanges(queryClient, tenantId, { lists: true }),
+      queryClient.invalidateQueries({ queryKey: [INBOX_KEY, tenantId, "conversation"] }),
+    ]);
   }
-
-  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  return invalidateInboxChanges(queryClient, tenantId, {
+    lists: true,
+    conversations: [[conversationId, { detail: true, messages }]],
+  });
 }
 
 /** Chave das mutações de envio: os eventos esperam o envio terminar para reler as mensagens. */
 export const INBOX_SEND_KEY = [INBOX_KEY, "send"] as const;
 
-/** Intervalo pelo modo: `list` é lista e contador; `detail` é conversa e mensagens. */
+/**
+ * Intervalo pelo modo. `list`: lista, contador e o detalhe da conversa (que traz a janela de 24 h,
+ * calculada no servidor e que expira sem evento); `detail`: as mensagens, que só mudam com evento.
+ */
 export function refetchIntervalFor(
   mode: InboxRealtimeMode,
   kind: "list" | "detail",
@@ -242,7 +267,8 @@ export function useConversations(filters: ConversationFilters) {
 
 export function useConversation(id: string | undefined) {
   const { tenant } = useAuth();
-  const interval = useInboxRefetchInterval("detail");
+  // A janela de 24 h expira sem evento: o detalhe segue o ciclo da lista (60 s ao vivo).
+  const interval = useInboxRefetchInterval("list");
 
   return useQuery({
     queryKey: inboxKeys.conversation(tenant?.id, id ?? ""),

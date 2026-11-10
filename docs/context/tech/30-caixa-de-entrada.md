@@ -316,18 +316,21 @@ separado porque o aviso sai do banco, não do processo.
   `streamInboxEvents(c, atorDaPlataforma)`.
 - **Cliente** (`use-inbox-events.ts`, `InboxEvents` no `AppLayout` para quem tem `inbox:read`):
   `connectInboxEvents` fecha o `EventSource` no erro e decide a reconexão: fluxo que chegou a abrir (fim dos
-  15 min) reconecta em 1 s sem mudar de modo; falha ao abrir (503, 429, rede) → modo `polling` e nova
-  tentativa em 2, 5, 10, 30 e 60 s. O modo fica em `realtime-mode.ts` (`useInboxRealtimeMode`) e
-  `refetchIntervalFor` o traduz: `live` = lista e contador a cada 60 s, conversa e mensagens só por evento;
-  `polling`/`connecting` = 20 s em tudo, com o aviso "Atualização em tempo real indisponível" no topo da tela.
-  Os eventos de uma rajada (250 ms) viram uma releitura: lista, contador, o detalhe de cada conversa e, para
-  `message` e `status`, as mensagens; com envio em andamento, espera (a releitura duplicaria a bolha
-  otimista). Nunca escreve o evento no cache. Ao reconectar e ao voltar o foco, relê lista, contador e
-  detalhes (e tenta reconectar já). `a = eu`, `p ≠ eu` e `u ≠ eu` em `conversation` → toast "Uma conversa
-  foi atribuída a você." com "Abrir".
+  15 min) reconecta em 1 s sem mudar de modo; falha ao abrir (503, 429, rede) ou tentativa sem resposta em
+  10 s → modo `polling` e nova tentativa em 2, 5, 10, 30 e 60 s. O modo fica em `realtime-mode.ts`
+  (`useInboxRealtimeMode`) e `refetchIntervalFor` o traduz: `live` = lista, contador e detalhe da conversa (a
+  janela de 24 h expira sem evento) a cada 60 s, mensagens só por evento; `polling`/`connecting` = 20 s em
+  tudo, com o aviso "Atualização em tempo real indisponível" no topo da tela. Os eventos de uma rajada
+  (250 ms) viram uma chamada de `invalidateInboxChanges` (a mesma fonte de chaves de `invalidateInbox`), por
+  tipo (`changeOf`): `message` relê lista, contador, detalhe e mensagens; `conversation`, lista, contador e
+  detalhe; `status`, só as mensagens. Com envio em andamento, espera (a releitura duplicaria a bolha
+  otimista). Nunca escreve o evento no cache. A **cada abertura** do fluxo e ao voltar o foco, relê tudo da
+  caixa (e, no foco, tenta reconectar já). `a = eu`, `p ≠ eu` e `u ≠ eu` em `conversation` → toast "Uma
+  conversa foi atribuída a você." com "Abrir".
 - **Limites conhecidos:** (a) sessão revogada, papel trocado ou membro removido seguem recebendo **ids** por
   até 15 min (a releitura pela API já os barra); (b) o teto de 3 fluxos é por processo (com réplicas, 3 por
-  réplica); (c) evento perdido na queda é coberto pela releitura ao reconectar, não por reenvio.
+  réplica); (c) evento perdido na queda é coberto pela releitura ao reconectar, não por reenvio; (d) aviso
+  sem `a` (status de entrega, `inbox.sweep`) custa um `SELECT` do dono por aviso na transação de quem grava.
 
 ## Segurança e privacidade
 

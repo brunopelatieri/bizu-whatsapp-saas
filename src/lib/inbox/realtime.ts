@@ -286,6 +286,17 @@ export async function stopRealtime(): Promise<void> {
   if (target.reconnectTimer) clearTimeout(target.reconnectTimer);
   if (target.healthTimer) clearInterval(target.healthTimer);
   settleWaiters(target, false);
+  // Os fluxos abertos se encerram (e liberam a vaga) em vez de ficar esperando a vida máxima.
+  for (const subscribers of target.subscribers.values()) {
+    for (const subscriber of [...subscribers]) {
+      try {
+        subscriber.lost();
+      } catch {
+        // Idem.
+      }
+    }
+  }
+  target.subscribers.clear();
   const client = target.client;
   target.client = undefined;
   target.state = "idle";
