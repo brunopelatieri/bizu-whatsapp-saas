@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { chronological, errorText, inboxKeys, type MessageView } from "@/components/inbox/inbox-api";
+import type { QueryClient } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
+import {
+  chronological,
+  errorText,
+  inboxKeys,
+  invalidateInbox,
+  type MessageView,
+} from "@/components/inbox/inbox-api";
 import { ApiError } from "@/lib/api/client";
 
 const message = (id: string, createdAt: string): MessageView => ({
@@ -38,6 +45,40 @@ describe("errorText", () => {
     expect(errorText(new ApiError("Já tem dono.", 409, "ALREADY_ASSIGNED"))).toBe("Já tem dono.");
     expect(errorText(new ApiError("x", 403, "PLAN_LIMIT_REACHED"))).toContain("limite");
     expect(errorText(new Error("rede"))).toBe("Não foi possível concluir. Tente novamente.");
+  });
+});
+
+describe("invalidateInbox", () => {
+  const keysOf = (calls: { queryKey?: readonly unknown[] }[]) => calls.map(({ queryKey }) => queryKey);
+
+  it("com conversa, relê lista, contador, detalhe e mensagens; sem mensagens quando pedido", async () => {
+    const invalidate = vi.fn(async (_filters: { queryKey?: readonly unknown[] }) => undefined);
+    const client = { invalidateQueries: invalidate } as unknown as QueryClient;
+
+    await invalidateInbox(client, "t1", { conversationId: "c1" });
+    expect(keysOf(invalidate.mock.calls.map(([filters]) => filters))).toEqual([
+      ["inbox", "t1", "conversations"],
+      ["inbox", "t1", "unread"],
+      ["inbox", "t1", "conversation", "c1"],
+      ["inbox", "t1", "messages", "c1"],
+    ]);
+
+    invalidate.mockClear();
+    await invalidateInbox(client, "t1", { conversationId: "c1", messages: false });
+    expect(invalidate).toHaveBeenCalledTimes(3);
+
+    invalidate.mockClear();
+    await invalidateInbox(client, "t1");
+    expect(keysOf(invalidate.mock.calls.map(([filters]) => filters))).toContainEqual([
+      "inbox",
+      "t1",
+      "conversation",
+    ]);
+    expect(keysOf(invalidate.mock.calls.map(([filters]) => filters))).not.toContainEqual([
+      "inbox",
+      "t1",
+      "messages",
+    ]);
   });
 });
 

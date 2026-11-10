@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Pencil, UserPlus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { useCan } from "@/components/auth/can";
@@ -201,7 +201,7 @@ function CustomerSection({
 
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
-  const serverFields = useMemo(() => link.customFields, [link.customFields]);
+  const serverFields = link.customFields;
   const serverKey = JSON.stringify(serverFields);
   // biome-ignore lint/correctness/useExhaustiveDependencies: o JSON é a identidade dos valores
   useEffect(() => setDraft({}), [serverKey, link.customer.id]);

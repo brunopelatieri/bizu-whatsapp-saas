@@ -66,7 +66,10 @@ export function DeliveryStatus({ message }: { message: MessageView }) {
 
 function MediaFrame({ message, children }: { message: MessageView; children: ReactNode }) {
   const media = message.media;
-  const { mutate, isPending } = useInboxMutation({ success: "Baixando de novo.", silent: false });
+  const { mutate, isPending } = useInboxMutation({
+    success: "Baixando de novo.",
+    conversationId: message.conversationId,
+  });
 
   if (!media) return null;
 
@@ -203,7 +206,10 @@ type MessageBubbleProps = {
 
 export function MessageBubble({ message, canReply }: MessageBubbleProps) {
   const outgoing = message.direction === "out";
-  const retry = useInboxMutation<{ message: MessageView }>({ silent: true });
+  const retry = useInboxMutation<{ message: MessageView }>({
+    silent: true,
+    conversationId: message.conversationId,
+  });
   const failed = message.status === "failed";
   const label = message.sender?.name ?? (message.senderType === "device" ? "Celular" : null);
 

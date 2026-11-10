@@ -273,6 +273,14 @@ por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
   "Conversar" (`StartConversationButton`) no detalhe do cliente e na lista de equipe, com `inbox:reply` e telefone.
   Telefone fixo ou celular de 8 dígitos troca o botão pela explicação; com um só número conectado a conversa abre
   direto. `GET /api/team` passou a trazer `phoneKind` (só o tipo, nunca o número).
+- **Erro de releitura:** só o erro **sem dados** troca a tela (`isError && !data`); uma releitura que falha no
+  polling mantém a conversa, a lista e o rascunho abertos.
+- **Releitura por escopo:** `invalidateInbox` sempre relê lista e contador; com `conversationId`, o detalhe e (salvo
+  `messages: false`) as mensagens daquela conversa. Assumir, devolver, transferir, situação e marcar como lida
+  passam `messages: false`.
+- **Limite conhecido:** o polling de 20 s de `useInfiniteQuery` relê **todas** as páginas já carregadas (lista e
+  mensagens), em sequência. Quem rolou muito faz várias requisições por ciclo; a C4 elimina o polling com o SSE.
+  Rascunhos do composer ficam em memória, com chave de tenant, pessoa e conversa.
 - **Tela estreita:** uma coluna por vez (lista → conversa → painel, com "voltar"); a partir de `xl` o painel é
   a terceira coluna.
 

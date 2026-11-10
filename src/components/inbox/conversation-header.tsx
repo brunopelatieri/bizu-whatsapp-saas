@@ -53,10 +53,11 @@ export function ConversationHeader({ detail, onBack, onOpenPanel }: Conversation
   const owner = conversation.assignedTo;
   const mine = owner?.id === user?.id;
 
-  const claim = useInboxMutation({ success: "Conversa assumida." });
-  const release = useInboxMutation({ success: "Conversa devolvida à fila." });
-  const transfer = useInboxMutation({ success: "Conversa transferida." });
-  const status = useInboxMutation({ success: "Situação atualizada." });
+  const scope = { conversationId: conversation.id, messages: false };
+  const claim = useInboxMutation({ success: "Conversa assumida.", ...scope });
+  const release = useInboxMutation({ success: "Conversa devolvida à fila.", ...scope });
+  const transfer = useInboxMutation({ success: "Conversa transferida.", ...scope });
+  const status = useInboxMutation({ success: "Situação atualizada.", ...scope });
   const assignees = useAssignees(canAssign);
 
   const label = contactLabel({ displayName: contact.displayName, phone: contact.phone });

@@ -305,7 +305,7 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
       </div>
 
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <QueryState {...query}>
+        <QueryState {...query} isError={query.isError && !query.data}>
           {items.length === 0 ? (
             <EmptyList
               tab={tab}

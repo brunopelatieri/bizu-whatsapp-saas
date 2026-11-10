@@ -66,11 +66,14 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [planLimit, setPlanLimit] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [inUse, setInUse] = useState<{ customerId: string; name?: string } | null>(null);
   const link = useLinkContact(contact.id);
 
   // Cada abertura começa do nome que já se conhece do contato.
+  // Só na abertura: o polling atualiza `waName` a cada mensagem e não pode apagar o que se digita.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `open` é o único gatilho
   useEffect(() => {
     if (!open) return;
     setName(contact.name ?? contact.waName ?? "");
@@ -78,9 +81,10 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
     setTagIds([]);
     setValues({});
     setFormError(null);
+    setPlanLimit(false);
     setEmailError(null);
     setInUse(null);
-  }, [open, contact.name, contact.waName]);
+  }, [open]);
 
   const save = useMutation({
     mutationFn: (body: unknown) =>
@@ -111,12 +115,14 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
           return;
         }
       }
+      setPlanLimit(error instanceof ApiError && error.code === "PLAN_LIMIT_REACHED");
       setFormError(errorText(error));
     },
   });
 
   function submit() {
     setFormError(null);
+    setPlanLimit(false);
     setEmailError(null);
     setInUse(null);
 
@@ -234,7 +240,7 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
           {formError ? (
             <p role="alert" className="text-sm text-destructive">
               {formError}{" "}
-              {/limite/i.test(formError) ? (
+              {planLimit ? (
                 <Link to="/app/assinatura" className="font-medium underline">
                   Ver assinatura
                 </Link>

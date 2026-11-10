@@ -110,7 +110,7 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
       : (usable.find(({ isDefault }) => isDefault) ?? usable[0])?.id;
 
   const customers = useCustomers({ q, page: 1 }, open && !preset && mode === "customer" && can("customer", "read"));
-  const team = useTeam();
+  const team = useTeam(open && !preset && mode === "member");
 
   const customerRows = (customers.data?.items ?? []).filter(
     (customer) => canWhatsApp(phoneKindOf(customer.phoneNormalized) ?? "landline"),

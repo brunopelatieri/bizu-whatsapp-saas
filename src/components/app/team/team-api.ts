@@ -30,13 +30,13 @@ type TeamResponse = {
   roles: RoleOption[];
 };
 
-export function useTeam() {
+export function useTeam(enabled = true) {
   const { tenant } = useAuth();
 
   return useQuery({
     queryKey: ["team", tenant?.id],
     queryFn: () => apiFetch<TeamResponse>("/api/team"),
-    enabled: Boolean(tenant),
+    enabled: enabled && Boolean(tenant),
     retry: false,
   });
 }

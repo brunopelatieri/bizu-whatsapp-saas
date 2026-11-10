@@ -151,14 +151,12 @@ export const inboxKeys = {
   messages: (tenantId: TenantId, id: string) => [INBOX_KEY, tenantId, "messages", id] as const,
   unread: (tenantId: TenantId) => [INBOX_KEY, tenantId, "unread"] as const,
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
-  candidates: (tenantId: TenantId, contactId: string) =>
-    [INBOX_KEY, tenantId, "candidates", contactId] as const,
 };
 
 /**
- * Invalida o que um evento da caixa afeta. Sem `conversationId`, tudo; com ele, a lista, o contador
- * e só as queries daquela conversa. A C4 chama isto com os ids do evento SSE (nunca escreve o
- * evento no cache).
+ * Invalida o que um evento da caixa afeta: sempre a lista e o contador. Com `conversationId`, o detalhe
+ * e (salvo `messages: false`) as mensagens daquela conversa; sem ele, o detalhe de todas e nenhuma
+ * mensagem. A C4 chama isto com os ids do evento SSE (nunca escreve o evento no cache).
  */
 export function invalidateInbox(
   queryClient: QueryClient,
@@ -172,7 +170,7 @@ export function invalidateInbox(
   ];
 
   if (!conversationId) {
-    keys.push(inboxKeys.all(tenantId));
+    keys.push([INBOX_KEY, tenantId, "conversation"]);
   } else {
     keys.push(inboxKeys.conversation(tenantId, conversationId));
     if (messages) keys.push(inboxKeys.messages(tenantId, conversationId));
@@ -292,21 +290,6 @@ export function useAssignees(enabled: boolean) {
   });
 }
 
-export function useContactCandidates(contactId: string, enabled: boolean) {
-  const { tenant } = useAuth();
-
-  return useQuery({
-    queryKey: inboxKeys.candidates(tenant?.id, contactId),
-    queryFn: () =>
-      apiFetch<{
-        customers: { id: string; name: string; phone: string | null }[];
-        users: { id: string; name: string }[];
-      }>(`/api/inbox/contacts/${contactId}/candidates`),
-    enabled: enabled && Boolean(tenant),
-    retry: false,
-  });
-}
-
 /** Junta as páginas de mensagens em ordem cronológica (a API entrega da mais nova para a mais antiga). */
 export function chronological(data: InfiniteData<Page<MessageView>> | undefined): MessageView[] {
   if (!data) return [];
@@ -347,9 +330,12 @@ export function errorText(error: unknown) {
 
 /**
  * Escrita da caixa (assumir, devolver, situação, vínculo…): relê a caixa no fim e mostra o erro.
- * 409 `ALREADY_ASSIGNED` e 404 também releem, porque a tela estava desatualizada.
+ * 409 `ALREADY_ASSIGNED` e 404 também releem, porque a tela estava desatualizada. `conversationId`
+ * restringe a releitura àquela conversa (`messages: false` quando as mensagens não mudam).
  */
-export function useInboxMutation<T = unknown>(options: { success?: string; silent?: boolean } = {}) {
+export function useInboxMutation<T = unknown>(
+  options: { success?: string; silent?: boolean; conversationId?: string; messages?: boolean } = {},
+) {
   const queryClient = useQueryClient();
   const { tenant } = useAuth();
 
@@ -365,7 +351,11 @@ export function useInboxMutation<T = unknown>(options: { success?: string; silen
     onError: (error) => {
       if (!options.silent) toast.error(errorText(error));
     },
-    onSettled: () => invalidateInbox(queryClient, tenant?.id),
+    onSettled: () =>
+      invalidateInbox(queryClient, tenant?.id, {
+        conversationId: options.conversationId,
+        messages: options.messages,
+      }),
   });
 }
 

@@ -36,6 +36,7 @@ export function MessageThread({ conversationId, canReply, sending }: MessageThre
   const atBottom = useRef(true);
   const initial = useRef(true);
   const firstId = useRef<string | undefined>(undefined);
+  const sendingCount = useRef(0);
   const snapshot = useRef<{ height: number; top: number } | null>(null);
 
   // Outra conversa: volta ao estado de primeira carga.
@@ -56,10 +57,13 @@ export function MessageThread({ conversationId, canReply, sending }: MessageThre
     });
   }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: roda a cada mudança da lista e dos envios
   useLayoutEffect(() => {
     const element = scroller.current;
     if (!element || messages.length === 0) return;
+
+    // Quem acabou de enviar quer ver o resultado, mesmo que estivesse lendo mensagens antigas.
+    if (sending.length > sendingCount.current) atBottom.current = true;
+    sendingCount.current = sending.length;
 
     const first = messages[0]?.id;
     const prepended = firstId.current !== undefined && first !== firstId.current;
@@ -95,7 +99,7 @@ export function MessageThread({ conversationId, canReply, sending }: MessageThre
       aria-label="Mensagens da conversa"
       className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-muted/30 px-3 py-4 sm:px-4"
     >
-      <QueryState {...query}>
+      <QueryState {...query} isError={query.isError && !query.data}>
         {hasNextPage ? (
           <div className="flex justify-center pb-2">
             <Button variant="outline" size="sm" disabled={isFetchingNextPage} onClick={loadOlder}>

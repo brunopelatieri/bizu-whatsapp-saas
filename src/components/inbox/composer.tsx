@@ -15,7 +15,10 @@ import { MESSAGE_TEXT_MAX } from "@/lib/schemas/inbox";
 import { useAuth } from "@/providers/auth-provider";
 import { Link } from "react-router";
 
-/** Rascunhos por conversa, só em memória: trocar de conversa e voltar não perde o texto. */
+/**
+ * Rascunhos por conversa, só em memória: trocar de conversa e voltar não perde o texto. A chave leva
+ * o tenant e a pessoa, para que outra sessão no mesmo navegador nunca veja o texto alheio.
+ */
 const drafts = new Map<string, string>();
 
 type ComposerProps = {
@@ -72,38 +75,39 @@ function useBlockReason(detail: ConversationResponse): ReactNode | null {
 }
 
 export function Composer({ conversationId, detail, onSendStart, onSendEnd }: ComposerProps) {
-  const [text, setText] = useState(() => drafts.get(conversationId) ?? "");
-  // Reaproveitado depois de um erro de rede: reenviar o mesmo texto não duplica no servidor.
-  const clientId = useRef(newClientId());
+  const { tenant, user } = useAuth();
+  const draftKey = `${tenant?.id}:${user?.id}:${conversationId}`;
+  const [text, setText] = useState(() => drafts.get(draftKey) ?? "");
+  // O texto de agora, para o callback de erro (a closure do envio guarda o de antes de limpar o campo).
+  const latest = useRef(text);
+  // Do envio que falhou: reenviar o MESMO texto reaproveita o id e não duplica no servidor; texto
+  // diferente leva id novo (o servidor devolveria a mensagem antiga para o mesmo id).
+  const failed = useRef<{ clientId: string; text: string } | null>(null);
   const send = useSendText(conversationId);
   const blocked = useBlockReason(detail);
 
   function change(value: string) {
+    latest.current = value;
     setText(value);
-    if (value) drafts.set(conversationId, value);
-    else drafts.delete(conversationId);
+    if (value) drafts.set(draftKey, value);
+    else drafts.delete(draftKey);
   }
 
   function submit() {
     const value = text.trim();
     if (!value || blocked || send.isPending) return;
 
-    const id = clientId.current;
+    const id = failed.current?.text === value ? failed.current.clientId : newClientId();
+    failed.current = null;
     change("");
     onSendStart({ clientId: id, text: value, createdAt: new Date().toISOString() });
     send.mutate(
       { text: value, clientId: id },
       {
-        onSuccess: () => {
-          clientId.current = newClientId();
-        },
         onError: (error) => {
           // Devolve o texto para a pessoa corrigir ou tentar de novo.
-          setText((current) => {
-            const next = current || value;
-            drafts.set(conversationId, next);
-            return next;
-          });
+          failed.current = { clientId: id, text: value };
+          if (latest.current.trim() === "") change(value);
           toast.error(errorText(error));
         },
         onSettled: () => onSendEnd(id),

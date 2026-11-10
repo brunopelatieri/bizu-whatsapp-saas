@@ -97,7 +97,7 @@ function ConversationView({
 
   // Abrir a conversa zera as não lidas (e a que chega com ela aberta). Falha (somente leitura,
   // sessão de suporte) é silenciosa e não repete para o mesmo valor.
-  const read = useInboxMutation({ silent: true });
+  const read = useInboxMutation({ silent: true, conversationId, messages: false });
   const lastRead = useRef<string | null>(null);
   const { mutate: markRead } = read;
   useEffect(() => {
@@ -111,7 +111,8 @@ function ConversationView({
     markRead({ path: `/api/inbox/conversations/${conversationId}/read`, method: "POST" });
   }, [conversationId, unread, markRead]);
 
-  if (query.isError) {
+  // Só o erro sem dados troca a tela: uma releitura que falha no polling mantém o que já está aberto.
+  if (query.isError && !detail) {
     const missing = query.error instanceof ApiError && query.error.status === 404;
 
     return (
