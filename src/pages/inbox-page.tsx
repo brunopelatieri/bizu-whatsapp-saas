@@ -8,6 +8,7 @@ import { ContactPanel } from "@/components/inbox/contact-panel";
 import { ConversationHeader } from "@/components/inbox/conversation-header";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import {
+  type MessageView,
   type SendingMessage,
   useConversation,
   useInboxMutation,
@@ -98,8 +99,13 @@ function ConversationView({
   const can = useCan();
   const query = useConversation(conversationId);
   const [sending, setSending] = useState<SendingMessage[]>([]);
+  // A mensagem que a próxima resposta cita; some ao trocar de conversa.
+  const [replyTo, setReplyTo] = useState<MessageView | null>(null);
   const detail = query.data;
   const unread = detail?.conversation.unreadCount ?? 0;
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: o id da conversa é o gatilho
+  useEffect(() => setReplyTo(null), [conversationId]);
 
   const sendStart = useCallback(
     (item: SendingMessage) => setSending((current) => [...current, item]),
@@ -176,12 +182,16 @@ function ConversationView({
           conversationId={conversationId}
           canReply={can("inbox", "reply")}
           sending={sending}
+          onReply={setReplyTo}
         />
         <Composer
+          key={conversationId}
           conversationId={conversationId}
           detail={detail}
           onSendStart={sendStart}
           onSendEnd={sendEnd}
+          replyTo={replyTo}
+          onClearReply={() => setReplyTo(null)}
         />
       </section>
 

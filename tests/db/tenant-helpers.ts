@@ -49,6 +49,28 @@ export function call(
   });
 }
 
+/**
+ * Como `call`, com `multipart/form-data` (envio de anexo). `Content-Length` vai declarado, como num
+ * navegador: é ele que o limite de corpo confere antes de ler o arquivo.
+ */
+export async function callForm(
+  method: string,
+  path: string,
+  { cookie, form, origin = APP_ORIGIN }: { cookie?: string; form: FormData; origin?: string },
+) {
+  const encoded = new Response(form);
+  const body = Buffer.from(await encoded.arrayBuffer());
+  const headers: Record<string, string> = {
+    "X-Forwarded-For": nextIp(),
+    Origin: origin,
+    "Content-Type": encoded.headers.get("content-type") ?? "multipart/form-data",
+    "Content-Length": String(body.byteLength),
+  };
+  if (cookie) headers.Cookie = cookie;
+
+  return api.request(path, { method, headers, body });
+}
+
 /** Cabeçalhos para comparar respostas: o nonce da CSP muda a cada uma, por definição. */
 export function comparableHeaders(response: Response) {
   const headers = Object.fromEntries(response.headers);

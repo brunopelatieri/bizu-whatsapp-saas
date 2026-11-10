@@ -14,6 +14,7 @@ import { customerRoutes } from "@/api/customers";
 import { fileRoutes } from "@/api/files";
 import { impersonationRoutes } from "@/api/impersonation";
 import { inboxRoutes } from "@/api/inbox";
+import { inboxMediaOutRoutes } from "@/api/inbox-media-out";
 import { invitationRoutes } from "@/api/invitations";
 import { lgpdRoutes, portalLgpdRoutes } from "@/api/lgpd";
 import { logError } from "@/api/log";
@@ -66,6 +67,8 @@ api.route("/", emailWebhooks);
 api.route("/", paymentWebhooks);
 api.route("/", channelWebhooks);
 api.route("/", evolutionWebhooks);
+// Anexo de saída para a Evolution: autorizado pelo token, sem sessão (`src/api/inbox-media-out.ts`).
+api.route("/", inboxMediaOutRoutes);
 api.route("/", cspReportRoutes);
 
 // Depois dos webhooks e do relatório de CSP, que não vêm de uma página do app.

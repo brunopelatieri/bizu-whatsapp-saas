@@ -6,19 +6,20 @@
 - **Specs relacionadas:** `docs/specs/caixa-de-entrada/spec.md` e `prd.md`; programa em
   `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T6, T10, T11, T13)
 - **Paths do código:** `src/db/schema/inbox.ts`, `src/lib/inbox/` (`constants.ts`, `contacts.ts`,
-  `ingest.ts`, `media.ts`, `notify.ts`, `channel-usage.ts`; da C2: `visibility.ts`, `cursor.ts`,
+  `ingest.ts`, `media.ts`, `notify.ts`, `channel-usage.ts`; da C5: `media-out.ts`, `send-media.ts`, `send-template.ts`, `templates.ts`; da C2: `visibility.ts`, `cursor.ts`,
   `views.ts`, `conversations.ts`, `assignment.ts`, `media-access.ts`, `send.ts`, `window.ts`,
-  `contact-actions.ts`; da C4: `realtime.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4),
+  `contact-actions.ts`; da C4: `realtime.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4), `src/api/inbox-media-out.ts` (C5),
   `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
   da C3: `src/components/inbox/` (`inbox-api.ts`, `format.ts`, `labels.ts`, `conversation-list.tsx`,
   `conversation-item.tsx`, `conversation-header.tsx`, `message-thread.tsx`, `message-bubble.tsx`,
-  `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`; da C4:
+  `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`; da C5: `template-dialog.tsx`; da C4:
   `use-inbox-events.ts`, `realtime-mode.ts`), `src/pages/inbox-page.tsx`, `src/routes/app.inbox.tsx`,
   `src/components/app/app-layout.tsx` (monta o `InboxEvents`),
   `drizzle/0032_caixa_de_entrada.sql`, `drizzle/0033_rls_caixa_de_entrada.sql`,
   `tests/db/inbox-ingest.test.ts`, `tests/db/inbox-{queue,send,contacts}.test.ts`,
   `tests/db/inbox-helpers.ts`, `tests/db/rls.test.ts` (bloco da caixa de entrada),
   `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
+  `tests/db/inbox-media-send.test.ts` (C5),
   `src/lib/channels/providers/*/inbox.db.test.ts`
 
 ## Estado
@@ -29,7 +30,7 @@
 | C2 | API: leitura paginada, fila, assumir, transferir, envio de texto, janela de 24 h, visibilidade, contato | **Feita** |
 | C3 | Tela `/app/atendimento` (polling de 20 s, só tenant) | **Feita** |
 | C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | **Feita** |
-| C5 | Mídia de saída, modelos, citação no envio | Pendente |
+| C5 | Mídia de saída, modelos, citação no envio | **Feita** |
 | C6 | Atendimento da plataforma em `/admin` | Pendente |
 | C7 | LGPD (exportação e exclusão cobrindo conversas) e fechamento | Pendente |
 
@@ -137,7 +138,9 @@ Erros saem por `handleTenantError`.
 | `GET /api/inbox/conversations?tab&status&unread&channelId&tagIds&assignedTo&q&cursor&limit` | `inbox:read`; `tab=all` e `assignedTo` pedem `supervise` (403); `tagIds` pede `customer:read` | `listConversations` |
 | `GET /api/inbox/conversations/:id` | `inbox:read` | `getConversation`: `{ conversation, contact, link, window }` |
 | `GET /api/inbox/conversations/:id/messages?before&limit` | `inbox:read` | `listMessages`, da mais nova para a mais antiga |
-| `POST /api/inbox/conversations/:id/messages` | `inbox:reply`, 60/min | `sendText`: 201 (`sent` ou `queued`), 200 com a mensagem `failed` |
+| `POST /api/inbox/conversations/:id/messages` | `inbox:reply`, 60/min (anexo: 20/min) | JSON `text` (com `replyTo`) → `sendText`; JSON `template` → `sendTemplate`; `multipart/form-data` → `sendMedia`. 201 (`sent` ou `queued`), 200 com a mensagem `failed` |
+| `GET /api/inbox/conversations/:id/templates` | `inbox:reply` | `listConversationTemplates`: modelos aprovados do WABA do canal, já analisados |
+| `GET /api/inbox/media-out/:token` | **sem sessão**, token assinado | `openOutboundMedia` (só a Evolution chama; ver "Anexo de saída") |
 | `POST /api/inbox/messages/:id/retry` | `inbox:reply`, 60/min | `retryMessage` |
 | `GET /api/inbox/messages/:id/media` | `inbox:read` | `openMessageMedia` |
 | `POST /api/inbox/messages/:id/media/retry` | `inbox:read`, 20/min | `retryMessageMedia`: 202 |
@@ -198,27 +201,72 @@ traz `payload` (só nome e tipo da mídia pendente), e a mídia aponta para a ro
    `SESSION_WINDOW_CLOSED`; citação de outra conversa → 400 `INVALID_REPLY`. Grava a mensagem `queued`,
    atualiza prévia e `last_message_at`, zera as não lidas, **assume** a conversa da fila (só no tenant;
    o supervisor que responde a de outro não toma o dono) e reabre a encerrada.
-2. Fora da transação, `sendChannelText` (que reconfere o canal e marca `error` em 401/403) com prazo de
+2. Fora da transação, `attemptOf` chama `sendChannelText`, `sendChannelMedia` ou `sendChannelTemplate` (que reconferem o canal e marca `error` em 401/403) com prazo de
    20 s. Sucesso: `sent` + `provider_message_id`; antes, apaga o eco `device` com o mesmo id (a
    Evolution pode entregá-lo antes desta gravação). `ProviderError` com status: `failed` com o código e a
    mensagem do provedor (até 500), e a rota responde 200. Rede ou timeout (`status 0`) ou prazo
    esgotado: fica `queued`; o resultado tardio ainda é gravado (`runInBackground`), inclusive sobre um
    `UNKNOWN_RESULT` da varredura.
-3. **Reenviar:** só `failed` de `sender_type = user` e tipo `text`; apaga a falha e cria a nova
-   (`clientId = retry-<id antigo>`) na mesma transação.
+3. **Reenviar:** só `failed` de `sender_type = user`; apaga a falha e cria a nova
+   (`clientId = retry-<id antigo>`) na mesma transação. Texto e modelo (carga de `payload.template`, vale com a janela
+   fechada) refazem a chamada; o **anexo reaproveita o `file`** (sem novo upload: o dono do arquivo passa à mensagem nova).
 4. **`inbox.sweep`:** `queued` há mais de 2 min vira `failed` com `UNKNOWN_RESULT`.
 
 **Limites conhecidos:** (a) se o provedor responder depois de 2 min e o atendente já tiver usado
 "Reenviar" na `UNKNOWN_RESULT`, o contato recebe duas vezes (a original sumiu; a tela avisa para
-conferir no celular antes de reenviar). (b) O eco `device` apagado em `recordSent` é sempre de texto
-nesta fase; com anexo de saída (C5), apagar o eco precisa levar junto o `file` dele. (c) Aviso de
+conferir no celular antes de reenviar). (b) O eco `device` apagado em `recordSent` levava só a mensagem; desde a C5 leva também o `file` e, depois do commit, o
+objeto (teste em `inbox-media-send.test.ts`). (c) Aviso de
 status que chega antes de gravarmos o `provider_message_id` fica `ignored` e a mensagem para em `sent`.
+
+### Anexo de saída, modelo e citação (C5)
+
+Uma só tubulação: `queueMessage` (transação curta, conversa travada) recebe um `Draft` (tipo, texto, arquivo novo
+ou existente, o que vai ao provedor) montado por `build` **depois** de conferidos canal, janela e citação;
+`dispatch` chama o provedor fora da transação (20 s; anexo 30 s). `send.ts` (núcleo, texto, reenvio),
+`send-media.ts` e `send-template.ts`.
+
+- **Anexo** (`multipart/form-data`: `file`, `caption?`, `replyTo?`, `clientId`): ordem para que a recusa nunca grave
+  nada: permissão, tamanho (16 MB: `FILE_TOO_LARGE` 413, também no limite de corpo antes de ler), tipo **pelo
+  conteúdo** (`classifyOutbound`: `inboundMime` sobre os bytes; o tipo do navegador só refina; fora de `OUTBOUND_MIME`
+  é 415 `UNSUPPORTED_MEDIA_TYPE`; OOXML exige a pasta `word/`, `xl/` ou `ppt/` no ZIP), legenda em áudio (400), cota
+  `storage_mb` do plano (403 `PLAN_LIMIT_REACHED`; a soma de `file` já inclui a mídia recebida) e só então grava o objeto
+  (`inbox/<tenant | platform>/<chave aleatória>`). A linha de `file` (`owner_type = message`, `owner_id` = a mensagem,
+  que nasce com id gerado antes) entra na mesma transação da mensagem. Se a transação recusar (janela, canal, citação)
+  ou o `clientId` já existir, o objeto é apagado. Lista: imagem jpeg/png/webp; vídeo mp4 e 3gpp; áudio ogg, mpeg, mp4,
+  aac, amr; pdf, doc/xls/ppt, docx/xlsx/pptx e text/plain. `OUTBOUND_MIME` e o teto estão em `constants.ts` (a tela os
+  lê) e são reexportados por `media.ts`. Anexo respeita a janela de 24 h (só o modelo a ignora).
+- **Como cada canal recebe o arquivo:** Cloud: `SendMedia.content` (função que lê o objeto), `uploadMedia` e envio pelo
+  id, nunca por link. Evolution: `POST /send/media` com `url` assinada de 5 min. **Decisão (a B0 não mediu base64):** as
+  fixtures de B0 são simuladas e o contrato medido na origem só tem `url`; por isso a rota existe. Se uma captura real
+  mostrar que o servidor aceita base64 (ou data URI) em `url`, troque `mediaOutUrl` e apague `media-out.ts`,
+  `inbox-media-out.ts` e a linha em `app.ts`. O servidor Evolution precisa alcançar `EVOLUTION_WEBHOOK_PUBLIC_URL`
+  (padrão `APP_URL`), como no webhook.
+- **`GET /api/inbox/media-out/:token`** (`src/api/inbox-media-out.ts`, antes do `csrfGuard`, fora da cadeia de sessão):
+  token `<fileId>.<expira>.<HMAC-SHA256>` com `BETTER_AUTH_SECRET` e rótulo de domínio; um arquivo, 5 minutos (prazo
+  assinado e limitado ao que emitimos), comparação em tempo constante. Só serve `file` que seja a mídia de mensagem
+  **enviada pela equipe** (`direction = out`, `sender_type = user`); mídia recebida, arquivo de outro módulo, token
+  vencido, adulterado ou de outro arquivo: 404 igual. Só as **recusas** contam no limite por IP (30/min, `failureLimit` como nos webhooks): a Evolution é um só IP e baixa um arquivo por envio de todos os tenants. Resposta `nosniff`,
+  `Cache-Control: private, no-store`, `attachment` salvo imagem/áudio/vídeo seguros. Não lista nada.
+- **Modelo** (`type: "template"`, `templateId`, `variables[]`): só de `message_template` aprovado, do WABA do canal e do
+  escopo; fora disso 404 (outro WABA é igual a inexistente), pendente 409 `TEMPLATE_NOT_APPROVED`, canal sem `templates`
+  400 `TEMPLATES_NOT_SUPPORTED`. `templates.ts` (puro, usado pela tela e pelo servidor) analisa os `components`:
+  cabeçalho de texto, corpo, rodapé, botões sem parâmetro, variáveis numeradas (em sequência) **ou** nomeadas
+  (`parameter_name`); cabeçalho de mídia, botão com variável, copy code, flow, carrossel e variável mista aparecem
+  desabilitados com o motivo (`TEMPLATE_NOT_SUPPORTED` no envio). `variables` na ordem dos slots (cabeçalho, depois
+  corpo); a contagem e cada valor (sem quebra de linha, tabulação nem 5 espaços, até 1024) são conferidos (400
+  `INVALID_TEMPLATE_VARIABLES`). Grava `type = template`, `template_name`, `text` = texto preenchido e
+  `payload.template = { id, name, language, variables, components }` (o reenvio usa `components`, sem reler a tabela).
+  Vale com a janela fechada e não a abre.
+- **Citação:** `replyTo` no texto e no anexo; mensagem de outra conversa (ou inexistente) é 400 `INVALID_REPLY` e não grava
+  nada; o provedor recebe o `provider_message_id` dela (se ainda não tem, a citação só fica do nosso lado). A Evolution
+  recebe `quoted` também no `/send/media`. Modelo não cita.
 
 ### Contato e início de conversa (`contact-actions.ts`)
 
 - **Vincular:** cliente do tenant (`customer:update`), membro ativo (400 `INVALID_LINK`) ou os dois
   nulos; um vínculo só. **Salvar como cliente:** `createCustomer` com o telefone **como o WhatsApp
-  entregou** (`+<phone>`, sem inserir o 9) e o vínculo no `afterCreate`, na mesma transação: limite do
+  entregou** (`+<phone>`, sem inserir o 9), ou o `phone` que o atendente corrigiu no formulário (C5; o contato continua
+  com o número do provedor), e o vínculo no `afterCreate`, na mesma transação: limite do
   plano (403 `PLAN_LIMIT_REACHED`), `INVALID_PHONE`, `PHONE_IN_USE` (com `customerId` e, para quem lê
   clientes, `name`), `CUSTOMER_EMAIL_TAKEN`; contato já vinculado → 409 `CONTACT_ALREADY_LINKED`.
 - **Iniciar conversa:** com `customerId`, também `customer:read` (a conversa mostra o telefone do
@@ -258,7 +306,8 @@ por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
   do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
   um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
   (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar".
-- **Envio:** `composer.tsx` só texto. O texto vai como bolha "enviando" local e some quando a releitura traz a
+- **Composer (C5):** além do texto, **anexo** (clipe e colar imagem; prévia, nome e tamanho, legenda no mesmo campo, sem legenda em áudio, 16 MB conferidos antes de subir), **citação** ("Responder" na bolha põe o chip "Respondendo ao contato / a você" acima do campo, com X; some ao enviar com sucesso e ao trocar de conversa) e **modelo** (`template-dialog.tsx`: aprovados do WABA, campos das variáveis, prévia pela mesma função do servidor, erro da API dentro do diálogo; botão no composer só em canal com `templates` e, com a janela fechada, o "Enviar modelo" da faixa). Anexo que falha volta ao composer com a legenda e reaproveita o `clientId`. A bolha "enviando" mostra a imagem local, o nome do arquivo ou o modelo. **Reenviar** vale para texto, anexo e modelo.
+- **Envio:** o texto vai como bolha "enviando" local e some quando a releitura traz a
   mensagem do servidor; erro devolve o texto ao campo, e o `clientId` é reaproveitado no reenvio depois de
   erro de rede. Um envio por vez. O campo é bloqueado, com a explicação, para: sessão personificada, sem
   `inbox:reply`, tenant `read_only`, número não conectado e janela de 24 h encerrada. Rascunho por conversa só
@@ -367,6 +416,14 @@ separado porque o aviso sai do banco, não do processo.
   antes do id, reenvio) e `inbox-contacts.test.ts` (vínculo, candidatos, salvar como cliente com
   limite do plano e `PHONE_IN_USE`, iniciar conversa). As rotas entram em `rbac.test.ts` e as escritas
   no `it.each` de `impersonation.test.ts`; `src/lib/inbox/window.test.ts` cobre a janela.
+- C5: `tests/db/inbox-media-send.test.ts` (Postgres real, provedor e armazenamento simulados): anexo Cloud (arquivo
+  gravado antes, conteúdo enviado ao provedor, legenda, mídia aberta pela rota) e Evolution (URL assinada baixada sem
+  sessão); recusas que não gravam nada (HTML como imagem, 16 MB + 1 e 20 MB, áudio com legenda, janela fechada, canal
+  desconectado, tenant `read_only`, conversa de outro, sem `inbox:reply`, 429 do 21º anexo, citação de outra conversa);
+  token vencido, adulterado, de outro arquivo e de mídia recebida; `clientId` repetido; falha e reenvio reaproveitando o
+  `file`; eco do aparelho que leva o `file`; modelo (lista, janela fechada, variáveis, pendente, outro WABA, mídia no
+  cabeçalho, Evolution, reenvio). Unitários: `templates.test.ts`, `media.test.ts` (`classifyOutbound`) e
+  `media-out.test.ts` (token). `inbox-contacts.test.ts`: telefone corrigido em "salvar como cliente".
 - C4: `tests/db/inbox-realtime.test.ts` (Postgres real): sessão, tenant e `inbox:read`; o membro A não recebe
   evento de conversa do membro B, e entrar e sair da fila chega a quem deve; status de entrega com o dono
   completado no servidor; ingestão num **processo à parte** (`fixtures/inbox-realtime-worker.ts`, o papel do
@@ -374,6 +431,23 @@ separado porque o aviso sai do banco, não do processo.
   reautenticação (fluxo encerrado e reconexão com sessão revogada → 401); queda do `LISTEN` → fluxo
   encerrado, 503 e volta. Unitários: `src/lib/inbox/realtime.test.ts` (carga, `parseInboxNotice`,
   `noticeVisibleTo`) e `src/components/inbox/use-inbox-events.test.ts` (modo, backoff, releitura, toast).
+
+## Desvios da SPEC (C5)
+
+- `GET /api/inbox/conversations/:id/templates` (nova, `inbox:reply`): a SPEC pede o `template-dialog` com a lista de
+  aprovados, mas não a rota; a de canais (`/api/channels/:id/templates`) exige permissão de canal, que o atendente não tem.
+- `variables` do modelo é uma **lista na ordem dos slots** (cabeçalho, depois corpo), não um objeto; o servidor devolve os
+  `slots` e confere a contagem.
+- O texto preenchido do modelo fica em `message.text` (e na prévia da conversa), não duplicado em `payload`; o `payload`
+  guarda `id`, nome, idioma, variáveis e os `components` do envio (usados no reenvio).
+- Rota `media-out` criada: a B0 (simulada) não mediu base64 no `/send/media`. Registrado em "Anexo de saída".
+- Modelos com cabeçalho de mídia, botão com variável e demais recursos aparecem **desabilitados** (a SPEC só diz
+  "variáveis validadas contra `components`").
+- Anexo tem limite próprio de 20/min por pessoa, além dos 60/min de envio, e respeita a cota `storage_mb` do plano.
+- Teto de 16 MB único para imagem, vídeo, áudio e documento; a Meta limita a imagem a 5 MB: acima disso o provedor recusa e
+  a mensagem fica `failed` com o motivo dele.
+- "Conversar" no detalhe do cliente deixou de esconder fixo e celular de 8 dígitos: mostra o botão com a explicação, e o
+  servidor decide (a exceção do contato que já escreveu).
 
 ## Desvios da SPEC (C4)
 
@@ -389,14 +463,13 @@ separado porque o aviso sai do banco, não do processo.
 ## Desvios da SPEC (C3)
 
 - Polling de 20 s no lugar de SSE (entregue na C4).
-- Sem "Enviar modelo", anexo nem citação (C5): a faixa da janela de 24 h só explica.
+- Sem "Enviar modelo", anexo nem citação (entregues na C5).
 - "Conversar" esconde fixo e celular de 8 dígitos com a explicação; a exceção da SPEC (cliente salvo a partir
   de um contato que já escreveu) não aparece no botão, porque o cliente não diz se o contato existe. O servidor
   continua decidindo: pelo diálogo "Nova conversa" com telefone, o número que já escreveu vale.
 - `GET /api/team` ganhou `phoneKind` (única mudança de API da C3, fora de `src/lib/inbox/`).
 - `INVALID_PHONE` em "Salvar como cliente" aparece como erro do formulário, sem campo de telefone para corrigir:
-  `saveContactAsCustomerSchema` não tem `phone`. **Pendência para a C2/C5**, se a regra do cadastro recusar um
-  número que o WhatsApp entrega.
+  `saveContactAsCustomerSchema` não tinha `phone` (**resolvido na C5**: `phone` opcional e campo no formulário).
 
 ## Desvios da SPEC (C2)
 

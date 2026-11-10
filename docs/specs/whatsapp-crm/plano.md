@@ -79,7 +79,7 @@ Cada fase cabe em um PR revisável e termina com `npm run lint`, `typecheck`, `t
 | C2 | API do atendimento | inbox | C1 | Leitura paginada, envio de texto, fila, assumir, transferir, encerrar, janela de 24 h, visibilidade | Opus + `/security-review` |
 | C3 | Tela do atendimento (tenant) | inbox | C2, A2, A3 | `/app/atendimento`: lista, conversa, composer, painel do contato | Sonnet |
 | C4 | Tempo real | inbox | C2 | SSE, `NOTIFY`, ressincronização e contador de não lidas no menu | Opus |
-| C5 | Mídia, modelos e resposta citada | inbox | C3, B2 | Anexos de saída, envio de modelo, citar mensagem | Sonnet |
+| C5 | Mídia, modelos e resposta citada (**implementada**) | inbox | C3, B2 | Anexos de saída, envio de modelo, citar mensagem | Sonnet |
 | C6 | Atendimento da plataforma | inbox | C3, B4, A4 | `/admin/atendimento`, sem fila | Sonnet + `/security-review` |
 | C7 | LGPD, contexto e fechamento | todas | todas | Exportação e exclusão cobrindo conversas, retenção de `channel_event`, `docs/context/`, rules, skills, README | Opus |
 

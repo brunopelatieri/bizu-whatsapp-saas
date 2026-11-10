@@ -10,6 +10,19 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C5 (mídia de saída, modelos e resposta citada)**: o atendente anexa imagem, vídeo,
+  áudio, PDF ou documento do Office (até 16 MB, tipo conferido pelo **conteúdo**, legenda, prévia), envia um
+  **modelo de mensagem aprovado** do WABA do canal com as variáveis conferidas (a única forma de falar com a
+  janela de 24 horas encerrada) e **cita** uma mensagem ao responder (texto e anexo). A Cloud API recebe o arquivo
+  por `uploadMedia`; a Evolution baixa um endereço assinado de 5 minutos em `GET /api/inbox/media-out/:token`
+  (a única rota do atendimento sem sessão: HMAC com `BETTER_AUTH_SECRET`, um arquivo, 5 minutos, só anexo enviado
+  pela equipe). Reenviar vale para texto, anexo (reaproveita o arquivo) e modelo; o eco do aparelho de um anexo
+  enviado por aqui deixa de sobrar arquivo. "Salvar como cliente" ganha o campo de telefone (o cadastro pode
+  recusar o número do WhatsApp). Rota nova `GET /api/inbox/conversations/:id/templates`. **Migração:** nenhuma
+  migration. O servidor Evolution precisa alcançar `EVOLUTION_WEBHOOK_PUBLIC_URL` (padrão `APP_URL`) também para
+  baixar o anexo. O provedor ganha `SendMedia.content` e `sendChannelTemplate`; módulo de canal próprio deve
+  aceitar `content` (ou ignorá-lo e usar `url`).
+
 - **Caixa de entrada, fase C4 (tempo real)**: toda escrita de conversa e mensagem avisa por `pg_notify`
   no `COMMIT` (só ids), cada processo web escuta numa conexão `LISTEN` e `GET /api/inbox/events` (SSE)
   entrega a cada pessoa só os avisos das conversas que ela vê (a fila e as próprias; quem supervisiona,

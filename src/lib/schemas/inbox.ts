@@ -53,21 +53,57 @@ export const clientIdSchema = z
   .max(64, "Identificador do envio inválido.")
   .regex(/^[A-Za-z0-9_-]+$/, "Identificador do envio inválido.");
 
+/** Legenda de mídia do WhatsApp. */
+export const MEDIA_CAPTION_MAX = 1024;
+/** Variáveis de um modelo (cabeçalho e corpo somam, no máximo). */
+export const TEMPLATE_VARIABLES_MAX = 20;
+
 /**
- * Envio. Só texto nesta fase (C2); modelo e anexo entram na C5 com o próprio contrato. Corpo de
- * outro tipo é 400.
+ * Envio por JSON: texto (com citação opcional) ou modelo aprovado. O anexo vai por `multipart`
+ * (`sendMediaFormSchema`). Corpo de outro tipo é 400.
  */
-export const sendMessageSchema = z.object({
-  type: z.literal("text", { error: "Tipo de mensagem não suportado." }),
-  text: z
-    .string()
-    .trim()
-    .min(1, "Escreva a mensagem.")
-    .max(MESSAGE_TEXT_MAX, "Mensagem muito longa."),
-  replyTo: z.uuid("Mensagem citada inválida.").optional(),
+export const sendMessageSchema = z.discriminatedUnion(
+  "type",
+  [
+    z.object({
+      type: z.literal("text"),
+      text: z
+        .string()
+        .trim()
+        .min(1, "Escreva a mensagem.")
+        .max(MESSAGE_TEXT_MAX, "Mensagem muito longa."),
+      replyTo: z.uuid("Mensagem citada inválida.").optional(),
+      clientId: clientIdSchema,
+    }),
+    z.object({
+      type: z.literal("template"),
+      templateId: z.uuid("Modelo inválido."),
+      /** Na ordem das variáveis que o modelo pede (cabeçalho, depois corpo); o servidor confere. */
+      variables: z
+        .array(z.string().max(1100, "Uma variável está muito longa."))
+        .max(TEMPLATE_VARIABLES_MAX, "Variáveis demais.")
+        .default([]),
+      clientId: clientIdSchema,
+    }),
+  ],
+  { error: "Tipo de mensagem não suportado." },
+);
+export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+export type SendTextInput = Extract<SendMessageInput, { type: "text" }>;
+export type SendTemplateInput = Extract<SendMessageInput, { type: "template" }>;
+
+const emptyToUndefined = (value: unknown) => (value === "" || value === null ? undefined : value);
+
+/** Campos de texto do `multipart` do anexo (o campo `file` é conferido à parte, pelo conteúdo). */
+export const sendMediaFormSchema = z.object({
+  caption: z.preprocess(
+    emptyToUndefined,
+    z.string().trim().max(MEDIA_CAPTION_MAX, "Legenda muito longa.").optional(),
+  ),
+  replyTo: z.preprocess(emptyToUndefined, z.uuid("Mensagem citada inválida.").optional()),
   clientId: clientIdSchema,
 });
-export type SendMessageInput = z.infer<typeof sendMessageSchema>;
+export type SendMediaFormInput = z.infer<typeof sendMediaFormSchema>;
 
 export const assignSchema = z.object({
   /** `null` devolve à fila. */
@@ -114,8 +150,12 @@ export const linkContactSchema = z.union([
 ], { error: "Informe o cliente, o membro, ou os dois nulos para desvincular." });
 export type LinkContactInput = z.infer<typeof linkContactSchema>;
 
-/** "Salvar como cliente": o telefone é o do contato, como o WhatsApp entregou. */
+/**
+ * "Salvar como cliente": o telefone é o do contato, como o WhatsApp entregou, salvo se o atendente o
+ * corrigir (`phone`, validado pela regra do cadastro). O contato continua guardando o número do provedor.
+ */
 export const saveContactAsCustomerSchema = z.object({
+  phone: z.preprocess(emptyToUndefined, z.string().trim().max(30, "Telefone inválido.").optional()),
   name: z.string().trim().min(2, "Informe o nome.").max(120, "Nome muito longo."),
   email: z
     .string()

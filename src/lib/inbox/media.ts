@@ -14,12 +14,13 @@ import { findProvider } from "@/lib/channels/registry";
 import { contextFor } from "@/lib/channels/service";
 import type { NormalizedMedia } from "@/lib/channels/types";
 import { sanitizeFileName } from "@/lib/files/types";
+import { MAX_OUTBOUND_MEDIA_BYTES, OUTBOUND_MIME, type OutboundKind } from "@/lib/inbox/constants";
 import { notifyInbox } from "@/lib/inbox/notify";
 import { getStorage, newStorageKey } from "@/lib/storage";
 
 /**
- * Mídia da caixa de entrada, parte de **entrada** (C1). A de saída (lista de MIME do envio,
- * URL assinada para a Evolution) é da C5.
+ * Mídia da caixa de entrada: **entrada** (C1) e a lista de tipos do **envio** (C5, `classifyOutbound`).
+ * O token assinado da Evolution está em `media-out.ts`.
  *
  * - Evolution: o conteúdo já está no `StorageProvider` (o webhook ou o `channel.inbound` o
  *   gravou sob `inbound/`); a ingestão só cria a linha de `file` (`storedMediaFile`).
@@ -118,6 +119,38 @@ export function inboundMime(body: Buffer, declared: string | null | undefined): 
   if (sniffed) return sniffed;
   if (claimed && PLAIN_TEXT.has(claimed) && !body.subarray(0, 1024).includes(0)) return claimed;
   return "application/octet-stream";
+}
+
+// ---------------------------------------------------------------------------
+// Anexo de saída (C5)
+// ---------------------------------------------------------------------------
+
+// A lista e o teto moram em `constants.ts` (código puro, a tela os lê para o `accept` do seletor).
+export { MAX_OUTBOUND_MEDIA_BYTES, OUTBOUND_MIME, type OutboundKind };
+
+/** Pasta que todo arquivo OOXML tem dentro do ZIP: um ZIP qualquer com nome de `.docx` não passa. */
+const OOXML_FOLDER: Record<string, string> = {
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "word/",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xl/",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "ppt/",
+};
+
+/**
+ * O tipo do anexo **pelo conteúdo** (`inboundMime`: o declarado só refina quando o conteúdo confirma a
+ * família), e o tipo de mensagem. `null` = fora da lista (415). O que o navegador declarou nunca decide.
+ */
+export function classifyOutbound(
+  body: Buffer,
+  declared: string | null | undefined,
+): { mime: string; kind: OutboundKind } | null {
+  const mime = inboundMime(body, declared);
+  const kind = OUTBOUND_MIME[mime];
+  if (!kind) return null;
+
+  const folder = OOXML_FOLDER[mime];
+  if (folder && !body.includes(folder, 0, "latin1")) return null;
+
+  return { mime, kind };
 }
 
 // ---------------------------------------------------------------------------

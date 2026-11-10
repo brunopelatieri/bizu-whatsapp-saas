@@ -133,6 +133,7 @@ const messageFields = {
   senderName: sender.name,
   type: message.type,
   text: message.text,
+  templateName: message.templateName,
   status: message.status,
   errorCode: message.errorCode,
   errorMessage: message.errorMessage,
@@ -171,6 +172,8 @@ export type MessageView = {
   sender: { id: string; name: string } | null;
   type: MessageType;
   text: string | null;
+  /** Mensagem de modelo: o nome do modelo (o texto já preenchido está em `text`). */
+  template: { name: string } | null;
   /** Só nas enviadas. */
   status: MessageStatus | null;
   error: { code: string | null; message: string | null } | null;
@@ -197,6 +200,7 @@ export function toMessageView(row: MessageRowView, base = "/api/inbox"): Message
     sender: row.senderUserId ? { id: row.senderUserId, name: row.senderName ?? "" } : null,
     type: row.type,
     text: row.text,
+    template: row.templateName ? { name: row.templateName } : null,
     status: row.status,
     error:
       row.status === "failed" ? { code: row.errorCode, message: row.errorMessage } : null,

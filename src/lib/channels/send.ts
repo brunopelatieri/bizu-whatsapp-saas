@@ -1,5 +1,5 @@
 import { type Scope, withScope } from "@/db/rls";
-import { ProviderError } from "@/lib/channels/errors";
+import { ChannelCapabilityError, ProviderError } from "@/lib/channels/errors";
 import { logChannelError } from "@/lib/channels/log";
 import { getProvider } from "@/lib/channels/registry";
 import { applyChannelStatus, contextFor, requireChannelRow } from "@/lib/channels/service";
@@ -8,6 +8,7 @@ import type {
   ChannelProvider,
   SendMedia,
   SendResult,
+  SendTemplate,
   SendText,
 } from "@/lib/channels/types";
 import { TenantRuleError } from "@/lib/tenant/errors";
@@ -58,3 +59,10 @@ export const sendChannelText = (scope: Scope, channelId: string, input: SendText
 
 export const sendChannelMedia = (scope: Scope, channelId: string, input: SendMedia) =>
   sendThrough(scope, channelId, (provider, ctx) => provider.sendMedia(ctx, input));
+
+/** Modelo aprovado (só a Cloud API). Provedor sem `sendTemplate` é erro de quem chamou: a tela esconde a ação. */
+export const sendChannelTemplate = (scope: Scope, channelId: string, input: SendTemplate) =>
+  sendThrough(scope, channelId, (provider, ctx) => {
+    if (!provider.sendTemplate) throw new ChannelCapabilityError(provider.type, "templates");
+    return provider.sendTemplate(ctx, input);
+  });

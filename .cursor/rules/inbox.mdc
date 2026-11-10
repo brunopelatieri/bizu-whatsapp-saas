@@ -1,6 +1,6 @@
 ---
 description: Caixa de entrada (contatos, conversas, mensagens e ingestão)
-globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts,src/api/inbox.ts,src/api/inbox-events.ts,src/lib/schemas/inbox.ts
+globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts,src/api/inbox.ts,src/api/inbox-events.ts,src/api/inbox-media-out.ts,src/lib/schemas/inbox.ts
 alwaysApply: false
 ---
 
@@ -10,6 +10,7 @@ alwaysApply: false
 - A rota (`src/api/inbox.ts`) só monta o `InboxActor` (`inboxActor(c)`) e valida com `src/lib/schemas/inbox.ts`; regra de permissão fina (`reply` × `assign`, `customer:read`) fica no serviço. Toda escrita passa por `blockMutationsWhileImpersonating`; rota nova entra em `rbac.test.ts` e, se escreve, no `it.each` de `impersonation.test.ts`.
 - Assumir é `UPDATE ... WHERE assigned_user_id IS NULL` (nunca ler e depois gravar); responder a da fila a assume, responder a de outro (supervisor) não troca o dono; mudar a situação à mão não mexe no dono.
 - Envio: mensagem `queued` gravada antes de falar com o provedor, `clientId` idempotente, janela de 24 h conferida no servidor (`window.ts`), provedor fora da transação; recusa vira `failed` com o motivo, sem resposta fica `queued` para o `inbox.sweep`.
+- Envio (C5): texto, anexo e modelo passam por `queueMessage` + `dispatch` (`send.ts`; `send-media.ts`, `send-template.ts`). Anexo: `multipart`, tipo decidido pelo **conteúdo** (`classifyOutbound`, lista `OUTBOUND_MIME`), 16 MB conferidos antes de gravar, nada gravado em qualquer recusa, objeto apagado se a transação recusar; reenvio reaproveita o `file`. Modelo: só aprovado do WABA do canal, variáveis conferidas por `templates.ts` (a mesma função serve à prévia da tela); é a única forma com a janela fechada. `GET /api/inbox/media-out/:token` é a **única rota sem sessão** do atendimento: token HMAC de 5 min de um arquivo, só anexo enviado pela equipe, 404 igual para qualquer recusa; nunca ampliar o que ele serve.
 - Mídia servida só pela rota autenticada, com o tipo decidido pelo conteúdo (`inboundMime` sobre os primeiros bytes), `inline` só para `INLINE_SAFE_MIME`, sempre `nosniff`.
 - Serviços recebem `Scope` e rodam em `withScope`; `tenant_id` vem de `scopeTenantId(scope)`, nunca do aviso nem do corpo. A plataforma nunca consulta `customer` de tenant nem usa `withPlatformScope` no atendimento.
 - Contato é achado pela `phone_key` (com e sem o 9º dígito). Telefone de provedor passa por `providerPhone` (normaliza com `+`). Vínculo automático com `user` ou `customer` só com correspondência única (`autoLinkContact`); o resto é manual.

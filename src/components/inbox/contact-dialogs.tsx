@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PhoneField } from "@/components/ui/phone-field";
 import { Label } from "@/components/ui/label";
 import { ApiError, apiFetch } from "@/lib/api/client";
 import type { CustomFieldValues } from "@/lib/crm/values";
@@ -63,6 +64,10 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
   const defs = fields.data ?? [];
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  // O número do WhatsApp, com `+`; o atendente o corrige se o cadastro o recusar (`INVALID_PHONE`).
+  const providerNumber = `+${contact.phone}`;
+  const [phoneValue, setPhoneValue] = useState(providerNumber);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -78,6 +83,8 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
     if (!open) return;
     setName(contact.name ?? contact.waName ?? "");
     setEmail("");
+    setPhoneValue(providerNumber);
+    setPhoneError(null);
     setTagIds([]);
     setValues({});
     setFormError(null);
@@ -114,6 +121,10 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
           setEmailError(error.message);
           return;
         }
+        if (error.code === "INVALID_PHONE") {
+          setPhoneError(error.message);
+          return;
+        }
       }
       setPlanLimit(error instanceof ApiError && error.code === "PLAN_LIMIT_REACHED");
       setFormError(errorText(error));
@@ -124,6 +135,7 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
     setFormError(null);
     setPlanLimit(false);
     setEmailError(null);
+    setPhoneError(null);
     setInUse(null);
 
     const patch: CustomFieldValues = {};
@@ -135,6 +147,8 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
 
     const parsed = saveContactAsCustomerSchema.safeParse({
       name,
+      // Só quando o atendente mexeu: sem correção, o servidor grava o número como o WhatsApp entregou.
+      ...(phoneValue && phoneValue !== providerNumber ? { phone: phoneValue } : {}),
       email: email || null,
       tagIds,
       customFields: patch,
@@ -142,6 +156,7 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       if (issue?.path[0] === "email") setEmailError(issue.message);
+      else if (issue?.path[0] === "phone") setPhoneError(issue.message);
       else setFormError(issue?.message ?? "Confira os dados.");
       return;
     }
@@ -158,7 +173,8 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
           <DialogTitle>Salvar como cliente</DialogTitle>
           <DialogDescription>
             O número {phone} é gravado como o WhatsApp entregou, e a conversa passa a mostrar o
-            cadastro.
+            cadastro. Se o cadastro recusar o número, corrija-o abaixo: o contato continua com o número
+            do WhatsApp.
           </DialogDescription>
         </DialogHeader>
 
@@ -179,6 +195,20 @@ export function SaveAsCustomerDialog({ open, contact, onClose }: SaveDialogProps
               autoComplete="off"
               required
             />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="save-customer-phone">Telefone</Label>
+            <PhoneField
+              id="save-customer-phone"
+              value={phoneValue}
+              onChange={(next) => {
+                setPhoneValue(next);
+                setPhoneError(null);
+              }}
+              disabled={save.isPending}
+              invalid={Boolean(phoneError)}
+            />
+            {phoneError ? <p className="text-xs text-destructive">{phoneError}</p> : null}
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="save-customer-email">E-mail (opcional)</Label>

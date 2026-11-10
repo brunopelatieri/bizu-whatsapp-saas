@@ -281,7 +281,8 @@ export function NewConversationDialog({ open, onClose, preset }: NewConversation
 
 /**
  * "Conversar" no detalhe do cliente e na lista de equipe: com `inbox:reply` e telefone. Número que
- * não é WhatsApp (fixo ou celular de 8 dígitos) troca o botão pela explicação. Com um único número
+ * não é WhatsApp (fixo ou celular de 8 dígitos) mantém o botão com a explicação: só abre a conversa de quem
+ * já escreveu pelo WhatsApp (o servidor decide). Com um único número
  * conectado, abre a conversa direto; com vários, pergunta de qual sair.
  */
 export function StartConversationButton({
@@ -306,13 +307,10 @@ export function StartConversationButton({
   if ("customerId" in target && !can("customer", "read")) return null;
   if (!phoneKind) return null;
 
-  if (!canWhatsApp(phoneKind)) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Sem WhatsApp: fixo ou celular de 8 dígitos. Corrija o número para conversar.
-      </p>
-    );
-  }
+  // Fixo e celular de 8 dígitos não abrem conversa nova, mas **abrem** a que já existe: cliente salvo a
+  // partir de um contato que escreveu pelo WhatsApp (SPEC, "Iniciar conversa"). A tela não sabe se o
+  // contato existe; o servidor decide e o erro (`PHONE_NOT_WHATSAPP`) vira aviso.
+  const legacy = !canWhatsApp(phoneKind);
 
   function click() {
     const only = usable.length === 1 ? usable[0] : undefined;
@@ -326,6 +324,12 @@ export function StartConversationButton({
         <MessageSquarePlus />
         Conversar
       </Button>
+      {legacy ? (
+        <p className="w-full text-xs text-muted-foreground">
+          Fixo ou celular de 8 dígitos: só abre a conversa de quem já escreveu pelo WhatsApp. Para
+          começar uma nova, corrija o número.
+        </p>
+      ) : null}
       <NewConversationDialog
         open={choosing}
         onClose={() => setChoosing(false)}
