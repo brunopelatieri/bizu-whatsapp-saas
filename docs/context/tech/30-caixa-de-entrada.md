@@ -245,7 +245,7 @@ ou existente, o que vai ao provedor) montado por `build` **depois** de conferido
   token `<fileId>.<expira>.<HMAC-SHA256>` com `BETTER_AUTH_SECRET` e rótulo de domínio; um arquivo, 5 minutos (prazo
   assinado e limitado ao que emitimos), comparação em tempo constante. Só serve `file` que seja a mídia de mensagem
   **enviada pela equipe** (`direction = out`, `sender_type = user`); mídia recebida, arquivo de outro módulo, token
-  vencido, adulterado ou de outro arquivo: 404 igual. Rate limit por IP (120/min). Resposta `nosniff`,
+  vencido, adulterado ou de outro arquivo: 404 igual. Só as **recusas** contam no limite por IP (30/min, `failureLimit` como nos webhooks): a Evolution é um só IP e baixa um arquivo por envio de todos os tenants. Resposta `nosniff`,
   `Cache-Control: private, no-store`, `attachment` salvo imagem/áudio/vídeo seguros. Não lista nada.
 - **Modelo** (`type: "template"`, `templateId`, `variables[]`): só de `message_template` aprovado, do WABA do canal e do
   escopo; fora disso 404 (outro WABA é igual a inexistente), pendente 409 `TEMPLATE_NOT_APPROVED`, canal sem `templates`

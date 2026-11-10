@@ -271,6 +271,13 @@ export async function queueMessage(
   };
 }
 
+/** Rascunho de texto: o mesmo no primeiro envio e no reenvio. */
+const textDraft = (text: string): Draft => ({
+  type: "text",
+  text,
+  delivery: () => ({ kind: "text", text }),
+});
+
 export const notRetryable = () =>
   new TenantRuleError(409, "NOT_RETRYABLE", "Só uma mensagem que falhou pode ser reenviada.");
 
@@ -510,11 +517,7 @@ export async function sendText(
       clientId: input.clientId,
       replyTo: input.replyTo,
       requiresWindow: true,
-      build: () => ({
-        type: "text",
-        text: input.text,
-        delivery: () => ({ kind: "text", text: input.text }),
-      }),
+      build: () => textDraft(input.text),
     }),
   );
   return dispatch(actor, prepared);
@@ -554,7 +557,7 @@ export async function retryMessage(actor: InboxActor, messageId: string): Promis
         tx,
         actor,
         old.conversationId,
-        { ...common, requiresWindow: true, build: () => ({ type: "text", text, delivery: () => ({ kind: "text", text }) }) },
+        { ...common, requiresWindow: true, build: () => textDraft(text) },
         old.id,
       );
     }

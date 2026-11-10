@@ -27,6 +27,7 @@ import { can as channelCan } from "@/lib/channels/capabilities";
 import { MAX_OUTBOUND_MEDIA_BYTES, OUTBOUND_MIME } from "@/lib/inbox/constants";
 import { previewOf } from "@/lib/inbox/preview";
 import { MEDIA_CAPTION_MAX, MESSAGE_TEXT_MAX } from "@/lib/schemas/inbox";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 /**
@@ -273,6 +274,8 @@ export function Composer({
 
   const quoteWho = replyTo?.direction === "out" ? "a você" : "ao contato";
   const limit = attachment ? MEDIA_CAPTION_MAX : MESSAGE_TEXT_MAX;
+  // O texto digitado antes de anexar pode passar da legenda (1024): o servidor recusaria; a tela avisa antes.
+  const overLimit = text.length > limit;
 
   return (
     <div className="border-t border-border bg-background p-3">
@@ -408,14 +411,15 @@ export function Composer({
           type="button"
           size="icon"
           aria-label="Enviar mensagem"
-          disabled={blocked || send.isPending || (!attachment && text.trim().length === 0)}
+          disabled={blocked || send.isPending || overLimit || (!attachment && text.trim().length === 0)}
           onClick={submit}
         >
           <SendHorizontal />
         </Button>
       </div>
       {text.length > limit - 500 ? (
-        <p className="mt-1 text-right text-xs text-muted-foreground">
+        <p className={cn("mt-1 text-right text-xs", overLimit ? "text-destructive" : "text-muted-foreground")}>
+          {overLimit ? "Legenda muito longa: " : ""}
           {text.length}/{limit}
         </p>
       ) : null}

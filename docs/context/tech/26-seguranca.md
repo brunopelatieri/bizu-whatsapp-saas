@@ -178,7 +178,7 @@ personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota
   HTML, GIF, WebM nem executável) e nada é gravado em qualquer recusa. `GET /api/inbox/media-out/:token` é a única rota
   do atendimento **sem sessão**: HMAC-SHA256 com `BETTER_AUTH_SECRET` e rótulo próprio sobre `<arquivo>.<prazo>`, um
   arquivo, 5 minutos, comparação em tempo constante, só mídia de mensagem enviada pela equipe, 404 igual para qualquer
-  recusa, 120/min por IP, `nosniff` e `no-store`. Testes em `inbox-media-send.test.ts` e `media-out.test.ts`. Limite
+  recusa, só as recusas contam no limite por IP (30/min, a Evolution é um IP só), `nosniff` e `no-store`. Testes em `inbox-media-send.test.ts` e `media-out.test.ts`. Limite
   conhecido: quem tem o endereço (o servidor Evolution, ou um log dele) baixa o arquivo por até 5 minutos; não é de uso único.
 - Conteúdo de mensagem, telefone e nome não vão a log, auditoria nem Sentry; erro de provedor só por
   `logChannelError`. Detalhes em `tech/30-caixa-de-entrada.md`.
