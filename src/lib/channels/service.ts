@@ -19,6 +19,7 @@ import {
   channelTypes,
 } from "@/lib/channels/types";
 import { SecretDecryptError } from "@/lib/crypto/secrets";
+import { channelHasConversations as inboxConversationCheck } from "@/lib/inbox/channel-usage";
 import type { UpdateChannelInput } from "@/lib/schemas/channels";
 import { maskSecret } from "@/lib/tenant/credentials";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
@@ -68,8 +69,8 @@ export const scopeWhere = (scope: Scope): SQL =>
   scope.kind === "tenant" ? eq(channel.tenantId, scope.tenantId) : isNull(channel.tenantId);
 
 /**
- * `true` quando já há conversa apontando para o canal. A caixa de entrada (C1) troca este corpo
- * por uma consulta em `conversation`; até lá nenhuma conversa existe, então remover apaga.
+ * `true` quando já há conversa apontando para o canal: remover desativa em vez de apagar. A
+ * consulta é da caixa de entrada (`src/lib/inbox/channel-usage.ts`), única dona de `conversation`.
  */
 export async function channelHasConversations(tx: Tx, channelId: string) {
   return conversationCheck(tx, channelId);
@@ -77,11 +78,11 @@ export async function channelHasConversations(tx: Tx, channelId: string) {
 
 type ConversationCheck = (tx: Tx, channelId: string) => Promise<boolean>;
 
-let conversationCheck: ConversationCheck = async () => false;
+let conversationCheck: ConversationCheck = inboxConversationCheck;
 
-/** A caixa de entrada (C1) registra a consulta real; os testes simulam o canal com histórico. */
+/** Os testes simulam o canal com histórico. `undefined` restaura a consulta real. */
 export function setConversationCheck(next: ConversationCheck | undefined) {
-  conversationCheck = next ?? (async () => false);
+  conversationCheck = next ?? inboxConversationCheck;
 }
 
 /** Texto do provedor pode trazer dado do cliente; só vai a log depois de sanitizado. */

@@ -51,6 +51,8 @@ describe("avisos de canal", () => {
     setChannelQueueForTests(async (id) => {
       enqueued.push(id);
     });
+    // A camada de canais sem a caixa de entrada; a ingestão real é de `inbox-ingest.test.ts`.
+    setInboxHandlers({});
   });
 
   afterEach(async () => {
@@ -66,6 +68,7 @@ describe("avisos de canal", () => {
 
   afterAll(async () => {
     setChannelQueueForTests(undefined);
+    setInboxHandlers(undefined);
     await cleanUpChannels(owner, [tenantA, tenantB]);
     await owner.end();
   });
@@ -240,7 +243,7 @@ describe("avisos de canal", () => {
       expect(normalize).toHaveBeenCalledTimes(1);
     });
 
-    it("mensagem e status ficam ignored enquanto a caixa de entrada não existe", async () => {
+    it("mensagem e status ficam ignored sem tratador da caixa de entrada", async () => {
       const seeded = await seedCloudChannel(tenantScope(tenantA));
       setProvidersForTests([passThrough]);
       const { id } = await receive(seeded, [message("200000000000001")]);

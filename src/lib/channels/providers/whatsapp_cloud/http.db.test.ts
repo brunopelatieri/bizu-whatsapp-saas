@@ -144,6 +144,8 @@ describe("WhatsApp Cloud pela API", () => {
 
   beforeAll(async () => {
     owner = connectOwner();
+    // A camada de canais sem a caixa de entrada; a ingestão real é de `inbox.db.test.ts`.
+    setInboxHandlers({});
 
     users.owner = await createUser(owner);
     tenantId = (await createTenant(users.owner)).id;
@@ -188,6 +190,7 @@ describe("WhatsApp Cloud pela API", () => {
   });
 
   afterAll(async () => {
+    setInboxHandlers(undefined);
     await cleanUpChannels(owner, []);
     await cleanUp(owner);
     await cleanUpBilling(owner);
