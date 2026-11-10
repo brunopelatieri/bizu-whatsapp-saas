@@ -7,6 +7,7 @@ import {
   sendMedia,
   sendTemplate,
   sendText,
+  uploadMedia,
   verifyPhoneNumber,
 } from "@/lib/channels/providers/whatsapp_cloud/graph";
 import { cloudRoutes } from "@/lib/channels/providers/whatsapp_cloud/routes";
@@ -63,13 +64,24 @@ export function createCloudProvider(): ChannelProvider {
 
     async sendMedia(ctx, input) {
       const { phoneNumberId, accessToken } = required(ctx, "phoneNumberId", "accessToken");
+      // Anexo de saída: sobe o arquivo à Meta e envia pelo id (nunca por link público nosso).
+      const content = input.content ? await input.content() : null;
+      const uploaded = content
+        ? await uploadMedia({
+            phoneNumberId,
+            accessToken,
+            body: content.body,
+            mime: content.mime,
+            filename: input.filename ?? "arquivo",
+          })
+        : null;
       const { messageId } = await sendMedia({
         phoneNumberId,
         accessToken,
         to: input.to,
         kind: input.kind,
-        link: input.url,
-        mediaId: input.providerMediaId,
+        link: uploaded ? undefined : input.url,
+        mediaId: uploaded?.mediaId ?? input.providerMediaId,
         caption: input.caption,
         filename: input.filename,
         contextMessageId: input.quotedProviderMessageId,

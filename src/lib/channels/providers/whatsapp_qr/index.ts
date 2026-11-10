@@ -190,6 +190,9 @@ export function createEvolutionProvider(config: EvolutionConfig | null): Channel
           type: input.kind,
           ...(input.caption ? { caption: input.caption } : {}),
           ...(input.filename ? { filename: input.filename } : {}),
+          ...(input.quotedProviderMessageId
+            ? { quoted: { messageId: input.quotedProviderMessageId } }
+            : {}),
         },
         required().mediaTimeoutMs,
       );

@@ -207,7 +207,8 @@ export async function saveContactAsCustomer(
     {
       name: input.name,
       email: input.email ?? null,
-      phone: `+${contact.phone}`,
+      // O número do WhatsApp, a menos que o atendente o tenha corrigido (a regra do cadastro o valida).
+      phone: input.phone ?? `+${contact.phone}`,
       document: null,
       notes: null,
       tagIds: input.tagIds,

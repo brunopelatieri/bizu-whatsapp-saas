@@ -155,6 +155,11 @@ export type SendMedia = {
   /** Endereço pré-assinado de curta duração, ou `providerMediaId` já enviado à Meta. */
   url?: string;
   providerMediaId?: string;
+  /**
+   * Lê o anexo, para o provedor que sobe o arquivo antes de enviar (Cloud API: `uploadMedia` e envio
+   * pelo id). É função para só ler o arquivo quando o provedor precisa: a Evolution usa `url` e não a chama.
+   */
+  content?: () => Promise<{ body: Buffer; mime: string }>;
   caption?: string;
   filename?: string;
   quotedProviderMessageId?: string;
