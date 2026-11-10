@@ -271,7 +271,7 @@ export function Composer({
     submit();
   }
 
-  const quoteWho = replyTo?.direction === "out" ? "você" : "o contato";
+  const quoteWho = replyTo?.direction === "out" ? "a você" : "ao contato";
   const limit = attachment ? MEDIA_CAPTION_MAX : MESSAGE_TEXT_MAX;
 
   return (
@@ -307,7 +307,7 @@ export function Composer({
       {replyTo ? (
         <div className="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-primary/60 bg-muted px-3 py-1.5 text-xs">
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-foreground">Respondendo a {quoteWho}</p>
+            <p className="font-medium text-foreground">Respondendo {quoteWho}</p>
             <p className="truncate text-muted-foreground">{previewOf(replyTo.type, replyTo.text)}</p>
           </div>
           <Button
