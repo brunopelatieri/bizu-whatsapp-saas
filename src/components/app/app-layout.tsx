@@ -11,6 +11,7 @@ import { BillingBanner } from "@/components/app/billing-banner";
 import { ConsentGate } from "@/components/app/consent-gate";
 import { ImpersonationBanner } from "@/components/app/impersonation-banner";
 import { TenantSwitcher } from "@/components/app/tenant-switcher";
+import { InboxEvents } from "@/components/inbox/use-inbox-events";
 import {
   Sheet,
   SheetContent,
@@ -74,6 +75,8 @@ export function AppLayout() {
   return (
     <div className="flex h-svh overflow-hidden bg-background">
       <ConsentGate />
+      {/* Tempo real do atendimento: o ponto do menu anda em qualquer tela do /app. */}
+      <InboxEvents key={tenant.id} />
       <AppSidebar collapsed={collapsed} />
 
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
