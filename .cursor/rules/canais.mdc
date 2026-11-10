@@ -1,6 +1,6 @@
 ---
 description: Canais de WhatsApp (módulos, caixa de avisos e segredos)
-globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/api/admin-channel-events.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts,src/components/channels/**,src/routes/app.settings.channels.tsx
+globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/api/admin-channel-events.ts,src/api/admin-channels.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts,src/components/channels/**,src/routes/app.settings.channels.tsx,src/routes/admin/channels.tsx
 alwaysApply: false
 ---
 
@@ -12,8 +12,10 @@ alwaysApply: false
 - Segredo (`*_enc`) só entra por `sealSecret` e só se decifra em `credentials.ts`; nenhuma resposta, log ou auditoria o traz. `ChannelView` não tem coluna `_enc`.
 - Webhook verifica sobre o corpo cru, grava em `channel_event` e enfileira `channel.inbound`; quem aplica é o job, com retry. Assinatura inválida: 401, sem gravar. Sem `app_secret`, não há canal Cloud (falha fechada).
 - Webhook, rotas de tipo e edição são declarados pelo módulo em `ChannelModule` (`webhook`, `routes(kit)`, `update`); `src/api/webhooks-channels.ts` e `src/api/channels.ts` só iteram `getModules()`. Chave desconhecida responde igual a assinatura errada.
+- Rota de canal é escrita uma vez: comum em `buildChannelRoutes` (`src/api/channels.ts`), de tipo em `routes(kit)` do módulo. Ela vale para `/api/channels` (tenant) e `/api/admin/channels` (plataforma, `src/api/admin-channels.ts`); base, escopo, ator e autorização vêm do kit, nunca do caminho escrito à mão nem da sessão lida no módulo. Rate limit só por `kit.limit` (prefixo por base).
+- Plataforma: suporte só lê, escrita é `platform_owner`, sem limite de plano; `missing` (nomes de variáveis) só sai em `/api/admin/channels`.
 - `registry.ts` não tem `await` no topo (ciclo módulo → serviço → registro); script `tsx` chama `loadChannelModules()`.
-- Tela: um tipo novo entra com uma linha em `src/components/channels/channel-dialogs.tsx` e o texto em `channel-kinds.tsx`.
+- Tela: um tipo novo entra com uma linha em `src/components/channels/channel-dialogs.tsx` e o texto em `channel-kinds.tsx`. Componentes recebem `basePath` por props: nada de `/api/channels` escrito dentro deles.
 - Roteamento por `phone_number_id` só entre os canais do escopo do canal verificado.
 - Falar com o provedor vem antes da transação local. Erro de provedor vai a log só por `logChannelError` (sem a mensagem dele).
 - Limite do plano: `assertChannelWithinLimit` com `lockScopeType` na mesma transação da criação.

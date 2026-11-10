@@ -16,8 +16,9 @@ Evolution Go único, da plataforma**. O tenant nunca informa a URL (sem SSRF). L
 | `webhook.ts` | Cadeia de verificação, `dedupe_key`, origem permitida de `mediaUrl` |
 | `media.ts` | base64 do aviso → `StorageProvider` (`externalizeEvolutionMedia`); `mediaUrl` de origem listada → download (`resolveEvolutionMedia`) |
 | `normalize.ts` | Aviso da Evolution → eventos comuns (função pura) |
-| `index.ts` | Monta o `ChannelProvider` (envio, `probe`, `destroy`, `pairing`, mídia) e exporta o módulo |
-| `webhook.db.test.ts`, `routes.db.test.ts`, `db-test-support.ts` | Testes com banco (`npm run test:db`) e o servidor Evolution simulado deles |
+| `routes.ts` | Rotas do tipo (`qrRoutes(kit)`: criar, QR, código, estado, ciclo de vida, ajustes), montadas por `buildChannelRoutes` para `/api/channels` e `/api/admin/channels` |
+| `index.ts` | Monta o `ChannelProvider` (envio, `probe`, `destroy`, `pairing`, mídia) e exporta o módulo (`routes`, `requiredEnv`) |
+| `webhook.db.test.ts`, `routes.db.test.ts`, `admin-routes.db.test.ts`, `db-test-support.ts` | Testes com banco (`npm run test:db`) e o servidor Evolution simulado deles |
 
 ## O que fica fora desta pasta
 
@@ -25,8 +26,9 @@ O módulo só fala com o servidor Evolution e lê o formato dele. Banco, limites
 do núcleo, que chama o módulo pelo contrato (`ChannelProvider.pairing`, `externalizeInboundMedia`,
 `resolveInboundMedia`): `src/lib/channels/pairing.ts` (criar, QR, código, estado, ciclo de vida),
 `connection.ts` (estado e readoção), `inbound-pairing.ts` e `src/api/webhooks-channels-evolution.ts`
-(webhook), `media.ts` (armazenamento) e as rotas em `src/api/channels.ts`. Sem esta pasta, essas rotas
-respondem 503 `PROVIDER_UNAVAILABLE` e o webhook, 503.
+(webhook) e `media.ts` (armazenamento). As rotas desta pasta só ligam o HTTP a `pairing.ts`. Com o
+módulo fora de `CHANNEL_PROVIDERS`, elas respondem 503 `PROVIDER_UNAVAILABLE` e o webhook, 503; sem
+a pasta, as rotas deixam de existir (404).
 
 ## O que foi medido (na origem) e diverge da documentação
 

@@ -17,6 +17,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   tela `/app/configuracoes/canais` com "Conectar número". Liga-se com `whatsapp_cloud` em
   `CHANNEL_PROVIDERS`; sem migration nova. Módulos de canal passam a declarar webhook, rotas e
   edição em `ChannelModule`. Falta o smoke com conta de teste da Meta.
+- **Canais da plataforma** (`docs/specs/whatsapp-canais/spec.md`, fase B4): a plataforma passa a ter
+  os próprios números de WhatsApp em `/admin/configuracoes/canais`, pelas mesmas rotas do tenant sob
+  `/api/admin/channels/*` (`Scope = platform`). O suporte lê; só o proprietário conecta, altera e
+  remove. Não há limite de plano, e o teto do servidor Evolution continua valendo. A tela mostra o
+  nome das variáveis que faltam no servidor. Sem migration nova. **Para projetos derivados:** as
+  rotas de QR Code saíram de `src/api/channels.ts` para `providers/whatsapp_qr/routes.ts`, e
+  `ChannelManager` passou a exigir a prop `canManage`.
 - **Avisos de canal no admin** (`docs/specs/whatsapp-canais/spec.md`, fase B4, parte): aba "Canais"
   em `/admin/webhooks` com os eventos de WhatsApp que falharam, de todas as organizações e da
   plataforma, e "Reprocessar" para o proprietário (`GET /api/admin/channel-events`,

@@ -14,7 +14,7 @@ cifrados (`src/lib/channels/credentials.ts`). Liga-se com `whatsapp_cloud` em
 | `normalize.ts` | Aviso da Meta → eventos comuns (função pura) |
 | `service.ts` | Salvar, editar, endereço de webhook (mostrar e gerar novo), diagnóstico, `findTarget` e `handshake` do webhook |
 | `templates.ts` | Lista e sincroniza `message_template` com a Meta |
-| `routes.ts` | Rotas do tipo, montadas por `src/api/channels.ts` com o `ChannelRouteKit` |
+| `routes.ts` | Rotas do tipo, montadas por `buildChannelRoutes` (`src/api/channels.ts`) com o `ChannelRouteKit`, para `/api/channels` e `/api/admin/channels` |
 | `index.ts` | Monta o `ChannelProvider` (envio, mídia, `probe`) e exporta o módulo (`webhook`, `routes`, `update`) |
 | `http.db.test.ts`, `events.db.test.ts` | Webhook, rotas e job com Postgres real (`npm run test:db`) |
 

@@ -2,7 +2,7 @@
 
 - **Escopo:** Área do proprietário da plataforma: rotas `/admin/**`, API `/api/admin/*`, papéis, suspensão, usuários, planos e configurações.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-rotas-api.md`, `spec-tenant-rbac.md`, `spec-billing.md`
-- **Paths do código:** `src/api/admin.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`
+- **Paths do código:** `src/api/admin.ts`, `src/api/admin-channels.ts`, `src/api/admin-channel-events.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`
 
 ## Acesso
 
@@ -41,6 +41,7 @@ só o caminho da interface. Sem `loader` de servidor. Em produção, sem 2FA, to
 | `GET /api/admin/webhooks?status&page` | plataforma | `payment_event` sem `raw`, que tem dado pessoal |
 | `POST /api/admin/webhooks/:id/reprocess` | owner | só `failed` ou `ignored` e verificado; 409 `NOT_REPROCESSABLE` |
 | `GET /api/admin/channel-events?status&page` | plataforma | `channel_event` de todos os escopos, sem `raw` nem `dedupe_key`; rotas em `src/api/admin-channel-events.ts`, sub-router com a própria cadeia de guardas, montado antes de `adminRoutes` (`tech/29-canais-whatsapp.md`) |
+| `/api/admin/channels/*` | leitura: plataforma; escrita: owner | números de WhatsApp **da plataforma** (`tenant_id` nulo): as mesmas rotas de `/api/channels`, montadas por `buildChannelRoutes` em `src/api/admin-channels.ts` (sub-router com a própria cadeia, antes de `adminRoutes`); sem limite de plano; `blockMutationsWhileImpersonating`; auditoria `channel.*` com `actor_type = platform`; a lista traz `providers[tipo].missing` (nomes de variáveis). Ver `tech/29-canais-whatsapp.md` |
 | `POST /api/admin/channel-events/:id/reprocess` | owner | só `failed` ou `ignored`; 409 `NOT_REPROCESSABLE`; `blockWhileImpersonating`; reenfileira `channel.inbound`; audita `admin.channel_event_reprocessed` |
 | `GET`, `POST /api/admin/plans` | leitura plataforma; escrita owner | 409 `SLUG_TAKEN` |
 | `PATCH /api/admin/plans/:id` | owner | parcial, o `slug` não muda; 409 `PLAN_HAS_PRICES` ao marcar gratuito com preço ativo; reativar preço de plano gratuito é 409 `FREE_PLAN_NO_PRICE`; audita `admin.plan_updated` com `fields`. `active: false` é "arquivar" (botão na lista e no detalhe) |
@@ -67,6 +68,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | `/admin/assinaturas` | `subscriptions-page.tsx`; menu por linha em `components/admin/subscription-actions.tsx`: editar datas e status (só os destinos de `allowedTargets`, motivo obrigatório), trocar plano, marcar pago/não pago (o mesmo `manual-billing-card`, com os dados de `GET /api/admin/tenants/:id`), buscar do provedor e cancelar |
 | `/admin/webhooks` | `webhooks-page.tsx`: abas "Pagamentos" e "Canais" (`?tab=canais`, em `channel-events-tab.tsx`, que abre nos avisos de canal com falha) |
 | `/admin/configuracoes/etiquetas`, `/admin/configuracoes/campos` | `routes/admin/crm-tags.tsx`, `crm-fields.tsx`: `TagManager` e `CustomFieldManager` com a API da plataforma por props (suporte só lê); links em `/admin/configuracoes` |
+| `/admin/configuracoes/canais` | `routes/admin/channels.tsx`: `ChannelManager` de `src/components/channels/` com `basePath = /api/admin/channels` (suporte só lê) e o aviso das variáveis que faltam no servidor; link em `/admin/configuracoes` e item "Canais" no menu |
 | `/admin/auditoria` | `routes/admin/audit.tsx`: log global, por ação, nome da organização (`tenantQ`, `ilike` em `organization.name`) e pessoa |
 | `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte |
 | `/admin/configuracoes/seguranca` | `routes/admin/security.tsx`: 2FA de quem administra |
