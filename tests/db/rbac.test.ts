@@ -97,6 +97,19 @@ const endpoints = [
   ["PUT", "/api/custom-fields/order", "custom_field:manage"],
   ["PATCH", `/api/custom-fields/${anyId}`, "custom_field:manage"],
   ["DELETE", `/api/custom-fields/${anyId}`, "custom_field:manage"],
+  // Caixa de entrada: a visibilidade por pessoa está em `inbox-queue.test.ts`.
+  ["GET", "/api/inbox/conversations", "inbox:read"],
+  ["GET", `/api/inbox/conversations/${anyId}`, "inbox:read"],
+  ["GET", `/api/inbox/conversations/${anyId}/messages`, "inbox:read"],
+  ["POST", `/api/inbox/conversations/${anyId}/claim`, "inbox:reply"],
+  // `null` na própria pede `inbox:reply`, o resto `inbox:assign`: o serviço confere.
+  ["POST", `/api/inbox/conversations/${anyId}/assign`, "inbox:read"],
+  ["POST", `/api/inbox/conversations/${anyId}/status`, "inbox:reply"],
+  ["POST", `/api/inbox/conversations/${anyId}/read`, "inbox:read"],
+  ["GET", "/api/inbox/unread", "inbox:read"],
+  ["GET", "/api/inbox/assignees", "inbox:assign"],
+  ["GET", `/api/inbox/messages/${anyId}/media`, "inbox:read"],
+  ["POST", `/api/inbox/messages/${anyId}/media/retry`, "inbox:read"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

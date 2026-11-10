@@ -1,0 +1,185 @@
+import { Readable } from "node:stream";
+import { zValidator } from "@hono/zod-validator";
+import { type Context, Hono } from "hono";
+import { requireAuth } from "@/api/auth";
+import {
+  authRateLimit,
+  jsonBodyLimit,
+  MINUTE,
+  sameOrigin,
+  validationError,
+  validId,
+} from "@/api/guards";
+import { blockMutationsWhileImpersonating } from "@/api/impersonation";
+import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
+import { clientKey, rateLimit } from "@/api/rate-limit";
+import { handleTenantError } from "@/api/tenant-errors";
+import { attachmentHeader } from "@/lib/files/types";
+import {
+  assignConversation,
+  claimConversation,
+  listAssignees,
+  markConversationRead,
+  setConversationStatus,
+} from "@/lib/inbox/assignment";
+import {
+  getConversation,
+  listConversations,
+  listMessages,
+  unreadCounts,
+} from "@/lib/inbox/conversations";
+import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
+import { type InboxActor, inboxCapabilities } from "@/lib/inbox/visibility";
+import {
+  assignSchema,
+  conversationStatusSchema,
+  conversationsQuerySchema,
+  messagesQuerySchema,
+} from "@/lib/schemas/inbox";
+
+/**
+ * `/api/inbox/*`: caixa de entrada do tenant (`docs/specs/caixa-de-entrada/spec.md`). A rota
+ * só monta o ator (tenant da sessão, permissões do papel) e valida a entrada; quem decide o que a
+ * pessoa vê é `visibleConversation` (`src/lib/inbox/visibility.ts`), em toda consulta.
+ *
+ * Escritas: `blockMutationsWhileImpersonating` (a sessão personificada lê, mas não envia, não
+ * assume nem marca como lida) e, pela regra geral de `requireTenant`, recusadas em `read_only`.
+ */
+export const inboxRoutes = new Hono<TenantEnv>();
+
+inboxRoutes.onError(handleTenantError);
+inboxRoutes.use(
+  "/api/inbox/*",
+  sameOrigin,
+  jsonBodyLimit,
+  authRateLimit,
+  requireAuth,
+  requireTenant,
+  blockMutationsWhileImpersonating,
+);
+
+export function inboxActor(c: Context<TenantEnv>): InboxActor {
+  const permissions = c.get("permissions");
+
+  return {
+    scope: { kind: "tenant", tenantId: c.get("tenant").id },
+    userId: c.get("user").id,
+    can: inboxCapabilities(permissions),
+    permissions,
+    catalog: c.get("roleCatalog"),
+    ip: clientKey(c),
+  };
+}
+
+const userKey = (c: Context) => (c as Context<TenantEnv>).get("user").id;
+const perUser = (name: string, limit: number) =>
+  rateLimit({ name, limit, windowMs: MINUTE, key: userKey });
+
+/** Assumir, transferir, situação e lida: 60 por minuto por pessoa. */
+const queueLimit = perUser("inbox-queue", 60);
+const mediaRetryLimit = perUser("inbox-media-retry", 20);
+
+const canRead = requirePermission("inbox", "read");
+const canReply = requirePermission("inbox", "reply");
+
+// ---------------------------------------------------------------------------
+// Leitura
+// ---------------------------------------------------------------------------
+
+inboxRoutes.get(
+  "/api/inbox/conversations",
+  canRead,
+  zValidator("query", conversationsQuerySchema, validationError),
+  async (c) => c.json(await listConversations(inboxActor(c), c.req.valid("query"))),
+);
+
+inboxRoutes.get("/api/inbox/conversations/:id", canRead, validId, async (c) =>
+  c.json(await getConversation(inboxActor(c), c.req.valid("param").id)),
+);
+
+inboxRoutes.get(
+  "/api/inbox/conversations/:id/messages",
+  canRead,
+  validId,
+  zValidator("query", messagesQuerySchema, validationError),
+  async (c) =>
+    c.json(await listMessages(inboxActor(c), c.req.valid("param").id, c.req.valid("query"))),
+);
+
+inboxRoutes.get("/api/inbox/unread", canRead, async (c) => c.json(await unreadCounts(inboxActor(c))));
+
+inboxRoutes.get("/api/inbox/assignees", requirePermission("inbox", "assign"), async (c) =>
+  c.json({ users: await listAssignees(inboxActor(c)) }),
+);
+
+inboxRoutes.get("/api/inbox/messages/:id/media", canRead, validId, async (c) => {
+  const media = await openMessageMedia(inboxActor(c), c.req.valid("param").id);
+  const disposition = attachmentHeader(media.name);
+
+  return new Response(Readable.toWeb(media.body) as ReadableStream, {
+    headers: {
+      "Content-Type": media.mime,
+      "Content-Length": String(media.size),
+      "Content-Disposition": media.inline ? disposition.replace(/^attachment/, "inline") : disposition,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, max-age=300",
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fila e situação
+// ---------------------------------------------------------------------------
+
+inboxRoutes.post("/api/inbox/conversations/:id/claim", canReply, queueLimit, validId, async (c) =>
+  c.json({ conversation: await claimConversation(inboxActor(c), c.req.valid("param").id) }),
+);
+
+/** `null` na própria conversa pede `inbox:reply`; o resto, `inbox:assign` (conferido no serviço). */
+inboxRoutes.post(
+  "/api/inbox/conversations/:id/assign",
+  canRead,
+  queueLimit,
+  validId,
+  zValidator("json", assignSchema, validationError),
+  async (c) =>
+    c.json({
+      conversation: await assignConversation(
+        inboxActor(c),
+        c.req.valid("param").id,
+        c.req.valid("json").userId,
+      ),
+    }),
+);
+
+inboxRoutes.post(
+  "/api/inbox/conversations/:id/status",
+  canReply,
+  queueLimit,
+  validId,
+  zValidator("json", conversationStatusSchema, validationError),
+  async (c) =>
+    c.json({
+      conversation: await setConversationStatus(
+        inboxActor(c),
+        c.req.valid("param").id,
+        c.req.valid("json").status,
+      ),
+    }),
+);
+
+inboxRoutes.post("/api/inbox/conversations/:id/read", canRead, queueLimit, validId, async (c) => {
+  await markConversationRead(inboxActor(c), c.req.valid("param").id);
+  return c.json({ ok: true });
+});
+
+inboxRoutes.post(
+  "/api/inbox/messages/:id/media/retry",
+  canRead,
+  mediaRetryLimit,
+  validId,
+  async (c) => {
+    await retryMessageMedia(inboxActor(c), c.req.valid("param").id);
+    return c.json({ ok: true }, 202);
+  },
+);
