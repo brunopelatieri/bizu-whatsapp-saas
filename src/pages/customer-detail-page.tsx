@@ -11,6 +11,7 @@ import {
   useCustomerMutation,
 } from "@/components/app/customers/customers-api";
 import { Can } from "@/components/auth/can";
+import { phoneKindOf, StartConversationButton } from "@/components/inbox/new-conversation-dialog";
 import { DetailRow } from "@/components/detail-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -189,7 +190,12 @@ export function CustomerDetailPage() {
                 <PageTitle title={customer.name} />
                 <CustomerStatusBadge status={customer.status} />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <StartConversationButton
+                  target={{ customerId: customer.id }}
+                  name={customer.name}
+                  phoneKind={phoneKindOf(customer.phoneNormalized)}
+                />
                 <Can resource="customer" action="update">
                   <Button variant="outline" onClick={() => setEditing(true)}>
                     Editar

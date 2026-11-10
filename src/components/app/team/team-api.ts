@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api/client";
+import type { PhoneKind } from "@/lib/phone/br";
 import { useAuth } from "@/providers/auth-provider";
 
 export type TeamMember = {
@@ -10,6 +11,8 @@ export type TeamMember = {
   email: string;
   role: string;
   createdAt: string;
+  /** Tipo do telefone do membro (`null` sem telefone); o número não sai da API. */
+  phoneKind: PhoneKind | null;
 };
 
 export type TeamInvitation = {

@@ -12,6 +12,7 @@ import {
 } from "@/lib/auth/permissions";
 import { releaseAssignments } from "@/lib/inbox/assignment";
 import { inboxCapabilities } from "@/lib/inbox/visibility";
+import { normalizePhone } from "@/lib/phone/br";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Quem está agindo: permissões já resolvidas em `requireTenant`. */
@@ -50,8 +51,12 @@ export function assertKnownRole(catalog: RoleCatalog, role: string) {
   }
 }
 
-export function listMembers(tenantId: string) {
-  return withTenant(tenantId, (tx) =>
+/**
+ * `phoneKind` diz se o membro tem telefone e de que tipo (a tela decide se oferece "Conversar");
+ * o número em si não sai: o servidor o lê pelo `userId` ao iniciar a conversa.
+ */
+export async function listMembers(tenantId: string) {
+  const rows = await withTenant(tenantId, (tx) =>
     tx
       .select({
         id: member.id,
@@ -60,12 +65,18 @@ export function listMembers(tenantId: string) {
         email: user.email,
         role: member.role,
         createdAt: member.createdAt,
+        phoneNormalized: user.phoneNormalized,
       })
       .from(member)
       .innerJoin(user, eq(member.userId, user.id))
       .where(eq(member.organizationId, tenantId))
       .orderBy(asc(member.createdAt)),
   );
+
+  return rows.map(({ phoneNormalized, ...row }) => {
+    const parsed = phoneNormalized ? normalizePhone(`+${phoneNormalized}`) : null;
+    return { ...row, phoneKind: parsed?.ok ? parsed.kind : null };
+  });
 }
 
 /**

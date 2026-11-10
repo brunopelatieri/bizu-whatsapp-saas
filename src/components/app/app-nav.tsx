@@ -1,4 +1,5 @@
 import { NavLink } from "react-router";
+import { useInboxUnread } from "@/components/inbox/inbox-api";
 import {
   appBottomNav,
   appMainNav,
@@ -26,6 +27,9 @@ function NavItem({
   onNavigate?: () => void;
 }) {
   const Icon = item.icon;
+  const unread = useInboxUnread(item.badge === "inbox");
+  // Ponto: há conversa com mensagem nova na fila ou nas minhas (por polling até a C4).
+  const hasUnread = item.badge === "inbox" && (unread.data?.queue ?? 0) + (unread.data?.mine ?? 0) > 0;
 
   return (
     <NavLink
@@ -41,8 +45,19 @@ function NavItem({
         )
       }
     >
-      <Icon className="size-4 shrink-0" />
+      <span className="relative shrink-0">
+        <Icon className="size-4" />
+        {hasUnread && collapsed ? (
+          <span className="absolute -top-1 -right-1 size-2 rounded-full bg-primary" aria-hidden />
+        ) : null}
+      </span>
       {!collapsed ? <span className="truncate">{item.label}</span> : null}
+      {hasUnread ? (
+        <>
+          {collapsed ? null : <span className="ml-auto size-2 rounded-full bg-primary" aria-hidden />}
+          <span className="sr-only">, há mensagens não lidas</span>
+        </>
+      ) : null}
     </NavLink>
   );
 }

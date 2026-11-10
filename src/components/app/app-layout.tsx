@@ -19,6 +19,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { appTitleFromPath } from "@/lib/constants/app-nav";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 const TWO_FACTOR_PATH = "/app/configuracoes/seguranca";
@@ -100,7 +101,15 @@ export function AppLayout() {
           title={title}
         />
         <BillingBanner />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        {/* O atendimento ocupa a altura toda e rola por dentro; as demais telas rolam aqui. */}
+        <main
+          className={cn(
+            "flex-1",
+            pathname.startsWith("/app/atendimento")
+              ? "min-h-0 overflow-hidden"
+              : "overflow-y-auto p-4 sm:p-6",
+          )}
+        >
           <Outlet />
         </main>
       </div>

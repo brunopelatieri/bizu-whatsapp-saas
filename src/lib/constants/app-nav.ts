@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   CreditCard,
   LayoutDashboard,
+  MessagesSquare,
   ScrollText,
   Settings,
   UserCog,
@@ -16,11 +17,20 @@ export type AppNavItem = {
   end?: boolean;
   /** Sem permissão, o item some do menu. A rota da API recusa por conta própria. */
   permission?: Permission;
+  /** Ponto de não lidas ao lado do rótulo (hoje só o atendimento). */
+  badge?: "inbox";
 };
 
 /** Navegação da área do tenant (`/app/**`). */
 export const appMainNav: AppNavItem[] = [
   { href: "/app", label: "Visão geral", icon: LayoutDashboard, end: true },
+  {
+    href: "/app/atendimento",
+    label: "Atendimento",
+    icon: MessagesSquare,
+    permission: "inbox:read",
+    badge: "inbox",
+  },
   {
     href: "/app/clientes",
     label: "Clientes",
@@ -48,6 +58,7 @@ export const appBottomNav: AppNavItem[] = [
 
 export const appTitles: Record<string, string> = {
   "/app": "Visão geral",
+  "/app/atendimento": "Atendimento",
   "/app/clientes": "Clientes",
   "/app/equipe": "Equipe",
   "/app/assinatura": "Assinatura",
@@ -65,6 +76,7 @@ export const appTitles: Record<string, string> = {
 
 export function appTitleFromPath(pathname: string): string {
   if (pathname.startsWith("/app/clientes/")) return "Cliente";
+  if (pathname.startsWith("/app/atendimento/")) return "Atendimento";
 
   return appTitles[pathname] ?? "Visão geral";
 }
