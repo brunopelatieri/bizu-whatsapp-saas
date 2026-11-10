@@ -97,7 +97,9 @@ const endpoints = [
   ["PUT", "/api/custom-fields/order", "custom_field:manage"],
   ["PATCH", `/api/custom-fields/${anyId}`, "custom_field:manage"],
   ["DELETE", `/api/custom-fields/${anyId}`, "custom_field:manage"],
-  // Caixa de entrada: a visibilidade por pessoa está em `inbox-queue.test.ts`.
+  // Caixa de entrada: a visibilidade por pessoa está em `inbox-queue.test.ts`. O SSE
+  // (`GET /api/inbox/events`) não entra aqui (o corpo não termina): sessão, `inbox:read` e o
+  // filtro por pessoa estão em `inbox-realtime.test.ts`.
   ["GET", "/api/inbox/conversations", "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}`, "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}/messages`, "inbox:read"],

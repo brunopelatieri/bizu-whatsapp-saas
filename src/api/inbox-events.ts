@@ -88,12 +88,7 @@ export async function streamInboxEvents(c: Context, actor: InboxActor) {
   }
   openStreams.set(actor.userId, openInboxStreams(actor.userId) + 1);
 
-  // Sem buffer em proxy (Nginx lê `X-Accel-Buffering`; o Caddy já descarrega `text/event-stream`)
-  // e sem transformação (compressão) no caminho.
-  c.header("Cache-Control", "no-cache, no-transform");
-  c.header("X-Accel-Buffering", "no");
-
-  return streamSSE(c, async (stream) => {
+  const response = streamSSE(c, async (stream) => {
     try {
       await new Promise<void>((resolve) => {
         let done = false;
@@ -142,4 +137,10 @@ export async function streamInboxEvents(c: Context, actor: InboxActor) {
       release(actor.userId);
     }
   });
+
+  // Depois do `streamSSE`, que grava o seu `Cache-Control`. Sem buffer em proxy (Nginx lê
+  // `X-Accel-Buffering`; o Caddy já descarrega `text/event-stream`) e sem compressão no caminho.
+  response.headers.set("Cache-Control", "no-cache, no-transform");
+  response.headers.set("X-Accel-Buffering", "no");
+  return response;
 }
