@@ -40,7 +40,10 @@
   `/api/webhooks/whatsapp/evolution/:secret`, mídia de entrada no `StorageProvider`, rotas de criar,
   parear, estado e ciclo de vida, readoção do canal antigo e `qr-channel-dialog.tsx`, ligado à página
   `/app/configuracoes/canais`. **Pendente:** smoke com o servidor Evolution real (QR, código,
-  desconectar no celular) e a medição B0. B4 (plataforma) segue.
+  desconectar no celular) e a medição B0.
+  **B4 parcial:** avisos de canal de todos os escopos em `/api/admin/channel-events` (listar sem
+  `raw`, reprocessar só pelo proprietário) e aba "Canais" em `/admin/webhooks`; faltam
+  `/api/admin/channels/*` e `/admin/configuracoes/canais`.
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

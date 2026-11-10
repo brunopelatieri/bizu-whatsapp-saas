@@ -63,6 +63,7 @@ export type AuditAction =
   // admin-crud B
   | "admin.subscription_updated"
   | "admin.webhook_reprocessed"
+  | "admin.channel_event_reprocessed"
   | "admin.portal_sessions_revoked"
   // admin-crud A
   | "admin.plan_deleted"

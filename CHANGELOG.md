@@ -17,6 +17,10 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   tela `/app/configuracoes/canais` com "Conectar número". Liga-se com `whatsapp_cloud` em
   `CHANNEL_PROVIDERS`; sem migration nova. Módulos de canal passam a declarar webhook, rotas e
   edição em `ChannelModule`. Falta o smoke com conta de teste da Meta.
+- **Avisos de canal no admin** (`docs/specs/whatsapp-canais/spec.md`, fase B4, parte): aba "Canais"
+  em `/admin/webhooks` com os eventos de WhatsApp que falharam, de todas as organizações e da
+  plataforma, e "Reprocessar" para o proprietário (`GET /api/admin/channel-events`,
+  `POST /api/admin/channel-events/:id/reprocess`). A listagem nunca traz o conteúdo do aviso.
 - **Cobrança manual como padrão** (`docs/specs/cobranca-manual/spec.md`): sem módulo de pagamento, o
   proprietário registra em `/admin/tenants/:id` quem pagou e quem não pagou
   (`POST /api/admin/subscriptions/:id/manual-payment` e `.../manual-unpaid`). Preço manual em

@@ -2,7 +2,7 @@
 
 - **Escopo:** números de WhatsApp do tenant e da plataforma: módulos de canal, estado, caixa de avisos dos provedores, jobs de aplicação e de saúde, limites do plano. A caixa de entrada (chat) é de `docs/specs/caixa-de-entrada/`.
 - **Specs relacionadas:** `docs/specs/whatsapp-canais/spec.md` e `prd.md`; programa em `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T3, T8 a T10, T12, T14)
-- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `pairing.ts`, `connection.ts`, `inbound-pairing.ts`, `media.ts`, `send.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/webhooks-channels.ts`, `src/api/webhooks-channels-evolution.ts`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
+- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `pairing.ts`, `connection.ts`, `inbound-pairing.ts`, `media.ts`, `send.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/webhooks-channels.ts`, `src/api/webhooks-channels-evolution.ts`, `src/api/admin-channel-events.ts`, `src/pages/admin/channel-events-tab.tsx`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
 
 ## Estado
 
@@ -12,7 +12,7 @@
 | B1 dados e núcleo | Feito: tabelas, RLS, serviço, avisos, filas, saúde, retenção, rotas comuns (listar, renomear, padrão, remover) |
 | B2 Cloud (rotas, webhook, tela) | Feito: webhook HTTP comum, salvar/editar/endereço/diagnóstico/modelos e a tela `/app/configuracoes/canais`. **Pendente:** smoke com conta de teste da Meta e conferência da `GRAPH_VERSION` contra a conta real |
 | B3 Evolution | **Feito no servidor e no diálogo:** webhook, mídia no `StorageProvider`, rotas de criar/parear/estado/ciclo de vida, readoção, `qr-channel-dialog.tsx`. **Pendente:** smoke com o servidor Evolution real (B0) |
-| B4 plataforma | Pendente (`/api/admin/channels/*`, telas e aba de avisos) |
+| B4 plataforma | **Parcial.** Feito: avisos de todos os escopos em `/api/admin/channel-events` e a aba "Canais" de `/admin/webhooks`. Pendente: `/api/admin/channels/*` e a tela `/admin/configuracoes/canais` |
 
 ## Modelo
 
@@ -197,6 +197,24 @@ QR Code (B3), no mesmo arquivo: `POST /whatsapp-qr` (10 por minuto), `POST /:id/
 `PLAN_LIMIT_REACHED`, 409 `SERVER_LIMIT_REACHED`, 503 `PROVIDER_UNAVAILABLE`, 409 `CHANNEL_DISABLED`,
 409 `CHANNEL_ALREADY_CONNECTED`, 400 `UNSUPPORTED_FOR_CHANNEL` (canal sem pareamento).
 
+### Plataforma: avisos de todos os escopos
+
+`src/api/admin-channel-events.ts` (sub-router próprio, com a cadeia completa `sameOrigin` →
+`jsonBodyLimit` → `authRateLimit` → `requireAuth` → `requirePlatform()`, montado **antes** de
+`adminRoutes` em `app.ts` para a cadeia de `/api/admin/*` não rodar duas vezes):
+
+- `GET /api/admin/channel-events?status&page` (plataforma, suporte incluso): `listChannelEvents`
+  em `withPlatformScope`, 20 por página, do mais novo ao mais antigo. A resposta **nunca** traz `raw`
+  nem `dedupe_key` (telefone e corpo da mensagem); `error` já chega sem dado pessoal
+  (`sanitizeChannelError`).
+- `POST /api/admin/channel-events/:id/reprocess` (`platform_owner` + `blockWhileImpersonating`):
+  `reprocessChannelEvent` trava a linha, só aceita `failed` ou `ignored` (senão 409
+  `NOT_REPROCESSABLE`; id inexistente ou malformado, 404), zera `attempts`, volta a `pending` e
+  enfileira `channel.inbound`; audita `admin.channel_event_reprocessed`.
+
+Tela: aba "Canais" de `/admin/webhooks` (`pages/admin/channel-events-tab.tsx`), que abre nos eventos
+com falha; "Reprocessar" só aparece para `platform_owner`, e quem decide é a API.
+
 ## Segurança
 
 - Segredos cifrados por `sealSecret` com `aad = channel:<id>:<campo>`; só `credentials.ts` decifra, e
@@ -221,6 +239,6 @@ A plataforma não tem limite de plano.
 (webhook e rotas da Cloud pela API: assinatura adulterada 401, repetido não duplica, isolamento entre
 tenants, `app_secret` mantido no `PATCH`, RBAC, 404 de outro tenant, resposta sem segredo), `tests/db/channels-schema.test.ts`
 (três modos de escopo, unicidades, cascata), `channels-service`, `channels-events`, `channels-queue`
-(pg-boss real), `channels-http` e a matriz de `rbac.test.ts`. Da B3, na pasta do módulo (`test:db`):
+(pg-boss real), `channels-http`, `admin-channel-events` (suporte 403, sem `raw`, 409, reenfileira) e a matriz de `rbac.test.ts`. Da B3, na pasta do módulo (`test:db`):
 `webhook.db.test.ts` (cadeia, dedupe, mídia, conexão, readoção) e `routes.db.test.ts` (limites, RBAC,
 404 entre tenants, resposta sem segredo), com servidor Evolution simulado (`db-test-support.ts`).

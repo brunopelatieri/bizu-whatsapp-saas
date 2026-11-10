@@ -299,6 +299,7 @@ describe("rotas de equipe sobre o servidor Node", () => {
     it.each([
       `/api/admin/portal-users/${anyId}/revoke-sessions`,
       `/api/admin/webhooks/${anyId}/reprocess`,
+      `/api/admin/channel-events/${anyId}/reprocess`,
       `/api/admin/subscriptions/${anyId}/cancel`,
       `/api/admin/subscriptions/${anyId}/sync`,
     ])("POST %s sem corpo chega à regra de negócio", async (path) => {

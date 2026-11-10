@@ -4,6 +4,7 @@ paths:
   - "src/db/schema/channels.ts"
   - "src/api/channels.ts"
   - "src/api/webhooks-channels.ts"
+  - "src/api/admin-channel-events.ts"
   - "src/jobs/channels.ts"
   - "src/lib/schemas/channels.ts"
   - "src/components/channels/**"
