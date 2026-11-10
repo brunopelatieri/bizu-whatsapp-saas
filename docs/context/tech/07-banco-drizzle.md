@@ -112,7 +112,8 @@ await withPlatformScope("motivo", (tx) => tx.select().from(auditLog));
 
 Para tabelas que servem o tenant (`/app`) e a plataforma (`/admin`) com o mesmo schema
 (WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Usam `scopedPolicy()`: `tag`,
-`custom_field` e `audit_log` (o evento da plataforma, sem `tenant_id`, grava em `withPlatformData`);
+`custom_field`, `audit_log` (o evento da plataforma, sem `tenant_id`, grava em `withPlatformData`),
+as tabelas de canal, as da caixa de entrada e `file`;
 usam `platformOnlyPolicy()`: `organization_tag` e `organization_profile` (A4, anotação da plataforma
 sobre a organização; o owner nunca as alcança).
 
@@ -196,11 +197,21 @@ usa `SEED_PASSWORD`. Conteúdo e regras em `tech/23-billing-planos.md`. Roda com
 Colunas `*_enc` guardam o texto de `encryptSecret`. Teste: `tests/db/channels-schema.test.ts`.
 Detalhes em `tech/29-canais-whatsapp.md`.
 
+## Tabelas da caixa de entrada
+
+`chat_contact`, `chat_contact_identity`, `conversation` e `message` (`src/db/schema/inbox.ts`):
+`tenant_id` anulável, `scopedPolicy()` e `FORCE` (migrations `0032_caixa_de_entrada` e
+`0033_rls_caixa_de_entrada`). `conversation.channel_id` é `restrict` e imutável (gatilho
+`conversation_channel_immutable`, erro `23514`). A `0032` também troca a política de `file` para
+`scopedPolicy()` e torna `file.tenant_id` anulável: o Drizzle Kit pergunta, sem TTY, se a política foi
+renomeada; a migration foi gerada em duas passadas (criar a nova, depois apagar a antiga) e unida.
+Detalhes em `tech/30-caixa-de-entrada.md`.
+
 ## Tabelas da fase 10
 
 - `consent_log` (sem tenant, sem RLS): aceite e recusa por `subject_type`/`subject_id`, `kind`, `version`, hash de IP.
 - `deletion_request` e `data_export` (RLS forçado; `tenant_id` nulo para pedidos de pessoa, que só se leem com `withPlatformScope`): índices únicos parciais garantem **um pendente por assunto**.
-- `file` (tenant, RLS forçado): metadados do módulo de arquivos; `key` única.
+- `file` (RLS forçado, `scopedPolicy()` desde a `0032`; `tenant_id` nulo = mídia da plataforma): metadados do módulo de arquivos; `key` única.
 - Migrations `0017_arquivos` e `0018_lgpd`, ambas com `FORCE ROW LEVEL SECURITY` e `GRANT` no fim do SQL, como `0015`.
 - `0019_leitura_migracoes_runtime` dá ao `bizu_app` leitura de `drizzle.__drizzle_migrations`: `src/db/schema-status.ts` compara o registro mais recente com o último `when` do journal, que entra no bundle. Na subida em produção, faltar migration encerra o processo (`tech/14-deploy.md`); banco à frente do build é normal.
 - `platform_setting` ganha `dpo_email` e `audit_retention_days`.

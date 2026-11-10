@@ -57,6 +57,8 @@ describe("webhook da Evolution", () => {
     owner = connectOwner();
     tenantA = await createTenantRow(owner, "evo-a");
     tenantB = await createTenantRow(owner, "evo-b");
+    // A camada de canais sem a caixa de entrada; a ingestão real é de `inbox.db.test.ts`.
+    setInboxHandlers({});
   });
 
   beforeEach(() => {
@@ -83,6 +85,7 @@ describe("webhook da Evolution", () => {
   });
 
   afterAll(async () => {
+    setInboxHandlers(undefined);
     await cleanUpChannels(owner, [tenantA, tenantB]);
     await owner.end();
   });

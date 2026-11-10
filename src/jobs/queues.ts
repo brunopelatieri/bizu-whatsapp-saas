@@ -29,6 +29,8 @@ export const QUEUE = {
   channelInboundDead: "channel.inbound.dead",
   channelHealth: "channel.health",
   channelHealthDead: "channel.health.dead",
+  inboxMedia: "inbox.media",
+  inboxMediaDead: "inbox.media.dead",
 } as const;
 
 /** Payload de `lgpd.export`: o pedido fica em `data_export`, a fila só leva o id. */
@@ -46,7 +48,14 @@ export type WebhookProcessJob = { paymentEventId: string };
 /** Payload de `channel.inbound`: o aviso fica em `channel_event`, a fila só leva o id. */
 export type ChannelInboundJob = { channelEventId: string };
 
+/**
+ * Payload de `inbox.media`: a mensagem fica em `message` (`media_status = pending`); o tenant
+ * (`null` na plataforma) só escolhe o escopo da transação, o RLS confere o resto.
+ */
+export type InboxMediaJob = { messageId: string; tenantId: string | null };
+
 export const EMAIL_RETRY_LIMIT = 5;
+export const INBOX_MEDIA_RETRY_LIMIT = 4;
 export const CHANNEL_INBOUND_RETRY_LIMIT = 5;
 export const WEBHOOK_RETRY_LIMIT = 5;
 
@@ -90,6 +99,7 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.lgpdDeleteDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.channelInboundDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.inboxMediaDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
     options: {
@@ -180,6 +190,21 @@ export const queueDefinitions: QueueDefinition[] = [
       expireInSeconds: 600,
       deleteAfterSeconds: 24 * 3600,
       deadLetter: QUEUE.channelHealthDead,
+    },
+  },
+  {
+    // `exclusive`: um job vivo por mensagem (`singletonKey` = `message.id`). 4 tentativas, de
+    // 1 min a 1 h; na última, a mensagem fica `media_status = failed` ("Tentar de novo" na tela).
+    name: QUEUE.inboxMedia,
+    options: {
+      policy: "exclusive",
+      retryLimit: INBOX_MEDIA_RETRY_LIMIT,
+      retryDelay: 60,
+      retryBackoff: true,
+      retryDelayMax: 3600,
+      expireInSeconds: 300,
+      deleteAfterSeconds: 7 * 24 * 3600,
+      deadLetter: QUEUE.inboxMediaDead,
     },
   },
 ];

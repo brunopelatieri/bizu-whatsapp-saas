@@ -10,6 +10,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C1** (`docs/specs/caixa-de-entrada/spec.md`): tabelas `chat_contact`,
+  `chat_contact_identity`, `conversation` e `message` (tenant e plataforma, `scopedPolicy()`), e a
+  ingestão das mensagens e dos status de WhatsApp recebidos pelos canais: contato por telefone (com e
+  sem o 9º dígito), vínculo automático com membro ou cliente só quando há um só, conversa encerrada
+  que volta à fila sem dono, mensagem enviada pelo celular (canal por QR Code) e o job `inbox.media`,
+  que baixa a mídia da Cloud API e confere o tipo pelo conteúdo. Ainda sem API nem tela (C2 e C3).
+  **Migração:** `npm run db:migrate` (`0032` e `0033`); `file.tenant_id` passa a anulável com
+  `scopedPolicy()`, e quem lia `file` fora de `withTenant` precisa filtrar o escopo. Quem desligava a
+  caixa de entrada nos testes com `setInboxHandlers({})` segue igual; `undefined` agora liga a
+  ingestão real.
+
 - **WhatsApp Cloud (fase B2 de `docs/specs/whatsapp-canais/spec.md`)**: webhook por canal em
   `/api/webhooks/whatsapp/cloud/:key` (`GET` de verificação e `POST` assinado com o segredo do
   aplicativo daquele canal), rotas `POST /api/channels/whatsapp-cloud`, `PATCH /api/channels/:id`,

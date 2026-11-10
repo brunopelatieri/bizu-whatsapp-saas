@@ -25,8 +25,9 @@ Cinco tabelas, todas com `tenant_id` anulável (`NULL` = plataforma), `scopedPol
 - Um padrão por escopo e tipo (índice único parcial; a plataforma tem o próprio, porque dois nulos
   não são iguais). Eleição em `electDefault`: o conectado mais antigo.
 - Remover = apagar sem conversas, **desativar** com conversas (`status = disabled`, `_enc` nulos,
-  sem padrão). Até a caixa de entrada (C1), `channelHasConversations` devolve `false`;
-  `setConversationCheck` troca o corpo.
+  sem padrão). `channelHasConversations` consulta `conversation` por `src/lib/inbox/channel-usage.ts`
+  (o `restrict` de `conversation.channel_id` é a rede de segurança); `setConversationCheck` simula
+  nos testes.
 
 ## Módulos e registro
 
@@ -62,7 +63,9 @@ O webhook **grava e enfileira**; quem aplica é `channel.inbound`:
 2. `enqueueChannelEvent` manda `{ channelEventId }` (`exclusive`, `singletonKey` = id).
 3. `processChannelEvent` trava a linha, normaliza com o módulo e aplica dentro de `withScope`:
    `connection` (estado, telefone, JID) e `template` (status de modelo já existente); `message` e
-   `status` vão a `setInboxHandlers` (C1) e, sem ele, ficam `ignored`.
+   `status` vão à ingestão da caixa de entrada (`src/lib/inbox/ingest.ts`, `tech/30-caixa-de-entrada.md`),
+   com a lista `after` para o que roda depois do commit. `setInboxHandlers({})` a desliga nos testes da
+   camada de canais (o aviso fica `ignored`); `undefined` volta à real.
 4. Falha soma `attempts` e guarda o erro **sem telefone nem e-mail** (`sanitizeChannelError`); na
    última tentativa vira `failed` e o job vai para `channel.inbound.dead`.
 
@@ -118,7 +121,9 @@ só o módulo com a capacidade `pairing` implementa. As rotas são do módulo
   grava estado, telefone e JID e audita `channel.connected`/`channel.disconnected` só na passagem. Se o
   telefone que conectou já tem um canal por QR **não conectado no mesmo escopo** (desativado ou caído),
   a instância nova passa para o canal antigo (segredos recifrados: o `aad` leva o id), os avisos
-  pendentes seguem junto e o canal novo é apagado. Para quem consulta o canal novo, `status` responde
+  pendentes seguem junto e o canal novo é apagado. Canal novo que **já tem conversa** (mensagem
+  aplicada antes do aviso de conexão) não é readotado: o histórico não muda de número
+  (`conversation.channel_id` é imutável e `restrict`), e ele conecta como canal próprio. Para quem consulta o canal novo, `status` responde
   404 (ou `readoptedInto`): a tela trata como conectado.
 - **Envio** (`send.ts`): canal que não está `connected` responde 409 `CHANNEL_NOT_CONNECTED` antes de
   chamar o provedor; 401/403 do provedor marca o canal `error`.
@@ -145,7 +150,8 @@ antes de gravar (em qualquer nível): `channel_event.raw` não guarda segredo.
   por `application/octet-stream`. **Quem servir esses objetos (C1) deve mandar `Content-Disposition:
   attachment` ou restringir os tipos**, e validar a referência com `isStoredMedia`.
 - Aviso `ignored` ou `failed` definitivo apaga o objeto. Reprocessar um aviso assim não recupera a
-  mídia. O objeto de aviso `processed` é da caixa de entrada (C1), que ainda não o referencia.
+  mídia. O objeto de aviso `processed` é da caixa de entrada, que o referencia em `file`
+  (`tech/30-caixa-de-entrada.md`).
 
 ### Tela
 

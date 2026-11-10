@@ -13,3 +13,4 @@ export * from "./schema/files";
 export * from "./schema/lgpd";
 export * from "./schema/channels";
 export * from "./schema/crm";
+export * from "./schema/inbox";

@@ -7,22 +7,24 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { tenantPolicy } from "../tenant-policy";
+import { scopedPolicy } from "../tenant-policy";
 import { user } from "./auth";
 import { organization } from "./tenant";
 
 /**
  * Metadados dos arquivos do módulo de arquivos. O conteúdo fica no `StorageProvider`, sob `key`
  * (aleatória; o nome original só existe aqui). `owner_type`/`owner_id` dizem a quem o arquivo
- * pertence no domínio do projeto (ex.: `customer`); o núcleo não confere que o dono existe.
+ * pertence no domínio do projeto (ex.: `customer`, `message`); o núcleo não confere que o dono
+ * existe.
+ *
+ * `tenant_id` nulo é arquivo da plataforma (mídia do atendimento em `/admin`, `scopedPolicy()`):
+ * `withTenant` nunca o lê, e só `withPlatformData` o grava.
  */
 export const file = pgTable(
   "file",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => organization.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
     ownerType: text("owner_type").notNull().default("tenant"),
     ownerId: uuid("owner_id"),
     key: text("key").notNull(),
@@ -44,6 +46,6 @@ export const file = pgTable(
       table.ownerType,
       table.ownerId,
     ),
-    tenantPolicy(),
+    scopedPolicy(),
   ],
 ).enableRLS();

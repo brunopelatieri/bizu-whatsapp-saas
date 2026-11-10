@@ -15,6 +15,7 @@ import { ChannelNotConfiguredError, PermanentEventError } from "@/lib/channels/e
 import { logChannelError, sanitizeChannelError } from "@/lib/channels/log";
 import { deleteInboundMedia, storeInboundMedia } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
+import { inboxHandlers as defaultInboxHandlers } from "@/lib/inbox/ingest";
 import type {
   ChannelEventKind,
   ChannelEventStatus,
@@ -110,17 +111,32 @@ export function setChannelQueueForTests(next: Enqueue | undefined) {
 // Aplicação (job)
 // ---------------------------------------------------------------------------
 
-/** `message` e `status` são da caixa de entrada (C1): até lá ficam `ignored`. */
+/** `message` e `status` são da caixa de entrada (`src/lib/inbox/ingest.ts`). */
 export type InboxHandlers = {
-  message?: (tx: Tx, scope: Scope, target: ChannelRow, event: NormalizedMessage) => Promise<boolean>;
-  status?: (tx: Tx, scope: Scope, target: ChannelRow, event: NormalizedStatus) => Promise<boolean>;
+  message?: (
+    tx: Tx,
+    scope: Scope,
+    target: ChannelRow,
+    event: NormalizedMessage,
+    after?: AfterCommit,
+  ) => Promise<boolean>;
+  status?: (
+    tx: Tx,
+    scope: Scope,
+    target: ChannelRow,
+    event: NormalizedStatus,
+    after?: AfterCommit,
+  ) => Promise<boolean>;
 };
 
-let inboxHandlers: InboxHandlers = {};
+let inboxHandlers: InboxHandlers = defaultInboxHandlers;
 
-/** A caixa de entrada registra aqui como aplica mensagens e status. */
-export function setInboxHandlers(next: InboxHandlers) {
-  inboxHandlers = next;
+/**
+ * Os testes trocam os tratadores: `{}` desliga a caixa de entrada (o aviso fica `ignored`),
+ * `undefined` volta à ingestão real.
+ */
+export function setInboxHandlers(next: InboxHandlers | undefined) {
+  inboxHandlers = next ?? defaultInboxHandlers;
 }
 
 /**
@@ -232,8 +248,8 @@ export async function applyChannelEvent(
       if (!target || target.status === "disabled") return false;
 
       const handler = event.type === "message" ? inboxHandlers.message : inboxHandlers.status;
-      // Sem a caixa de entrada, o aviso fica `ignored`: nada é aplicado.
-      return handler ? handler(tx, scope, target, event as never) : false;
+      // Sem tratador (só em teste), o aviso fica `ignored`: nada é aplicado.
+      return handler ? handler(tx, scope, target, event as never, after) : false;
     }
   }
 }

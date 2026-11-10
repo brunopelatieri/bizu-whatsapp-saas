@@ -34,6 +34,8 @@ describe("avisos da Meta pelo job", () => {
     owner = connectOwner();
     tenantA = await createTenantRow(owner, "cloud-a");
     tenantB = await createTenantRow(owner, "cloud-b");
+    // A camada de canais sem a caixa de entrada; a ingestão real é de `inbox.db.test.ts`.
+    setInboxHandlers({});
   });
 
   afterEach(async () => {
@@ -46,6 +48,7 @@ describe("avisos da Meta pelo job", () => {
   });
 
   afterAll(async () => {
+    setInboxHandlers(undefined);
     await cleanUpChannels(owner, [tenantA, tenantB]);
     await owner.end();
   });
@@ -64,7 +67,7 @@ describe("avisos da Meta pelo job", () => {
     (await withPlatformScope("teste", (tx) => tx.select().from(channelEvent).where(eq(channelEvent.id, id))))[0]
       ?.status;
 
-  it("mensagem fica ignored enquanto a caixa de entrada não existe", async () => {
+  it("mensagem fica ignored sem tratador da caixa de entrada", async () => {
     const seeded = await seedCloudChannel(tenantScope(tenantA), { phoneNumberId: "200000000000001" });
     setProvidersForTests([createCloudProvider()]);
     const { id } = await receive(seeded, fixture("cloud/message-text"));

@@ -1,0 +1,186 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { type Scope, scopeTenantId, type Tx } from "@/db/rls";
+import { chatContact, chatContactIdentity, customer, member, user } from "@/db/schema";
+import type { ChatContactOrigin } from "@/lib/inbox/constants";
+import { normalizePhone } from "@/lib/phone/br";
+
+/**
+ * Quem escreve no WhatsApp (`chat_contact`, plano T4). O contato é achado pela `phone_key` (o
+ * celular sem o 9º dígito), então o número com e sem o 9 é um contato só. O vínculo automático
+ * com `user` ou `customer` só acontece com correspondência **única**; o resto é manual (C2).
+ */
+
+/** O suficiente para tratar um telefone de provedor; nunca vira resposta de API. */
+export type ProviderPhone = { phone: string; phoneKey: string };
+
+/**
+ * Telefone como o provedor entregou (só dígitos, com DDI, sem `+`). O `+` é acrescentado para a
+ * regra do Brasil só valer com DDI `55`: sem ele, um número estrangeiro de 10 ou 11 dígitos seria
+ * lido como DDD + número. Número que o normalizador recusa ainda é um contato (o provedor o
+ * entregou): fica com os próprios dígitos como chave.
+ */
+export function providerPhone(raw: string | null | undefined): ProviderPhone | null {
+  const digits = raw?.replace(/\D/g, "") ?? "";
+  if (digits.length < 6 || digits.length > 20) return null;
+
+  const result = normalizePhone(`+${digits}`);
+  return result.ok ? { phone: result.phone, phoneKey: result.key } : { phone: digits, phoneKey: digits };
+}
+
+const scopeFilter = (scope: Scope) =>
+  scope.kind === "tenant"
+    ? eq(chatContact.tenantId, scope.tenantId)
+    : isNull(chatContact.tenantId);
+
+export type ContactRow = typeof chatContact.$inferSelect;
+
+/** Contato do escopo com a mesma `phone_key` (o número com ou sem o 9º dígito). */
+export async function findContactByPhoneKey(tx: Tx, scope: Scope, phoneKey: string) {
+  const [row] = await tx
+    .select()
+    .from(chatContact)
+    .where(and(scopeFilter(scope), eq(chatContact.phoneKey, phoneKey)));
+  return row ?? null;
+}
+
+/** Contato que já mostrou este LID junto com o telefone. Sem ele, a mensagem é descartada. */
+export async function findContactByLid(tx: Tx, scope: Scope, lid: string) {
+  const [row] = await tx
+    .select({ contact: chatContact })
+    .from(chatContactIdentity)
+    .innerJoin(chatContact, eq(chatContact.id, chatContactIdentity.contactId))
+    .where(
+      and(
+        scope.kind === "tenant"
+          ? eq(chatContactIdentity.tenantId, scope.tenantId)
+          : isNull(chatContactIdentity.tenantId),
+        eq(chatContactIdentity.kind, "lid"),
+        eq(chatContactIdentity.value, lid),
+      ),
+    );
+  return row?.contact ?? null;
+}
+
+/** Grava o LID do contato. O mesmo LID já ligado a outro contato fica como estava. */
+export async function rememberLid(tx: Tx, scope: Scope, contactId: string, lid: string) {
+  const values = { tenantId: scopeTenantId(scope), contactId, kind: "lid" as const, value: lid };
+
+  await (scope.kind === "tenant"
+    ? tx
+        .insert(chatContactIdentity)
+        .values(values)
+        .onConflictDoNothing({
+          target: [chatContactIdentity.tenantId, chatContactIdentity.kind, chatContactIdentity.value],
+        })
+    : tx
+        .insert(chatContactIdentity)
+        .values(values)
+        .onConflictDoNothing({
+          target: [chatContactIdentity.kind, chatContactIdentity.value],
+          where: sql`tenant_id is null`,
+        }));
+}
+
+/**
+ * Acha ou cria o contato pela `phone_key`, em um comando (duas mensagens simultâneas do mesmo
+ * número não criam dois). `waName` atualiza o nome do perfil quando vem; `inserted` diz se nasceu
+ * agora (só então há vínculo automático).
+ */
+export async function upsertContact(
+  tx: Tx,
+  scope: Scope,
+  input: ProviderPhone & { waName: string | null; createdVia: ChatContactOrigin },
+) {
+  const values = {
+    tenantId: scopeTenantId(scope),
+    phone: input.phone,
+    phoneKey: input.phoneKey,
+    waName: input.waName,
+    createdVia: input.createdVia,
+  };
+  const set = {
+    waName: sql`coalesce(excluded.wa_name, ${chatContact.waName})`,
+    updatedAt: sql`now()`,
+  };
+  // `xmax = 0` só na linha recém-inserida: no `DO UPDATE` ela carrega a transação que atualizou.
+  const returning = { id: chatContact.id, inserted: sql<boolean>`(xmax = 0)` };
+
+  const [row] = await (scope.kind === "tenant"
+    ? tx
+        .insert(chatContact)
+        .values(values)
+        .onConflictDoUpdate({ target: [chatContact.tenantId, chatContact.phoneKey], set })
+        .returning(returning)
+    : tx
+        .insert(chatContact)
+        .values(values)
+        .onConflictDoUpdate({
+          target: chatContact.phoneKey,
+          targetWhere: sql`tenant_id is null`,
+          set,
+        })
+        .returning(returning));
+  if (!row) throw new Error("Contato não gravado.");
+
+  return row;
+}
+
+/**
+ * Quem tem a mesma `phone_key` no escopo: membros ativos do tenant (ou usuários, na plataforma) e
+ * clientes do tenant. Base do vínculo automático e da lista de candidatos do painel (C2). A
+ * plataforma nunca consulta `customer` de tenant (decisão do proprietário).
+ */
+export async function linkCandidates(tx: Tx, scope: Scope, phoneKey: string, limit = 20) {
+  const users =
+    scope.kind === "tenant"
+      ? await tx
+          .select({ id: user.id, name: user.name })
+          .from(member)
+          .innerJoin(user, eq(user.id, member.userId))
+          .where(
+            and(
+              eq(member.organizationId, scope.tenantId),
+              eq(user.phoneKey, phoneKey),
+              eq(user.banned, false),
+            ),
+          )
+          .orderBy(user.name)
+          .limit(limit)
+      : await tx
+          .select({ id: user.id, name: user.name })
+          .from(user)
+          .where(and(eq(user.phoneKey, phoneKey), eq(user.banned, false)))
+          .orderBy(user.name)
+          .limit(limit);
+
+  const customers =
+    scope.kind === "tenant"
+      ? await tx
+          .select({ id: customer.id, name: customer.name, phone: customer.phoneNormalized })
+          .from(customer)
+          .where(and(eq(customer.tenantId, scope.tenantId), eq(customer.phoneKey, phoneKey)))
+          .limit(limit)
+      : [];
+
+  return { users, customers };
+}
+
+/**
+ * Vínculo automático do contato recém-criado, nesta ordem e só com correspondência única: membro
+ * ativo da equipe (no tenant) ou usuário (na plataforma); depois cliente do tenant. Dois membros
+ * com o mesmo número (o da empresa) deixam o contato sem `user` e o painel mostra os candidatos.
+ */
+export async function autoLinkContact(tx: Tx, scope: Scope, contactId: string, phoneKey: string) {
+  const { users, customers } = await linkCandidates(tx, scope, phoneKey, 2);
+
+  const link =
+    users.length === 1 && users[0]
+      ? { userId: users[0].id }
+      : customers.length === 1 && customers[0]
+        ? { customerId: customers[0].id }
+        : null;
+  if (!link) return null;
+
+  await tx.update(chatContact).set(link).where(eq(chatContact.id, contactId));
+  return link;
+}
