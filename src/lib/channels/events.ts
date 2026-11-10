@@ -4,17 +4,17 @@ import { type Scope, type Tx, withPlatformScope, withScope } from "@/db/rls";
 import {
   channel,
   channelEvent,
-  channelEvolution,
   channelWhatsappCloud,
   messageTemplate,
   organization,
 } from "@/db/schema";
 import { getBoss } from "@/jobs/boss";
 import { type ChannelInboundJob, QUEUE } from "@/jobs/queues";
-import { ChannelNotConfiguredError } from "@/lib/channels/errors";
+import { type AfterCommit, applyConnectionState } from "@/lib/channels/connection";
+import { ChannelNotConfiguredError, PermanentEventError } from "@/lib/channels/errors";
 import { logChannelError, sanitizeChannelError } from "@/lib/channels/log";
+import { deleteInboundMedia, storeInboundMedia } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
-import { applyChannelStatus } from "@/lib/channels/service";
 import type {
   ChannelEventKind,
   ChannelEventStatus,
@@ -159,22 +159,18 @@ async function resolveTarget(
   return row?.channel ?? null;
 }
 
-async function applyConnection(tx: Tx, target: ChannelRow, event: NormalizedConnection) {
-  await applyChannelStatus(tx, target.id, {
-    status: event.status,
-    detail: event.detail,
-    identifier: event.phone,
+/** Estado, telefone conectado e readoção do canal antigo: `connection.ts`. */
+async function applyConnection(
+  tx: Tx,
+  scope: Scope,
+  target: ChannelRow,
+  event: NormalizedConnection,
+  after: AfterCommit | undefined,
+) {
+  await applyConnectionState(tx, scope, target, event, {
+    after,
+    destroyRemote: findProvider(target.type)?.destroy,
   });
-
-  if (event.phone || event.jid) {
-    await tx
-      .update(channelEvolution)
-      .set({
-        ...(event.phone ? { connectedPhone: event.phone } : {}),
-        ...(event.jid ? { connectedJid: event.jid } : {}),
-      })
-      .where(eq(channelEvolution.channelId, target.id));
-  }
 
   return true;
 }
@@ -222,10 +218,12 @@ export async function applyChannelEvent(
   scope: Scope,
   origin: ChannelRow,
   event: NormalizedEvent,
+  /** Trabalho para depois do commit (apagar instância que sobrou, auditoria da plataforma). */
+  after?: AfterCommit,
 ): Promise<boolean> {
   switch (event.type) {
     case "connection":
-      return applyConnection(tx, origin, event);
+      return applyConnection(tx, scope, origin, event, after);
     case "template":
       return applyTemplate(tx, scope, event);
     case "message":
@@ -240,7 +238,7 @@ export async function applyChannelEvent(
   }
 }
 
-type Outcome = "processed" | "ignored" | "skipped";
+type Outcome = "processed" | "ignored" | "skipped" | "failed";
 
 async function tenantIsActive(tenantId: string) {
   const [row] = await getDb()
@@ -251,13 +249,15 @@ async function tenantIsActive(tenantId: string) {
   return row?.status === "active";
 }
 
-async function markIgnored(id: string, reason: string, now: Date) {
+/** Aviso descartado não deixa mídia para trás no armazenamento. */
+async function markIgnored(id: string, reason: string, now: Date, raw: unknown) {
   await withPlatformScope("channel.inbound: ignora aviso", (tx) =>
     tx
       .update(channelEvent)
       .set({ status: "ignored", error: reason, processedAt: now })
       .where(and(eq(channelEvent.id, id), eq(channelEvent.status, "pending"))),
   );
+  await deleteInboundMedia(raw);
 }
 
 /**
@@ -284,21 +284,49 @@ export async function processChannelEvent(
 
   try {
     if (origin.status === "disabled") {
-      await markIgnored(id, "canal desativado", now);
+      await markIgnored(id, "canal desativado", now, event.raw);
       return "ignored";
     }
     // Organização suspensa ou em exclusão: o webhook segue recebendo, mas nada é aplicado.
     if (origin.tenantId && !(await tenantIsActive(origin.tenantId))) {
-      await markIgnored(id, "organização inativa", now);
+      await markIgnored(id, "organização inativa", now, event.raw);
       return "ignored";
     }
 
     const provider = findProvider(origin.type);
     if (!provider) throw new ChannelNotConfiguredError(origin.type);
 
-    const normalized = provider.normalizeEvents(event.raw);
+    // Mídia citada por endereço: baixada e gravada antes de normalizar. O `raw` é atualizado
+    // já aqui, para um retry não baixar de novo.
+    let raw = event.raw;
+    if (provider.resolveInboundMedia) {
+      const media = await provider.resolveInboundMedia(raw, storeInboundMedia);
 
-    return await withScope(scope, async (tx) => {
+      if (media.outcome === "ignored") {
+        await markIgnored(id, media.reason, now, raw);
+        return "ignored";
+      }
+      if (media.outcome === "stored") {
+        raw = media.raw;
+        const saved = await withPlatformScope("channel.inbound: grava mídia", (tx) =>
+          tx
+            .update(channelEvent)
+            .set({ raw })
+            .where(and(eq(channelEvent.id, id), eq(channelEvent.status, "pending")))
+            .returning({ id: channelEvent.id }),
+        );
+        // Outro job terminou o aviso enquanto baixávamos: o objeto recém-gravado é só nosso.
+        if (saved.length === 0) {
+          await deleteInboundMedia(raw);
+          return "skipped";
+        }
+      }
+    }
+
+    const normalized = provider.normalizeEvents(raw);
+    const after: AfterCommit = [];
+
+    const outcome = await withScope(scope, async (tx) => {
       // Dois jobs do mesmo aviso: o segundo espera aqui e encontra o trabalho feito.
       const [current] = await tx
         .select({ status: channelEvent.status })
@@ -309,7 +337,7 @@ export async function processChannelEvent(
 
       let applied = false;
       for (const item of normalized) {
-        applied = (await applyChannelEvent(tx, scope, origin, item)) || applied;
+        applied = (await applyChannelEvent(tx, scope, origin, item, after)) || applied;
       }
 
       const status: ChannelEventStatus = applied ? "processed" : "ignored";
@@ -320,25 +348,40 @@ export async function processChannelEvent(
 
       return status;
     });
+
+    if (outcome === "ignored") await deleteInboundMedia(raw);
+    for (const effect of after) {
+      await effect().catch((error) => logChannelError("Falha em tarefa pós-aviso de canal", error));
+    }
+
+    return outcome;
   } catch (error) {
-    await recordFailure(id, error, options.lastAttempt ?? false);
+    // Definitivo (mídia vencida, endereço sem acesso): fecha o aviso agora, sem retry.
+    const permanent = error instanceof PermanentEventError;
+
+    await recordFailure(id, error, permanent || (options.lastAttempt ?? false));
+    if (permanent) return "failed";
     throw error;
   }
 }
 
 async function recordFailure(id: string, error: unknown, lastAttempt: boolean) {
   try {
-    await withPlatformScope("channel.inbound: marca falha", (tx) =>
+    const [row] = await withPlatformScope("channel.inbound: marca falha", (tx) =>
       tx
         .update(channelEvent)
         .set({
           attempts: sql`${channelEvent.attempts} + 1`,
           error: sanitizeChannelError(error),
           // Só a última tentativa fecha o aviso; as outras o deixam para o retry.
-          ...(lastAttempt ? { status: "failed" as const } : {}),
+          ...(lastAttempt ? { status: "failed" as const, processedAt: new Date() } : {}),
         })
-        .where(eq(channelEvent.id, id)),
+        .where(eq(channelEvent.id, id))
+        .returning({ raw: channelEvent.raw }),
     );
+
+    // `failed` definitivo: a mídia do aviso sai do armazenamento.
+    if (lastAttempt && row) await deleteInboundMedia(row.raw);
   } catch (writeError) {
     logChannelError("Falha ao registrar erro de aviso de canal", writeError);
   }

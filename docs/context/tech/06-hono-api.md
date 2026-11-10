@@ -127,6 +127,16 @@ corpo cru (401; chave desconhecida responde igual; 429 após 20 falhas por IP no
 do teto do módulo), grava `channel_event` e enfileira `channel.inbound`. Ver
 `tech/29-canais-whatsapp.md`.
 
+- **QR Code (B3):** `POST /api/channels/whatsapp-qr`, `POST /:id/qr`, `/:id/pair`, `GET /:id/status`,
+  `POST /:id/disconnect`, `/logout`, `/reconnect` e `PATCH /:id/advanced-settings`. Limite de taxa
+  **por usuário** (`key` = id do usuário): criar 10, QR e código 15, estado 30, demais 30 por minuto.
+  QR e código saem com `Cache-Control: no-store`. A regra de negócio está em
+  `src/lib/channels/pairing.ts`; a rota só monta escopo, ator e validação.
+- **Webhook da Evolution:** `src/api/webhooks-channels-evolution.ts` exporta `evolutionWebhooks`
+  (`POST /api/webhooks/whatsapp/evolution/:secret`), montado em `app.ts` junto dos outros webhooks,
+  antes do `csrfGuard`. `bodyLimit` de 25 MB, 401 sem detalhe, `failureLimit` de 20 por IP por minuto.
+  O webhook da Cloud (B2) fica em `webhooks-channels.ts`.
+
 ## LGPD, arquivos e logs (fase 10)
 
 - `src/api/lgpd.ts` (`lgpdRoutes`, `portalLgpdRoutes`): exportação (`/api/me/export`, `/api/portal/me/export`), exclusão (`DELETE /api/me`, `DELETE /api/portal/me`) e cancelamento. `DELETE /api/tenant` e `POST /api/tenant/deletion/cancel` ficam em `src/api/tenant.ts`; `GET/POST /api/me/consent*` em `src/api/me.ts`.

@@ -2,7 +2,7 @@
 
 - **Escopo:** números de WhatsApp do tenant e da plataforma: módulos de canal, estado, caixa de avisos dos provedores, jobs de aplicação e de saúde, limites do plano. A caixa de entrada (chat) é de `docs/specs/caixa-de-entrada/`.
 - **Specs relacionadas:** `docs/specs/whatsapp-canais/spec.md` e `prd.md`; programa em `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T3, T8 a T10, T12, T14)
-- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/webhooks-channels.ts`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
+- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `pairing.ts`, `connection.ts`, `inbound-pairing.ts`, `media.ts`, `send.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/webhooks-channels.ts`, `src/api/webhooks-channels-evolution.ts`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
 
 ## Estado
 
@@ -11,7 +11,7 @@
 | B0 medição | **Pendente.** Fixtures simuladas a partir da origem (`tests/fixtures/channels/README.md`); falta capturar da Meta e da Evolution reais |
 | B1 dados e núcleo | Feito: tabelas, RLS, serviço, avisos, filas, saúde, retenção, rotas comuns (listar, renomear, padrão, remover) |
 | B2 Cloud (rotas, webhook, tela) | Feito: webhook HTTP comum, salvar/editar/endereço/diagnóstico/modelos e a tela `/app/configuracoes/canais`. **Pendente:** smoke com conta de teste da Meta e conferência da `GRAPH_VERSION` contra a conta real |
-| B3 Evolution | Módulo puro pronto (`client`, `instances`, `webhook`, `normalize`); faltam rotas, mídia no `StorageProvider`, readoção e a tela |
+| B3 Evolution | **Feito no servidor e no diálogo:** webhook, mídia no `StorageProvider`, rotas de criar/parear/estado/ciclo de vida, readoção, `qr-channel-dialog.tsx`. **Pendente:** smoke com o servidor Evolution real (B0) |
 | B4 plataforma | Pendente (`/api/admin/channels/*`, telas e aba de avisos) |
 
 ## Modelo
@@ -94,6 +94,65 @@ Montado em `app.ts` antes do `csrfGuard`, fora de `sameOrigin`. Um fluxo para to
 canal, em tempo constante → 200 `text/plain` com o desafio e `webhook_verified_at` gravado; senão
 403, igual para chave desconhecida e token errado.
 
+## Canal por QR Code (Evolution Go, B3)
+
+O núcleo não conhece a Evolution: fala com `provider.pairing` (`PairingOperations` em `types.ts`), que
+só o módulo com a capacidade `pairing` implementa. Sem o módulo em `CHANNEL_PROVIDERS`, toda rota
+abaixo responde 503 `PROVIDER_UNAVAILABLE`.
+
+- **Criar** (`pairing.ts`, `createPairingChannel`): teto do servidor (`EVOLUTION_MAX_INSTANCES_TOTAL`,
+  o maior entre o que o servidor lista e os canais locais de todos os escopos) → limite do plano →
+  instância no servidor (token nosso, `randomUUID`) → transação (`lockScopeType`, limite de novo,
+  `channel` em `connecting`, `channel_evolution` com token e segredo cifrados). Transação que falha
+  apaga a instância.
+- **Parear:** `POST /:id/qr` registra o webhook (`connect`, reexecutável) e pede o QR; devolve
+  `qrcode` (data URI), `code` (texto, desenhado com `qrcode.react`) e `expiresInSeconds` (60). O QR
+  nunca é gravado, só `last_qr_at`. Canal já conectado responde `{ alreadyConnected: true }` sem chamar
+  o servidor. `POST /:id/pair` devolve o código de 8 caracteres.
+- **Estado:** `GET /:id/status` devolve o gravado; em `connecting`, pergunta também ao provedor
+  (`probe`), para a tela fechar mesmo se o aviso de conexão não chegar. É um `GET` que grava (estado
+  e, se for o caso, a readoção) com `channel:read`: o que grava vem do provedor, nunca de quem chama.
+- **Conexão e readoção** (`connection.ts`, `applyConnectionState`): o aviso `connection` (ou o `probe`)
+  grava estado, telefone e JID e audita `channel.connected`/`channel.disconnected` só na passagem. Se o
+  telefone que conectou já tem um canal por QR **não conectado no mesmo escopo** (desativado ou caído),
+  a instância nova passa para o canal antigo (segredos recifrados: o `aad` leva o id), os avisos
+  pendentes seguem junto e o canal novo é apagado. Para quem consulta o canal novo, `status` responde
+  404 (ou `readoptedInto`): a tela trata como conectado.
+- **Envio** (`send.ts`): canal que não está `connected` responde 409 `CHANNEL_NOT_CONNECTED` antes de
+  chamar o provedor; 401/403 do provedor marca o canal `error`.
+- **Ajustes avançados:** `PATCH /:id/advanced-settings` (lista fechada em `qrAdvancedSettingsSchema`).
+  Rota própria, e não o `PATCH /:id` da SPEC, para não disputar o handler com os campos da Cloud.
+
+### Webhook (`POST /api/webhooks/whatsapp/evolution/:secret`)
+
+`src/api/webhooks-channels-evolution.ts` exporta `evolutionWebhooks`, montado em `app.ts` antes do
+CSRF. Cadeia em `inbound-pairing.ts`: sha256 do segredo acha a instância (o corpo nem é lido antes
+disso) → `instanceId` = `remote_instance_id` → `instanceToken` = token decifrado, em tempo constante.
+Qualquer falha é 401 **igual e sem detalhe**; 20 falhas por IP por minuto, depois 429; 413 acima de
+25 MB; canal `disabled` responde 200 e descarta; módulo desligado, 503. O `instanceToken` sai do corpo
+antes de gravar (em qualquer nível): `channel_event.raw` não guarda segredo.
+
+### Mídia (`media.ts` e `providers/whatsapp_qr/media.ts`)
+
+- **base64:** no webhook, antes do `channel_event`, vai ao `StorageProvider` sob `inbound/<chave
+  aleatória>` e o `raw` fica com `{ storageKey, mime, size }`. Reentrega não sobe de novo.
+- **`mediaUrl`:** o job baixa só de origem em `EVOLUTION_MEDIA_ORIGINS` (exata), sem seguir
+  redirecionamento, com timeout e teto de 25 MB. Fora da lista → `ignored`; 403/404 → `failed` na hora
+  (`PermanentEventError`, sem retry). URL cifrada do CDN do WhatsApp nunca é baixada.
+- O `Content-Type` do objeto vem de quem mandou a mensagem: `safeMime` troca HTML, SVG, XML e script
+  por `application/octet-stream`. **Quem servir esses objetos (C1) deve mandar `Content-Disposition:
+  attachment` ou restringir os tipos**, e validar a referência com `isStoredMedia`.
+- Aviso `ignored` ou `failed` definitivo apaga o objeto. Reprocessar um aviso assim não recupera a
+  mídia. O objeto de aviso `processed` é da caixa de entrada (C1), que ainda não o referencia.
+
+### Tela
+
+`QrChannelDialog` (`src/components/channels/qr-channel-dialog.tsx`) é autocontido: aviso de risco
+permanente, nome, abas "QR Code" (contagem de 60 s, "Gerar outro", um QR por abertura) e "Código",
+consulta `status` a cada 4 s e fecha ao conectar. Props: `trigger` ou `open`/`onOpenChange`, `channel`
+(parear de novo), `onChanged` (recarregar a lista) e `basePath` (`/api/admin/channels` na B4). A página da
+lista o chama pelo adaptador `QrDialog` de `channel-dialogs.tsx`.
+
 ## Rotas
 
 `/api/channels` (`src/api/channels.ts`): `GET` (`channel:read`; devolve `channels`, `providers` e
@@ -132,6 +191,12 @@ tipo** liga o diálogo de conectar/gerenciar; sem diálogo, o tipo não aparece 
 `cloud-channel-dialog.tsx` (4 etapas, formulário com o schema da API, cartão com endereço e token
 para copiar, "Gerar novo endereço", "Diagnosticar"). Segredo só sobe: os campos nascem vazios.
 
+QR Code (B3), no mesmo arquivo: `POST /whatsapp-qr` (10 por minuto), `POST /:id/qr` e `/:id/pair` (15,
+`Cache-Control: no-store`), `GET /:id/status` (`channel:read`, 30), `POST /:id/disconnect`, `/logout`,
+`/reconnect` e `PATCH /:id/advanced-settings` (30). Limites por usuário. Códigos: 403
+`PLAN_LIMIT_REACHED`, 409 `SERVER_LIMIT_REACHED`, 503 `PROVIDER_UNAVAILABLE`, 409 `CHANNEL_DISABLED`,
+409 `CHANNEL_ALREADY_CONNECTED`, 400 `UNSUPPORTED_FOR_CHANNEL` (canal sem pareamento).
+
 ## Segurança
 
 - Segredos cifrados por `sealSecret` com `aad = channel:<id>:<campo>`; só `credentials.ts` decifra, e
@@ -156,4 +221,6 @@ A plataforma não tem limite de plano.
 (webhook e rotas da Cloud pela API: assinatura adulterada 401, repetido não duplica, isolamento entre
 tenants, `app_secret` mantido no `PATCH`, RBAC, 404 de outro tenant, resposta sem segredo), `tests/db/channels-schema.test.ts`
 (três modos de escopo, unicidades, cascata), `channels-service`, `channels-events`, `channels-queue`
-(pg-boss real), `channels-http` e a matriz de `rbac.test.ts`.
+(pg-boss real), `channels-http` e a matriz de `rbac.test.ts`. Da B3, na pasta do módulo (`test:db`):
+`webhook.db.test.ts` (cadeia, dedupe, mídia, conexão, readoção) e `routes.db.test.ts` (limites, RBAC,
+404 entre tenants, resposta sem segredo), com servidor Evolution simulado (`db-test-support.ts`).

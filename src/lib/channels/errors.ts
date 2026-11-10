@@ -44,3 +44,15 @@ export class ProviderError extends Error {
     return this.status === 401 || this.status === 403;
   }
 }
+
+/**
+ * Falha que não adianta repetir (mídia vencida, endereço sem acesso): o aviso vira `failed`
+ * na hora, sem retry. A `message` vai ao `channel_event.error`: nunca ponha nela telefone,
+ * endereço ou trecho de conversa.
+ */
+export class PermanentEventError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PermanentEventError";
+  }
+}

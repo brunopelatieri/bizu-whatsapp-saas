@@ -8,16 +8,37 @@ import {
   readEvolutionConfig,
   unwrap,
 } from "@/lib/channels/providers/whatsapp_qr/client";
-import { deleteRemoteInstance, fetchStatus } from "@/lib/channels/providers/whatsapp_qr/instances";
+import {
+  buildInstanceName,
+  connectInstance,
+  countRemoteInstances,
+  createRemoteInstance,
+  deleteRemoteInstance,
+  disconnectInstance,
+  fetchPairingCode,
+  fetchQr,
+  fetchStatus,
+  logoutInstance,
+  reconnectInstance,
+  updateAdvancedSettings,
+} from "@/lib/channels/providers/whatsapp_qr/instances";
+import {
+  externalizeEvolutionMedia,
+  resolveEvolutionMedia,
+} from "@/lib/channels/providers/whatsapp_qr/media";
 import { normalizeEvolutionEvents } from "@/lib/channels/providers/whatsapp_qr/normalize";
 import { verifyEvolutionWebhook } from "@/lib/channels/providers/whatsapp_qr/webhook";
 import type { ChannelModule } from "@/lib/channels/registry";
 import type {
   ChannelContext,
   ChannelProvider,
+  PairingOperations,
   ProbeResult,
   SendResult,
 } from "@/lib/channels/types";
+
+/** O QR da Evolution vale 60 s (medido na origem); a tela conta a partir daí. */
+export const QR_TTL_SECONDS = 60;
 
 /** A Evolution quer só dígitos, sem `+` (mesma convenção do telefone canônico do projeto). */
 function toNumber(to: string) {
@@ -72,9 +93,74 @@ export function createEvolutionProvider(config: EvolutionConfig | null): Channel
     return { providerMessageId: extractProviderMessageId(data) };
   }
 
+  /** Segredo do webhook: sem ele não há endereço a registrar no servidor. */
+  const webhookSecret = (ctx: ChannelContext) => {
+    const secret = ctx.credentials.webhookSecret;
+
+    if (!secret) throw new EvolutionApiError("channel_auth_failed", 401, "Segredo do webhook ausente.");
+    return secret;
+  };
+
+  const remoteId = (ctx: ChannelContext) => {
+    const id = ctx.credentials.remoteInstanceId;
+
+    if (!id) throw new EvolutionApiError("not_found", 404, "Instância sem identificador no servidor.");
+    return id;
+  };
+
+  const pairing: PairingOperations = {
+    capacity: async () => ({
+      used: await countRemoteInstances(required()),
+      max: required().maxInstancesTotal,
+    }),
+
+    async createInstance(input) {
+      const config = required();
+      const created = await createRemoteInstance(config, {
+        name: buildInstanceName(config.instancePrefix, input.scopeKey, input.label),
+        token: input.instanceToken,
+      });
+
+      return { remoteInstanceId: created.id, remoteInstanceName: created.name };
+    },
+
+    async connect(ctx) {
+      await connectInstance(required(), {
+        instanceToken: instanceToken(ctx),
+        webhookSecret: webhookSecret(ctx),
+      });
+    },
+
+    async qr(ctx) {
+      const result = await fetchQr(required(), instanceToken(ctx));
+
+      return result.alreadyConnected
+        ? result
+        : { ...result, expiresInSeconds: QR_TTL_SECONDS };
+    },
+
+    pairingCode: (ctx, phone) =>
+      fetchPairingCode(required(), { instanceToken: instanceToken(ctx), phone }),
+    disconnect: (ctx) => disconnectInstance(required(), instanceToken(ctx)),
+    logout: (ctx) => logoutInstance(required(), instanceToken(ctx)),
+    reconnect: (ctx) => reconnectInstance(required(), instanceToken(ctx)),
+    updateSettings: (ctx, settings) =>
+      updateAdvancedSettings(required(), {
+        remoteInstanceId: remoteId(ctx),
+        instanceToken: instanceToken(ctx),
+        settings,
+      }),
+  };
+
   return {
     type: "whatsapp_qr",
     capabilities: capabilitiesFor("whatsapp_qr"),
+    pairing,
+
+    externalizeInboundMedia: externalizeEvolutionMedia,
+    // Sem configuração não há lista de origens: nada é baixado.
+    resolveInboundMedia: (raw, store) =>
+      config ? resolveEvolutionMedia(config, raw, store) : Promise.resolve({ outcome: "unchanged" }),
 
     verifyWebhook: verifyEvolutionWebhook,
     normalizeEvents: (raw) => normalizeEvolutionEvents(raw),

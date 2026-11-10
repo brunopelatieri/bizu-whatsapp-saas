@@ -111,3 +111,47 @@ export type ChannelErrorCode =
   | "CHANNEL_DISABLED"
   | "CHANNEL_NOT_CONNECTED"
   | "CONFIRMATION_MISMATCH";
+
+// ---------------------------------------------------------------------------
+// Canal por QR Code (B3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Ajustes da instância no servidor Evolution. Lista fechada: nada que o tenant mande além
+ * disto chega ao servidor. Pelo menos um campo.
+ */
+export const qrAdvancedSettingsSchema = z
+  .strictObject({
+    alwaysOnline: z.boolean().optional(),
+    rejectCall: z.boolean().optional(),
+    msgRejectCall: z.string().trim().max(500, "Use até 500 caracteres.").optional(),
+    readMessages: z.boolean().optional(),
+    ignoreGroups: z.boolean().optional(),
+    ignoreStatus: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Informe ao menos um ajuste.");
+export type QrAdvancedSettings = z.infer<typeof qrAdvancedSettingsSchema>;
+
+export const updateQrSettingsSchema = z.strictObject({
+  advancedSettings: qrAdvancedSettingsSchema,
+});
+
+/** Resposta de `POST /api/channels/:id/qr`. `code` é o texto do QR; `qrcode`, a imagem em data URI. */
+export type QrResponse =
+  | { alreadyConnected: true }
+  | { alreadyConnected?: false; qrcode: string | null; code: string | null; expiresInSeconds: number };
+
+/** Resposta de `GET /api/channels/:id/status`. */
+export type ChannelStatusResponse = {
+  status: z.infer<typeof channelStatusSchema>;
+  statusDetail: string | null;
+  identifier: string | null;
+  lastSeenAt: string | null;
+  /** O mesmo número voltou para um canal antigo: este id deixou de existir. */
+  readoptedInto?: string;
+};
+
+export type QrChannelErrorCode =
+  | ChannelErrorCode
+  | "CHANNEL_ALREADY_CONNECTED"
+  | "UNSUPPORTED_FOR_CHANNEL";

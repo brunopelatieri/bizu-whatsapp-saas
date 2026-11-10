@@ -35,8 +35,12 @@
   `/api/channels`; `tech/29-canais-whatsapp.md`); as fixtures de `tests/fixtures/channels/` são
   **simuladas** (a medição B0 real falta). **B2 (WhatsApp Cloud) implementada:** webhook comum
   `/api/webhooks/whatsapp/<segmento>/:key`, rotas de salvar, editar, endereço, diagnóstico e modelos
-  e a tela `/app/configuracoes/canais`; falta o smoke com conta de teste da Meta. B3 (Evolution) e
-  B4 (plataforma) seguem.
+  e a tela `/app/configuracoes/canais`; falta o smoke com conta de teste da Meta.
+  **B3 (Evolution, canal por QR Code) implementada no servidor e no diálogo:** webhook
+  `/api/webhooks/whatsapp/evolution/:secret`, mídia de entrada no `StorageProvider`, rotas de criar,
+  parear, estado e ciclo de vida, readoção do canal antigo e `qr-channel-dialog.tsx`, ligado à página
+  `/app/configuracoes/canais`. **Pendente:** smoke com o servidor Evolution real (QR, código,
+  desconectar no celular) e a medição B0. B4 (plataforma) segue.
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

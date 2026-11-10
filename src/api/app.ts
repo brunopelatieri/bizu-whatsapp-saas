@@ -29,6 +29,7 @@ import { teamRoutes } from "@/api/team";
 import { tenantRoutes } from "@/api/tenant";
 import { channelWebhooks } from "@/api/webhooks-channels";
 import { emailWebhooks } from "@/api/webhooks-email";
+import { evolutionWebhooks } from "@/api/webhooks-channels-evolution";
 import { paymentWebhooks } from "@/api/webhooks-payments";
 import { getDb } from "@/db";
 import { contactMessages } from "@/db/schema";
@@ -61,6 +62,7 @@ api.get("/api/ready", async (c) => {
 api.route("/", emailWebhooks);
 api.route("/", paymentWebhooks);
 api.route("/", channelWebhooks);
+api.route("/", evolutionWebhooks);
 api.route("/", cspReportRoutes);
 
 // Depois dos webhooks e do relatório de CSP, que não vêm de uma página do app.
