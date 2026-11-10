@@ -58,16 +58,59 @@ export function conversationScope(scope: Scope): SQL {
     : isNull(conversation.tenantId);
 }
 
+/**
+ * Como o ator enxerga as conversas: `none` (sem `inbox:read`), `all` (todas do escopo) ou `own`
+ * (sem dono ou com ele como dono). Fonte única das duas formas do predicado abaixo: a de SQL
+ * (`visibleConversation`, nas consultas) e a de memória (`noticeVisibleTo`, no SSE).
+ */
+type Reach = "none" | "all" | "own";
+
+function reachOf(actor: InboxActor): Reach {
+  // Quem não lê não vê nada, mesmo que a rota esqueça a permissão.
+  if (!actor.can.read) return "none";
+  if (actor.scope.kind === "platform" || actor.can.supervise) return "all";
+  return "own";
+}
+
 /** O predicado de visibilidade. Sem `inbox:read`, nada. */
 export function visibleConversation(actor: InboxActor): SQL {
   const scoped = conversationScope(actor.scope);
+  const reach = reachOf(actor);
 
-  // Quem não lê não vê nada, mesmo que a rota esqueça a permissão.
-  if (!actor.can.read) return sql`false`;
-  if (actor.scope.kind === "platform" || actor.can.supervise) return scoped;
+  if (reach === "none") return sql`false`;
+  if (reach === "all") return scoped;
 
   return and(
     scoped,
     or(isNull(conversation.assignedUserId), eq(conversation.assignedUserId, actor.userId)),
   ) as SQL;
+}
+
+/**
+ * O mesmo predicado sobre um dono já conhecido (o `a` ou o `p` de um aviso), sem ir ao banco.
+ * Dono desconhecido (`undefined`) só passa para quem vê tudo: falha fechada.
+ */
+export function ownerVisible(actor: InboxActor, owner: string | null | undefined): boolean {
+  const reach = reachOf(actor);
+
+  if (reach === "none") return false;
+  if (reach === "all") return true;
+  if (owner === undefined) return false;
+  return owner === null || owner === actor.userId;
+}
+
+/** O que o SSE precisa de um aviso para decidir a entrega (`InboxNotice`, sem depender dele). */
+export type NoticeOwners = { s: string | null; a?: string | null; p?: string | null };
+
+/**
+ * O aviso chega ao assinante? Só do próprio escopo (tenant da sessão, ou plataforma) e, de
+ * conversa que ele via **antes** (`p`) ou vê **depois** (`a`) da mudança: entrar e sair da fila
+ * também interessam. Sem `p`, o dono não mudou e vale o `a`.
+ */
+export function noticeVisibleTo(actor: InboxActor, notice: NoticeOwners): boolean {
+  const scopeId = actor.scope.kind === "tenant" ? actor.scope.tenantId : null;
+  if (notice.s !== scopeId) return false;
+
+  const before = notice.p === undefined ? notice.a : notice.p;
+  return ownerVisible(actor, notice.a) || ownerVisible(actor, before);
 }

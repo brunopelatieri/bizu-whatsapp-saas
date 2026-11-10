@@ -377,7 +377,14 @@ export async function startConversation(actor: InboxActor, input: StartConversat
       await auditInbox(tx, actor, "inbox.conversation_claimed", { type: "conversation", id: inserted.id }, {
         via: "start",
       });
-      await notifyInbox(tx, { s: tenantId, c: inserted.id, k: "conversation", a: actor.userId, p: null });
+      await notifyInbox(tx, {
+        s: tenantId,
+        c: inserted.id,
+        k: "conversation",
+        a: actor.userId,
+        p: null,
+        u: actor.userId,
+      });
       return { conversation: await conversationItem(tx, actor, inserted.id), created: true };
     }
 
