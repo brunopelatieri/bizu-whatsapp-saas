@@ -18,6 +18,12 @@ Não há demo pública deste repositório. O README diz "em breve"; quando exist
   divide containers nem volumes com o `docker-compose.yml` de desenvolvimento.
 - Reverse proxy: **Caddy** (TLS automático por Let's Encrypt, HSTS, `reverse_proxy app:3000`), com o
   `docker/caddy/Caddyfile`. Traefik ou Nginx também servem, desde que `TRUSTED_PROXY_HOPS` bata.
+- **SSE do atendimento** (`/api/inbox/events`, `text/event-stream`, conexão longa de até 15 min): o
+  `reverse_proxy` do Caddy descarrega `text/event-stream` na hora, e o `Caddyfile` tira esse caminho
+  (e o `/api/admin/inbox/events` da C6) do `encode`, que seguraria os eventos. A resposta já leva
+  `Cache-Control: no-cache, no-transform` e `X-Accel-Buffering: no` (Nginx: também `proxy_buffering off`
+  e `proxy_read_timeout` acima de 25 s, o batimento). Recarregar o Caddy fecha os fluxos: a tela
+  reconecta sozinha.
 - Processo Node único (assets, `/api/*` e SSR); a fila roda dentro dele (`JOBS_MODE=inline`) ou num
   `worker`.
 
@@ -127,6 +133,10 @@ Runtime (a lista completa está em `.env.example`; a validação, em `src/lib/en
 - `NODE_ENV=production`, `PORT=3000`
 - `APP_URL` com `https://`, `TRUSTED_PROXY_HOPS=1` (um por reverse proxy)
 - `DATABASE_URL` (`bizu_app`), `DIRECT_URL` (`bizu_owner`; exigida em todo processo, mas só migrations e `jobs:install` a usam: no compose, `app` e `worker` recebem a do `bizu_app` e só o `migrate` leva a do dono). Em produção, as duas URLs são recusadas com senha vazia, igual ao usuário, com menos de 16 caracteres ou começada por `change-me`; em loopback (`localhost`, smoke de `npm run start`) só o `change-me` é recusado
+- `REALTIME_DATABASE_URL` (opcional, padrão `DATABASE_URL`): a conexão `LISTEN inbox` do tempo real da
+  caixa de entrada, **uma por processo web** (o `worker` não abre). Precisa ser conexão direta ou pooler
+  em **modo sessão**; em modo transaction o `LISTEN` não recebe nada e a tela fica no polling de 20 s. Na
+  stack do compose a `DATABASE_URL` já é direta, então não precisa. Mesma regra de senha das outras URLs
 - `BETTER_AUTH_SECRET`, `CREDENTIALS_ENCRYPTION_KEY` (32 bytes em base64), `AUDIT_SALT`: valores
   gerados; os de exemplo derrubam o processo em produção
 - `RATE_LIMIT_STORE=postgres`: `memory` derruba o processo em produção

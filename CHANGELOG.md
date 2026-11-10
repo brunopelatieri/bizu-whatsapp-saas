@@ -10,6 +10,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C4 (tempo real)**: toda escrita de conversa e mensagem avisa por `pg_notify`
+  no `COMMIT` (só ids), cada processo web escuta numa conexão `LISTEN` e `GET /api/inbox/events` (SSE)
+  entrega a cada pessoa só os avisos das conversas que ela vê (a fila e as próprias; quem supervisiona,
+  todas), inclusive quando a ingestão roda no `--worker`. A tela do atendimento e o ponto de não lidas do
+  menu passam a se atualizar pelos eventos; sem SSE, voltam ao polling de 20 s com o aviso "Atualização em
+  tempo real indisponível". Atribuição feita por outra pessoa vira aviso na tela. **Migração:** nenhuma
+  migration. Variável nova opcional `REALTIME_DATABASE_URL` (padrão `DATABASE_URL`): se a `DATABASE_URL`
+  passa por pooler em modo transaction, aponte esta para a conexão direta (ou pooler em modo sessão). Atrás
+  de proxy, o SSE não pode ter buffer nem compressão: o `docker/caddy/Caddyfile` tira `/api/inbox/events`
+  do `encode` (copie a linha `@compressible` se o seu Caddyfile for próprio).
+
 - **Caixa de entrada, fase C2** (API do atendimento): `/api/inbox/*` com a visibilidade por pessoa em
   toda consulta (o membro vê a fila e as próprias; quem supervisiona vê todas; fora disso, 404), lista
   e mensagens paginadas por cursor, assumir (dois cliques ao mesmo tempo: um assume, o outro recebe

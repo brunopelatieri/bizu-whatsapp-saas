@@ -54,6 +54,9 @@ Não há demo pública deste repositório; o README diz "em breve".
 - O estágio `build` do `Dockerfile` é o alvo do `migrate` (tem `drizzle-kit`, `tsx` e `drizzle/`).
 - Migrations rodam fora do container da aplicação, como etapa separada. Em produção, `app` e `worker` recusam subir quando faltam migrations do build (`src/db/schema-status.ts`).
 - Atrás de reverse proxy, defina `TRUSTED_PROXY_HOPS=1` (um valor por proxy na frente).
+- O SSE do atendimento (`/api/inbox/events`) não pode passar por buffer nem compressão no proxy (o
+  `Caddyfile` o tira do `encode`), e a conexão `LISTEN` (`REALTIME_DATABASE_URL`, padrão `DATABASE_URL`)
+  precisa ser direta ou de pooler em modo sessão (`tech/14-deploy.md`).
 - HSTS é configurado no reverse proxy, não no app. Só inclua subdomínios se todos usarem HTTPS.
 
 ## Riscos e pendências

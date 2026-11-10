@@ -56,7 +56,7 @@
   pessoa em toda consulta (`visibility.ts`), listas por cursor, assumir atômico, transferir, devolver,
   situação, lida, mídia servida pelo tipo do conteúdo, envio de texto com janela de 24 h, reenvio,
   `inbox.sweep`, vínculo do contato, salvar como cliente, iniciar conversa, permissão `inbox` e o
-  gancho de remoção de membro. **`caixa-de-entrada` C3 (tela do tenant) implementada:** `/app/atendimento` com lista (Fila, Minhas, Todas, filtros, busca, cursor), conversa, composer de texto, painel do contato (salvar como cliente, vincular, etiquetas e campos), nova conversa, "Conversar" no cliente e na equipe e ponto de não lidas no menu, tudo por polling de 20 s. **Pendente:** C4 (SSE; `notifyInbox` segue vazio), C5
+  gancho de remoção de membro. **`caixa-de-entrada` C3 (tela do tenant) implementada:** `/app/atendimento` com lista (Fila, Minhas, Todas, filtros, busca, cursor), conversa, composer de texto, painel do contato (salvar como cliente, vincular, etiquetas e campos), nova conversa, "Conversar" no cliente e na equipe e ponto de não lidas no menu, por polling de 20 s. **`caixa-de-entrada` C4 (tempo real) implementada:** `pg_notify` no `COMMIT`, uma conexão `LISTEN` por processo web (`REALTIME_DATABASE_URL`), SSE `/api/inbox/events` filtrado por pessoa no servidor (batimento, 15 min, 3 por pessoa, 503 sem escuta) e a tela atualizada pelos eventos, com polling de 20 s e aviso quando o SSE cai. **Pendente:** C5
   (anexo de saída, modelo), C6 (`/api/admin/inbox`) e a LGPD das conversas (C7: exportação e exclusão
   ainda não cobrem as tabelas novas).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do

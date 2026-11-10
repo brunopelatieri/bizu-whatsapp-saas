@@ -437,6 +437,7 @@ Variáveis, topologia e riscos: [`docs/context/infra-deploy.md`](docs/context/in
 |---|---|
 | `APP_URL` | URL pública do app; base dos links de e-mail e dos cookies |
 | `DATABASE_URL` / `DIRECT_URL` | Runtime (`bizu_app`) / migrations e fila (`bizu_owner`) |
+| `REALTIME_DATABASE_URL` | Opcional: conexão `LISTEN` do tempo real do atendimento (padrão `DATABASE_URL`); direta ou pooler em modo sessão |
 | `BETTER_AUTH_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`, `AUDIT_SALT` | Segredos obrigatórios; os de exemplo são recusados em produção |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `SMTP_*`, `RESEND_*` | Envio de e-mail |
 | `JOBS_MODE` | `inline` (fila no servidor), `worker` (`node build/server/index.js --worker`) ou `off` |

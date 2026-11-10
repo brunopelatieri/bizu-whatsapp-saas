@@ -30,6 +30,10 @@ tentativa, com `/api/ready` em 200 assim que as filas existissem. Em dev, o site
 - Com `worker`, o processo web roda com `JOBS_MODE=off` (ou `worker`, que no HTTP
   equivale a `off`): ele enfileira, o serviço `--worker` entrega.
 - Em dev: `npx tsx --tsconfig tsconfig.app.json src/server.ts --worker` também funciona.
+- Tempo real da caixa de entrada: o job que grava (ingestão, `inbox.media`, `inbox.sweep`) chama
+  `notifyInbox` na transação, e o `pg_notify` sai no `COMMIT` para todo processo que escuta; só o
+  processo web abre a conexão `LISTEN` (`src/lib/inbox/realtime.ts`), o `--worker` nunca
+  (`tech/30-caixa-de-entrada.md`, "Tempo real").
 - Papéis do `boss.ts`: `installer` (DIRECT_URL, migra), `worker` (DATABASE_URL, supervisiona
   e agenda crons), `producer` (DATABASE_URL, só `send`). A instância fica em `globalThis`
   (HMR do dev não duplica).
