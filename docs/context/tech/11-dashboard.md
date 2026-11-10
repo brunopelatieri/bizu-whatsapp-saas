@@ -2,13 +2,14 @@
 
 - **Escopo:** Layout, rotas e estado atual da área autenticada do owner e da equipe (`/app`). A área da plataforma (`/admin`) está em `tech/22-admin.md`, e o portal (`/portal`), em `tech/25-portal-clientes.md`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-rotas-api.md`, `spec-tenant-rbac.md`
-- **Paths do código:** `src/components/app/`, `src/components/admin/`, `src/components/auth/can.tsx`, `src/lib/constants/app-nav.ts`, `src/lib/constants/admin-nav.ts`, `src/lib/constants/permission-labels.ts`, `src/providers/auth-provider.tsx`, `src/pages/dashboard-page.tsx`, `src/pages/onboarding-page.tsx`, `src/pages/team-page.tsx`, `src/routes/app.tsx`, `src/routes/app.onboarding.tsx`, `src/routes/app.team.tsx`, `src/routes/app.settings.tsx`, `src/routes/app.customers.tsx`, `src/routes/app.customers.$id.tsx`, `src/pages/customers-page.tsx`, `src/pages/customer-detail-page.tsx`, `src/components/app/customers/`
+- **Paths do código:** `src/components/app/`, `src/components/admin/`, `src/components/auth/can.tsx`, `src/lib/constants/app-nav.ts`, `src/lib/constants/admin-nav.ts`, `src/lib/constants/permission-labels.ts`, `src/providers/auth-provider.tsx`, `src/pages/dashboard-page.tsx`, `src/pages/onboarding-page.tsx`, `src/pages/team-page.tsx`, `src/routes/app.tsx`, `src/routes/app.onboarding.tsx`, `src/routes/app.team.tsx`, `src/routes/app.settings.tsx`, `src/routes/app.customers.tsx`, `src/routes/app.customers.$id.tsx`, `src/pages/customers-page.tsx`, `src/pages/customer-detail-page.tsx`, `src/components/app/customers/`, `src/components/inbox/`, `src/pages/inbox-page.tsx`, `src/routes/app.inbox.tsx`
 
 ## Rotas
 
 | Rota | Estado |
 |---|---|
 | `/app` | visão geral com `AccountCard` e cards de clientes, equipe e assinatura |
+| `/app/atendimento`, `/app/atendimento/:conversationId` | caixa de entrada: lista (Fila, Minhas, Todas), conversa e painel do contato; polling de 20 s; ocupa a altura toda (`tech/30-caixa-de-entrada.md`) |
 | `/app/clientes`, `/app/clientes/:id` | lista com busca, filtro e paginação; criar, editar, remover, bloquear, enviar acesso ao portal e último acesso (`tech/25-portal-clientes.md`) |
 | `/app/onboarding` | criação do tenant e convites abertos; fora do layout com sidebar |
 | `/app/equipe` | membros, convites, reenvio, revogação, troca de papel e remoção |

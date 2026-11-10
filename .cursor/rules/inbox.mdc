@@ -21,6 +21,7 @@ alwaysApply: false
 - Toda escrita chama `notifyInbox(tx, ...)` na mesma transação (só ids; o corpo é da C4).
 - Conteúdo de mensagem, telefone e nome nunca vão a `logError`, `audit_log`, Sentry ou `channel_event.error`. Erro de provedor só por `logChannelError`.
 - Dado pessoal novo entra na exportação e na anonimização (C7 cobre as conversas: até lá, `docs/context/lgpd.md` marca como pendente).
+- Tela (C3, `src/components/inbox/`): client-only, só pela API com TanStack Query (`inbox-api.ts`: chaves em `["inbox", tenantId, …]`, `invalidateInbox` é o ponto de encaixe da C4); o cliente só esconde botões, o servidor decide; texto de mensagem sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`; conteúdo de mensagem nunca em `console.*` nem em log.
 - Mudança aqui atualiza `docs/context/tech/30-caixa-de-entrada.md`.
 
 Para entender este domínio, leia: docs/context/tech/30-caixa-de-entrada.md e docs/specs/caixa-de-entrada/spec.md
