@@ -65,24 +65,36 @@ export function ConversationHeader({ detail, onBack, onOpenPanel }: Conversation
   const transferTargets = (assignees.data ?? []).filter(({ id }) => id !== owner?.id);
 
   return (
-    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-background px-3 py-2.5">
-      <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Voltar para a lista" onClick={onBack}>
-        <ArrowLeft />
-      </Button>
+    <header className="space-y-2 border-b border-border bg-background px-3 py-2.5">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="lg:hidden" aria-label="Voltar para a lista" onClick={onBack}>
+          <ArrowLeft />
+        </Button>
 
-      <div
-        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary"
-        aria-hidden
-      >
-        {initialsOf(label)}
-      </div>
+        <div
+          className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary"
+          aria-hidden
+        >
+          {initialsOf(label)}
+        </div>
 
-      <div className="min-w-0 flex-1">
-        <h2 className="truncate text-sm font-semibold text-foreground">{label}</h2>
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-          {contact.displayName && phone ? <span>{phone}</span> : null}
-          <ChannelBadge type={conversation.channel.type} name={conversation.channel.name} className="text-xs" />
-        </p>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-sm font-semibold text-foreground">{label}</h2>
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            {contact.displayName && phone ? <span>{phone}</span> : null}
+            <ChannelBadge type={conversation.channel.type} name={conversation.channel.name} className="text-xs" />
+          </p>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="xl:hidden"
+          aria-label="Dados do contato"
+          onClick={onOpenPanel}
+        >
+          <PanelRight />
+        </Button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -172,16 +184,6 @@ export function ConversationHeader({ detail, onBack, onOpenPanel }: Conversation
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="xl:hidden"
-          aria-label="Dados do contato"
-          onClick={onOpenPanel}
-        >
-          <PanelRight />
-        </Button>
       </div>
     </header>
   );

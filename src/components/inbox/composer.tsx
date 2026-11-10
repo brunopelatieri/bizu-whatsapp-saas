@@ -63,8 +63,8 @@ function useBlockReason(detail: ConversationResponse): ReactNode | null {
     return (
       <>
         <strong className="font-semibold">Janela de 24 horas encerrada.</strong> Neste número oficial só
-        é possível responder em até 24 horas da última mensagem do contato. O envio de modelo aprovado
-        chega em uma próxima etapa.
+        é possível responder em até 24 horas da última mensagem do contato. Depois disso, só um modelo
+        de mensagem aprovado pode reabrir a conversa (ainda não disponível nesta tela).
       </>
     );
   }
