@@ -63,6 +63,16 @@ do plugin em `tests/db/rbac.test.ts`.
 personalizado) valem para os números de WhatsApp (`docs/specs/whatsapp-canais/spec.md`); as rotas
 `/api/channels/*` entram com a etapa B1 e a matriz `tests/db/rbac.test.ts` as cobre então.
 
+`inbox:read`, `inbox:reply`, `inbox:assign` e `inbox:supervise` são da caixa de entrada
+(`docs/specs/caixa-de-entrada/spec.md`, `tech/30-caixa-de-entrada.md`): owner e admin têm as quatro,
+membro `read` e `reply`; todas atribuíveis a papel personalizado; `supervise` sem `read` não tem
+efeito (`inboxCapabilities`, `src/lib/inbox/visibility.ts`). A visibilidade por pessoa não é do
+RBAC: `requirePermission` só abre a rota, e `visibleConversation` decide qual conversa a pessoa vê.
+
+**Gancho da caixa de entrada:** `removeMember` e `changeMemberRole` (para papel sem `inbox:reply`)
+chamam `releaseAssignments` na mesma transação: as conversas da pessoa voltam à fila. Editar um papel
+personalizado tirando `inbox:*` não devolve as conversas de quem o tem (limite conhecido).
+
 Regras além da matriz, em `src/lib/tenant/team.ts`:
 
 - **Só se age sobre quem não tem mais poder que você** (`canActOnRole`). Vale para conceder
@@ -108,7 +118,10 @@ Eventos: `auth.email_verified`, `auth.password_reset`, `tenant.created`, `tenant
 `member.removed`, `role.created`, `role.updated`, `role.deleted`, `customer.created`,
 `customer.updated`, `customer.deleted`, `customer.invited`, `tag.created`, `tag.updated`,
 `tag.deleted`, `custom_field.created`, `custom_field.updated`, `custom_field.archived`,
-`custom_field.deleted` (só ids e `key`; valor de campo nunca). Na plataforma os mesmos eventos levam o prefixo `admin.` (`admin.tag_created|updated|deleted`, `admin.custom_field_created|updated|archived|deleted`) e `admin.tenant_profile_updated`, com `actor_type = platform` e **sem `tenant_id`**: nunca aparecem em `/app/auditoria`. Ações do próprio cliente gravam
+`custom_field.deleted` (só ids e `key`; valor de campo nunca), `inbox.conversation_claimed`,
+`inbox.conversation_assigned`, `inbox.conversation_released`, `inbox.conversation_closed`,
+`inbox.conversation_reopened`, `inbox.contact_linked`, `inbox.contact_saved_as_customer` (só ids;
+texto e telefone nunca). Na plataforma os mesmos eventos levam o prefixo `admin.` (`admin.tag_created|updated|deleted`, `admin.custom_field_created|updated|archived|deleted`) e `admin.tenant_profile_updated`, com `actor_type = platform` e **sem `tenant_id`**: nunca aparecem em `/app/auditoria`. Ações do próprio cliente gravam
 `actor_type = portal_user`: `portal.signed_up`, `portal.profile_updated`, `portal.password_set`.
 
 Evento sem tenant só aparece com `withPlatformScope`. Ainda não há tela de leitura.

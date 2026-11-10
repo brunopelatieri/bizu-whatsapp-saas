@@ -306,6 +306,8 @@ async function destinationPhone(tx: Tx, tenantId: string, input: StartConversati
 export async function startConversation(actor: InboxActor, input: StartConversationInput) {
   if (!actor.can.reply) throw permissionDenied();
   if (actor.scope.kind !== "tenant") throw permissionDenied();
+  // A conversa mostra o telefone do contato: pelo cliente, só quem já lê clientes.
+  if (input.customerId && !readsCustomers(actor)) throw permissionDenied();
   const tenantId = actor.scope.tenantId;
 
   return withScope(actor.scope, async (tx) => {

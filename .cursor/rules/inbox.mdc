@@ -1,12 +1,16 @@
 ---
 description: Caixa de entrada (contatos, conversas, mensagens e ingestão)
-globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts
+globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts,src/api/inbox.ts,src/lib/schemas/inbox.ts
 alwaysApply: false
 ---
 
 # Caixa de entrada (contatos, conversas, mensagens e ingestão)
 
-- Só `src/lib/inbox/` consulta `chat_contact`, `chat_contact_identity`, `conversation` e `message`. Rota e tela passam pelo serviço; a partir da C2, toda leitura e escrita de conversa usa o predicado de visibilidade (`visibility.ts`, T13) e conversa fora dele responde 404.
+- Só `src/lib/inbox/` consulta `chat_contact`, `chat_contact_identity`, `conversation` e `message`. Rota e tela passam pelo serviço; toda leitura e escrita de conversa, mensagem, mídia e contato usa `visibleConversation(actor)` (`visibility.ts`, T13) e o que está fora dele responde 404, igual a id inexistente. Gancho de fora (remoção de membro, LGPD) chama `releaseAssignments`, nunca a tabela.
+- A rota (`src/api/inbox.ts`) só monta o `InboxActor` (`inboxActor(c)`) e valida com `src/lib/schemas/inbox.ts`; regra de permissão fina (`reply` × `assign`, `customer:read`) fica no serviço. Toda escrita passa por `blockMutationsWhileImpersonating`; rota nova entra em `rbac.test.ts` e, se escreve, no `it.each` de `impersonation.test.ts`.
+- Assumir é `UPDATE ... WHERE assigned_user_id IS NULL` (nunca ler e depois gravar); responder a da fila a assume, responder a de outro (supervisor) não troca o dono; mudar a situação à mão não mexe no dono.
+- Envio: mensagem `queued` gravada antes de falar com o provedor, `clientId` idempotente, janela de 24 h conferida no servidor (`window.ts`), provedor fora da transação; recusa vira `failed` com o motivo, sem resposta fica `queued` para o `inbox.sweep`.
+- Mídia servida só pela rota autenticada, com o tipo decidido pelo conteúdo (`inboundMime` sobre os primeiros bytes), `inline` só para `INLINE_SAFE_MIME`, sempre `nosniff`.
 - Serviços recebem `Scope` e rodam em `withScope`; `tenant_id` vem de `scopeTenantId(scope)`, nunca do aviso nem do corpo. A plataforma nunca consulta `customer` de tenant nem usa `withPlatformScope` no atendimento.
 - Contato é achado pela `phone_key` (com e sem o 9º dígito). Telefone de provedor passa por `providerPhone` (normaliza com `+`). Vínculo automático com `user` ou `customer` só com correspondência única (`autoLinkContact`); o resto é manual.
 - Gravar conversa e mensagem é `INSERT ... ON CONFLICT` em um comando, idempotente: repetir o aviso não muda nada. `unread_count` só por incremento atômico; `last_inbound_at` só avança (`GREATEST`) e só com mensagem recebida. Mensagem do contato em conversa encerrada a reabre **sem dono**.

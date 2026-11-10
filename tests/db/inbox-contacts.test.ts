@@ -377,6 +377,14 @@ describe("/api/inbox: contato e início de conversa", () => {
         body: { channelId, customerId: randomUUID() },
       });
       expect(unknownCustomer.status).toBe(404);
+
+      // Pelo cliente, só quem lê clientes: a conversa mostraria o telefone dele.
+      const client = await createCustomer();
+      const agent = await call("POST", "/api/inbox/conversations", {
+        cookie: as("agent"),
+        body: { channelId, customerId: client.id },
+      });
+      expect(agent.status).toBe(403);
     });
   });
 });

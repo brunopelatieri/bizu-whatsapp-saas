@@ -73,6 +73,7 @@ recusar a subida.
 
 | `channel.inbound` | webhooks de canal | 5x, backoff de 30 s a 1 h | `exclusive`, `singletonKey = channel_event.id`; aplica o aviso gravado (`processChannelEvent`), baixando antes a mídia citada por `mediaUrl` (só de origem em `EVOLUTION_MEDIA_ORIGINS`; 403/404 fecham o aviso como `failed` sem retry); na última tentativa o aviso vira `failed`; dead letter `channel.inbound.dead` (14 dias) |
 | `inbox.media` | mensagem recebida pela Cloud com mídia (`media_status = pending`), enfileirada depois do commit do aviso | 4x, backoff de 1 min a 1 h | `exclusive`, `singletonKey = message.id`; `fetchMedia` fora da transação, tipo conferido pelo conteúdo, `file` + `ready`; recusa do provedor ou última tentativa marca `failed`; dead letter `inbox.media.dead` (`tech/30-caixa-de-entrada.md`) |
+| `inbox.sweep` | cron `*/5 * * * *` | 1x | Mensagem enviada `queued` há mais de 2 min (o provedor não respondeu no prazo) vira `failed` com `UNKNOWN_RESULT`; atravessa os tenants (`withPlatformScope("inbox.sweep")`); dead letter `inbox.sweep.dead` |
 | `channel.health` | cron a cada 15 min | 1x | `probe` de cada canal não desativado, grava o estado, avisa os owners na queda e devolve à fila avisos `pending` há mais de 10 min (`tech/29-canais-whatsapp.md`) |
 
 Detalhes das filas de cobrança em `tech/24-billing-cobranca.md`. As de LGPD entram na fase 10: acrescente em `queueDefinitions` (a
