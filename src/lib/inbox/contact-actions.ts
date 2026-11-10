@@ -1,8 +1,8 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { scopeTenantId, type Tx, withScope } from "@/db/rls";
-import { chatContact, conversation, customer, member, user } from "@/db/schema";
+import { chatContact, conversation, customer, user } from "@/db/schema";
 import { requireChannelRow } from "@/lib/channels/service";
-import { alreadyAssigned, auditInbox } from "@/lib/inbox/assignment";
+import { activeMemberRole, alreadyAssigned, auditInbox } from "@/lib/inbox/assignment";
 import {
   autoLinkContact,
   findContactByPhoneKey,
@@ -129,14 +129,8 @@ export async function contactCandidates(actor: InboxActor, contactId: string) {
 }
 
 /** Membro ativo do tenant (não banido). */
-async function isActiveMember(tx: Tx, tenantId: string, userId: string) {
-  const [row] = await tx
-    .select({ id: member.id })
-    .from(member)
-    .innerJoin(user, eq(user.id, member.userId))
-    .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), eq(user.banned, false)));
-  return Boolean(row);
-}
+const isActiveMember = async (tx: Tx, tenantId: string, userId: string) =>
+  (await activeMemberRole(tx, tenantId, userId)) !== null;
 
 /**
  * Vincular a um cliente (`customer:update`), a um membro ativo, ou desfazer. Um vínculo só: o

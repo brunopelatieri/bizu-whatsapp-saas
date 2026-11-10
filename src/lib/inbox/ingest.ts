@@ -6,7 +6,7 @@ import type { AfterCommit } from "@/lib/channels/connection";
 import type { InboxHandlers } from "@/lib/channels/events";
 import { isStoredMedia } from "@/lib/channels/media";
 import type { NormalizedMessage, NormalizedStatus } from "@/lib/channels/types";
-import { type MessageType, PREVIEW_MAX } from "@/lib/inbox/constants";
+import type { MessageType } from "@/lib/inbox/constants";
 import {
   autoLinkContact,
   findContactByLid,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/inbox/contacts";
 import { enqueueInboxMedia, type PendingMediaInfo, storedMediaFile } from "@/lib/inbox/media";
 import { notifyInbox } from "@/lib/inbox/notify";
+import { previewOf } from "@/lib/inbox/preview";
 import { getStorage } from "@/lib/storage";
 
 /**
@@ -29,27 +30,7 @@ type ChannelRow = typeof channel.$inferSelect;
 /** Identificador oculto do WhatsApp, como a Evolution o entrega (`<dígitos>@lid`). */
 const LID = /^\d+@lid$/;
 
-const PREVIEW_LABELS: Record<MessageType, string> = {
-  text: "Mensagem",
-  image: "Imagem",
-  video: "Vídeo",
-  audio: "Áudio",
-  document: "Documento",
-  sticker: "Figurinha",
-  location: "Localização",
-  contacts: "Contato",
-  template: "Modelo de mensagem",
-  interactive: "Resposta",
-  unsupported: "Mensagem não suportada",
-};
-
-/** Prévia da lista: o texto (ou legenda), senão o tipo; até 120 caracteres. */
-export function previewOf(type: MessageType, text: string | null) {
-  const body = text?.replace(/\s+/g, " ").trim() || PREVIEW_LABELS[type];
-  const chars = Array.from(body);
-
-  return chars.length > PREVIEW_MAX ? `${chars.slice(0, PREVIEW_MAX - 1).join("")}…` : body;
-}
+export { previewOf };
 
 /** Hora do provedor, nunca no futuro: relógio de celular adiantado não fura a ordem da lista. */
 function eventTime(occurredAt: Date, now = new Date()) {

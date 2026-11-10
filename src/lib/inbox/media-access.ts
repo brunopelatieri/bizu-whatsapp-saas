@@ -59,11 +59,17 @@ async function peek(stream: Readable, bytes: number) {
 
   const head = Buffer.concat(chunks);
   async function* all() {
-    yield head;
-    while (true) {
-      const next = await iterator.next();
-      if (next.done) return;
-      yield Buffer.from(next.value);
+    try {
+      yield head;
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) return;
+        yield Buffer.from(next.value);
+      }
+    } finally {
+      // Download cancelado: fecha o fluxo do armazenamento (arquivo ou conexão), não só o nosso.
+      await iterator.return?.();
+      stream.destroy();
     }
   }
 

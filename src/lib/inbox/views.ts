@@ -13,8 +13,8 @@ import type {
   MessageType,
 } from "@/lib/inbox/constants";
 import { cursorTime } from "@/lib/inbox/cursor";
-import { previewOf } from "@/lib/inbox/ingest";
 import type { PendingMediaInfo } from "@/lib/inbox/media";
+import { previewOf } from "@/lib/inbox/preview";
 import { type InboxActor, readsCustomers } from "@/lib/inbox/visibility";
 
 /**

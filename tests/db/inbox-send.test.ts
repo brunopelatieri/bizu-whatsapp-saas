@@ -11,8 +11,10 @@ import { sweepQueuedMessages, UNKNOWN_RESULT } from "@/lib/inbox/send";
 import { bodyOf } from "./billing-helpers";
 import { cleanUpChannels, seedCloudChannel, seedQrChannel, tenantScope } from "./channels-helpers";
 import { readAll, seedConversation, seedMessage } from "./inbox-helpers";
+import { api } from "@/api/app";
 import {
   addMember,
+  APP_ORIGIN,
   call,
   cleanUp,
   connectOwner,
@@ -264,6 +266,33 @@ describe("/api/inbox: envio de texto", () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ senderType: "user", status: "sent" });
+  });
+
+  it("o texto mais pesado que o schema aceita cabe no limite de 16 KB; corpo enorme é 413", async () => {
+    const q = await seedConversation(scope(), cloudId);
+    // 4096 unidades UTF-16 de 3 bytes cada (CJK): o maior texto válido em UTF-8.
+    const text = "中".repeat(4096);
+    expect(Buffer.byteLength(JSON.stringify({ text }))).toBeGreaterThan(12 * 1024);
+
+    // Com `Content-Length`, como o navegador manda: é ele que liga o `bodyLimit`.
+    const post = (body: string) =>
+      api.request(`/api/inbox/conversations/${q.id}/messages`, {
+        method: "POST",
+        headers: {
+          Cookie: as("memberA"),
+          Origin: APP_ORIGIN,
+          "Content-Type": "application/json",
+          "Content-Length": String(Buffer.byteLength(body)),
+          "X-Forwarded-For": `10.99.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250) + 1}`,
+        },
+        body,
+      });
+
+    const ok = await post(JSON.stringify({ type: "text", text, clientId: clientId() }));
+    expect(ok.status).toBe(201);
+
+    const huge = await post(JSON.stringify({ type: "text", text: "x".repeat(70_000), clientId: clientId() }));
+    expect(huge.status).toBe(413);
   });
 
   it("valida o corpo: texto vazio, longo demais, tipo sem suporte e clientId ruim são 400", async () => {

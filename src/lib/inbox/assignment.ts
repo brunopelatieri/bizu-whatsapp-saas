@@ -105,18 +105,23 @@ export async function claimConversation(actor: InboxActor, conversationId: strin
   });
 }
 
-/**
- * Membro ativo do tenant (não banido) cujo papel responde no atendimento. Fora disso, 400
- * `INVALID_ASSIGNEE`, sem dizer se a pessoa existe.
- */
-async function assertAssignable(tx: Tx, actor: InboxActor, tenantId: string, userId: string) {
+/** Papel do membro ativo (não banido) do tenant; `null` para quem não é. */
+export async function activeMemberRole(tx: Tx, tenantId: string, userId: string) {
   const [row] = await tx
     .select({ role: member.role })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .where(and(eq(member.organizationId, tenantId), eq(member.userId, userId), eq(user.banned, false)));
+  return row?.role ?? null;
+}
 
-  const replies = row && inboxCapabilities(permissionsOf(actor.catalog ?? {}, row.role)).reply;
+/**
+ * Membro ativo do tenant cujo papel responde no atendimento. Fora disso, 400
+ * `INVALID_ASSIGNEE`, sem dizer se a pessoa existe.
+ */
+async function assertAssignable(tx: Tx, actor: InboxActor, tenantId: string, userId: string) {
+  const role = await activeMemberRole(tx, tenantId, userId);
+  const replies = role !== null && inboxCapabilities(permissionsOf(actor.catalog ?? {}, role)).reply;
   if (!replies) {
     throw new TenantRuleError(
       400,
@@ -143,9 +148,10 @@ export async function assignConversation(
     const previous = current.assignedUserId;
 
     if (userId === null) {
+      // Já está na fila: nada a fazer (dois cliques, ou outro devolveu antes).
+      if (previous === null) return conversationItem(tx, actor, conversationId);
       const own = previous === actor.userId;
       if (own ? !actor.can.reply : !actor.can.assign) throw permissionDenied();
-      if (previous === null) return conversationItem(tx, actor, conversationId);
 
       await tx
         .update(conversation)

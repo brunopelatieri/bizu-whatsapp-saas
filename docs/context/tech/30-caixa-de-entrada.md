@@ -201,6 +201,12 @@ traz `payload` (só nome e tipo da mídia pendente), e a mídia aponta para a ro
    (`clientId = retry-<id antigo>`) na mesma transação.
 4. **`inbox.sweep`:** `queued` há mais de 2 min vira `failed` com `UNKNOWN_RESULT`.
 
+**Limites conhecidos:** (a) se o provedor responder depois de 2 min e o atendente já tiver usado
+"Reenviar" na `UNKNOWN_RESULT`, o contato recebe duas vezes (a original sumiu; a tela avisa para
+conferir no celular antes de reenviar). (b) O eco `device` apagado em `recordSent` é sempre de texto
+nesta fase; com anexo de saída (C5), apagar o eco precisa levar junto o `file` dele. (c) Aviso de
+status que chega antes de gravarmos o `provider_message_id` fica `ignored` e a mensagem para em `sent`.
+
 ### Contato e início de conversa (`contact-actions.ts`)
 
 - **Vincular:** cliente do tenant (`customer:update`), membro ativo (400 `INVALID_LINK`) ou os dois

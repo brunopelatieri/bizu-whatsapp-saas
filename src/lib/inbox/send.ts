@@ -13,7 +13,7 @@ import {
   permissionDenied,
   requireVisibleConversation,
 } from "@/lib/inbox/conversations";
-import { previewOf } from "@/lib/inbox/ingest";
+import { previewOf } from "@/lib/inbox/preview";
 import { notifyInbox } from "@/lib/inbox/notify";
 import type { MessageView } from "@/lib/inbox/views";
 import type { InboxActor } from "@/lib/inbox/visibility";
@@ -293,8 +293,18 @@ async function recordFailure(scope: Scope, prepared: Prepared, error: unknown) {
   });
 }
 
-/** Chama o provedor fora da transação e grava o resultado. */
+async function outcomeOf(actor: InboxActor, messageId: string): Promise<SendOutcome> {
+  const view = await withScope(actor.scope, (tx) => messageView(tx, messageId));
+  return { message: view, failed: view.status === "failed" };
+}
+
+/**
+ * Chama o provedor fora da transação e grava o resultado. A mensagem que já existia (`clientId`
+ * repetido) só é devolvida: nunca vai ao provedor de novo.
+ */
 async function dispatch(actor: InboxActor, prepared: Prepared): Promise<SendOutcome> {
+  if (!prepared.created) return outcomeOf(actor, prepared.messageId);
+
   const attempt = sendChannelText(actor.scope, prepared.channelId, {
     to: prepared.to,
     text: prepared.text,
@@ -316,8 +326,7 @@ async function dispatch(actor: InboxActor, prepared: Prepared): Promise<SendOutc
     );
   }
 
-  const view = await withScope(actor.scope, (tx) => messageView(tx, prepared.messageId));
-  return { message: view, failed: view.status === "failed" };
+  return outcomeOf(actor, prepared.messageId);
 }
 
 /**
@@ -334,10 +343,6 @@ export async function sendText(
   const prepared = await withScope(actor.scope, (tx) =>
     queueText(tx, actor, conversationId, input),
   );
-  if (!prepared.created) {
-    const view = await withScope(actor.scope, (tx) => messageView(tx, prepared.messageId));
-    return { message: view, failed: view.status === "failed" };
-  }
   return dispatch(actor, prepared);
 }
 

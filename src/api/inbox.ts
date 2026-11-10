@@ -14,7 +14,7 @@ import { blockMutationsWhileImpersonating } from "@/api/impersonation";
 import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
-import { attachmentHeader } from "@/lib/files/types";
+import { dispositionHeader } from "@/lib/files/types";
 import {
   assignConversation,
   claimConversation,
@@ -64,6 +64,7 @@ inboxRoutes.onError(handleTenantError);
 inboxRoutes.use(
   "/api/inbox/*",
   sameOrigin,
+  // 16 KB: 4096 unidades UTF-16 de texto dão no máximo ~12 KB em UTF-8.
   jsonBodyLimit,
   authRateLimit,
   requireAuth,
@@ -131,13 +132,12 @@ inboxRoutes.get("/api/inbox/assignees", requirePermission("inbox", "assign"), as
 
 inboxRoutes.get("/api/inbox/messages/:id/media", canRead, validId, async (c) => {
   const media = await openMessageMedia(inboxActor(c), c.req.valid("param").id);
-  const disposition = attachmentHeader(media.name);
 
   return new Response(Readable.toWeb(media.body) as ReadableStream, {
     headers: {
       "Content-Type": media.mime,
       "Content-Length": String(media.size),
-      "Content-Disposition": media.inline ? disposition.replace(/^attachment/, "inline") : disposition,
+      "Content-Disposition": dispositionHeader(media.name, media.inline ? "inline" : "attachment"),
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, max-age=300",
     },

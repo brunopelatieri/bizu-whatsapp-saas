@@ -238,6 +238,13 @@ describe("/api/inbox: leitura e fila", () => {
       });
       expect(release.status).toBe(200);
       expect(((await bodyOf(release)).conversation as Item).assignedTo).toBeNull();
+
+      // Devolver de novo (já na fila) não é erro, mesmo sem `inbox:assign`.
+      const again = await call("POST", `/api/inbox/conversations/${a.id}/assign`, {
+        cookie: as("memberA"),
+        body: { userId: null },
+      });
+      expect(again.status).toBe(200);
     });
 
     it("o admin transfere para quem atende; destino fora da equipe ou sem atendimento é 400", async () => {

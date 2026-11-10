@@ -49,9 +49,14 @@ export function sanitizeFileName(raw: string) {
   return (clean || "arquivo").slice(0, MAX_NAME_LENGTH);
 }
 
-/** `Content-Disposition: attachment` seguro para qualquer nome (RFC 5987). */
-export function attachmentHeader(name: string) {
+/** `Content-Disposition` seguro para qualquer nome (RFC 5987). `inline` só para tipo passivo. */
+export function dispositionHeader(name: string, kind: "attachment" | "inline") {
   const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/[\\"]/g, "_");
 
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+  return `${kind}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/** `Content-Disposition: attachment` seguro para qualquer nome (RFC 5987). */
+export function attachmentHeader(name: string) {
+  return dispositionHeader(name, "attachment");
 }
