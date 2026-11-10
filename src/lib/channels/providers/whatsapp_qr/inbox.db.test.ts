@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 import type postgres from "postgres";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { api } from "@/api/app";
-import { withPlatformScope } from "@/db/rls";
-import { chatContact, conversation, file, message } from "@/db/schema";
+import { withPlatformScope, withScope } from "@/db/rls";
+import { channel, channelEvolution, chatContact, conversation, file, message } from "@/db/schema";
 import {
   processChannelEvent,
   setChannelQueueForTests,
@@ -17,7 +17,12 @@ import {
 import { setProvidersForTests } from "@/lib/channels/registry";
 import { fixture, fixtureText } from "@/lib/channels/test-fixtures";
 import { setStorageForTests } from "@/lib/storage";
-import { cleanUpChannels, createTenantRow, tenantScope } from "../../../../../tests/db/channels-helpers";
+import {
+  cleanUpChannels,
+  createTenantRow,
+  seedQrChannel,
+  tenantScope,
+} from "../../../../../tests/db/channels-helpers";
 import { connectOwner } from "../../../../../tests/db/tenant-helpers";
 
 /**
@@ -148,6 +153,27 @@ describe("caixa de entrada com avisos da Evolution", () => {
     await expect(deliver(ch.webhookSecret, fixtureText("evolution/receipt-read"))).resolves.toBe("processed");
 
     expect((await messages(ch.id)).find((row) => row.providerMessageId === "3EB0OUT00001")?.status).toBe("read");
+  });
+
+  it("canal novo que já tem conversa conecta sem readotar o antigo (o histórico não muda de número)", async () => {
+    const scope = tenantScope(tenantId);
+    const old = await seedQrChannel(scope, { name: "Antigo", status: "disabled" });
+    await withScope(scope, (tx) =>
+      tx
+        .update(channelEvolution)
+        .set({ connectedPhone: "5511999990001", instanceTokenEnc: null, webhookSecretEnc: null, remoteInstanceId: null })
+        .where(eq(channelEvolution.channelId, old.id)),
+    );
+    const fresh = await seedFixtureChannel(scope, { name: "Novo", status: "connecting" });
+
+    // A mensagem chega e é aplicada antes do aviso de conexão.
+    await expect(deliver(fresh.webhookSecret, fixtureText("evolution/message-text"))).resolves.toBe("processed");
+    await expect(deliver(fresh.webhookSecret, fixtureText("evolution/connected"))).resolves.toBe("processed");
+
+    const channels = await read((tx) => tx.select().from(channel).where(eq(channel.tenantId, tenantId)));
+    expect(channels.find((row) => row.id === fresh.id)).toMatchObject({ status: "connected" });
+    expect(channels.find((row) => row.id === old.id)).toMatchObject({ status: "disabled" });
+    expect(await threadOf(fresh.id)).toBeDefined();
   });
 
   it("LID sem telefone conhecido e mensagem de grupo ficam ignored, sem contato", async () => {

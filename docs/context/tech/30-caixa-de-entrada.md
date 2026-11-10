@@ -78,8 +78,11 @@ canais); `undefined` volta à ingestão real. Retorno `false` = aviso `ignored`.
    `status = sent`; não soma não lida nem mexe na situação, no dono e em `last_inbound_at`.
 7. `notifyInbox(tx, { s, c, k, m, a })` na mesma transação: ponto de extensão da C4, hoje vazio.
 
-Mensagem repetida com mídia nova (outro aviso, outra chave) apaga o objeto que ninguém cita, depois do
-commit. O aviso inteiro `ignored` já apaga a própria mídia (`deleteInboundMedia`).
+Item descartado (repetido, LID desconhecido, eco sem `deviceEcho`) apaga a mídia que trouxe, se
+nenhum `file` a cita, depois do commit, mesmo que outro item do aviso seja aplicado. O aviso inteiro
+`ignored` já apaga a própria mídia (`deleteInboundMedia`).
+
+Canal QR novo que já tem conversa não é readotado (`connection.ts`): o histórico não muda de número.
 
 **`status`:** um `UPDATE` condicional, sem ler antes: `queued < sent < delivered < read`; `failed` só
 a partir de `queued` ou `sent`, com `error_code` (o `#código` da Meta) e `error_message` (até 500).
@@ -99,7 +102,12 @@ avança vira `ignored`.
 4. Grava sob `inbox/<tenant | platform>/<chave aleatória>`, cria o `file` e passa a mensagem a
    `ready` com `WHERE media_status = 'pending'`; perdeu a corrida, apaga o objeto.
 5. Recusa do provedor (4xx menos 429) ou `PermanentEventError`: `failed` na hora. Outra falha lança
-   (o pg-boss repete); a última tentativa marca `failed`. Log só por `logChannelError`, sem conteúdo.
+   (o pg-boss repete), inclusive erro ao carregar e módulo fora de `CHANNEL_PROVIDERS`; a última
+   tentativa marca `failed`. Log só por `logChannelError`, sem conteúdo.
+
+**Limite conhecido:** se enfileirar o job falhar depois do commit do aviso (fila fora do ar), a
+mensagem fica `pending` até alguém usar "Tentar de novo" (`POST .../media/retry`, C2). Não há varredura
+de mídia `pending` (pediria um índice parcial novo em `message`).
 
 **Pendente para quem servir a mídia (C2):** o `file.mime` da mídia da Evolution é o declarado pelo
 remetente, filtrado por `safeMime` (sem HTML/SVG/script), mas não conferido pelo conteúdo. A rota

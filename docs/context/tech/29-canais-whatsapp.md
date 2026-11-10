@@ -121,7 +121,9 @@ só o módulo com a capacidade `pairing` implementa. As rotas são do módulo
   grava estado, telefone e JID e audita `channel.connected`/`channel.disconnected` só na passagem. Se o
   telefone que conectou já tem um canal por QR **não conectado no mesmo escopo** (desativado ou caído),
   a instância nova passa para o canal antigo (segredos recifrados: o `aad` leva o id), os avisos
-  pendentes seguem junto e o canal novo é apagado. Para quem consulta o canal novo, `status` responde
+  pendentes seguem junto e o canal novo é apagado. Canal novo que **já tem conversa** (mensagem
+  aplicada antes do aviso de conexão) não é readotado: o histórico não muda de número
+  (`conversation.channel_id` é imutável e `restrict`), e ele conecta como canal próprio. Para quem consulta o canal novo, `status` responde
   404 (ou `readoptedInto`): a tela trata como conectado.
 - **Envio** (`send.ts`): canal que não está `connected` responde 409 `CHANNEL_NOT_CONNECTED` antes de
   chamar o provedor; 401/403 do provedor marca o canal `error`.

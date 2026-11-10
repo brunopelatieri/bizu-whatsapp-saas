@@ -3,7 +3,11 @@ import { type Scope, scopeTenantId, type Tx, withScope } from "@/db/rls";
 import { channel, file, message } from "@/db/schema";
 import { getBoss } from "@/jobs/boss";
 import { type InboxMediaJob, QUEUE } from "@/jobs/queues";
-import { PermanentEventError, ProviderError } from "@/lib/channels/errors";
+import {
+  ChannelNotConfiguredError,
+  PermanentEventError,
+  ProviderError,
+} from "@/lib/channels/errors";
 import { logChannelError } from "@/lib/channels/log";
 import { isStoredMedia, MAX_INBOUND_MEDIA_BYTES, safeMime } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
@@ -55,6 +59,8 @@ const OFFICE_OLE = new Set([
   "application/vnd.ms-powerpoint",
 ]);
 const PLAIN_TEXT = new Set(["text/plain", "text/csv"]);
+/** Marcas `ftyp` de imagem HEIF (fotos de iPhone): não são vídeo. */
+const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "mif1", "msf1"]);
 
 const at = (bytes: Buffer, signature: number[], offset = 0) =>
   signature.every((byte, index) => bytes[offset + index] === byte);
@@ -75,6 +81,9 @@ export function sniffMime(bytes: Buffer): string | null {
     const brand = ascii(bytes, 8, 12);
     if (brand.startsWith("3gp")) return "video/3gpp";
     if (brand.startsWith("M4A") || brand.startsWith("M4B")) return "audio/mp4";
+    if (HEIF_BRANDS.has(brand)) return "image/heic";
+    if (brand === "avif" || brand === "avis") return "image/avif";
+    if (brand === "qt  ") return "video/quicktime";
     return "video/mp4";
   }
   if (at(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return "video/webm";
@@ -204,26 +213,26 @@ export async function processInboxMedia(
   options: { lastAttempt?: boolean } = {},
 ): Promise<InboxMediaOutcome> {
   const scope = scopeOfJob(job);
-
-  const loaded = await withScope(scope, async (tx) => {
-    const [row] = await tx.select().from(message).where(eq(message.id, job.messageId));
-    if (row?.mediaStatus !== "pending" || !row.providerMediaId) return null;
-
-    const [target] = await tx.select().from(channel).where(eq(channel.id, row.channelId));
-    if (!target) return null;
-
-    return { row, target, ctx: await contextFor(tx, target) };
-  });
-  if (!loaded) return "skipped";
-
-  const { row, target, ctx } = loaded;
   let storedKey: string | null = null;
 
   try {
+    // Dentro do `try`: falha ao carregar (banco, credencial) também conta para a última tentativa.
+    const loaded = await withScope(scope, async (tx) => {
+      const [row] = await tx.select().from(message).where(eq(message.id, job.messageId));
+      if (row?.mediaStatus !== "pending" || !row.providerMediaId) return null;
+
+      const [target] = await tx.select().from(channel).where(eq(channel.id, row.channelId));
+      if (!target) return null;
+
+      return { row, target, ctx: await contextFor(tx, target) };
+    });
+    if (!loaded) return "skipped";
+
+    const { row, target, ctx } = loaded;
+    // Módulo fora de `CHANNEL_PROVIDERS` é configuração: repete, e só a última tentativa desiste.
     const provider = findProvider(target.type);
-    if (!provider?.fetchMedia) {
-      throw new PermanentEventError("O canal não baixa mídia.");
-    }
+    if (!provider) throw new ChannelNotConfiguredError(target.type);
+    if (!provider.fetchMedia) throw new PermanentEventError("O canal não baixa mídia.");
 
     const { body, mime: declared } = await provider.fetchMedia(ctx, row.providerMediaId as string);
     if (body.byteLength === 0) throw new PermanentEventError("Mídia vazia.");
@@ -286,7 +295,7 @@ export async function processInboxMedia(
 
     const permanent = isPermanent(error);
     if (permanent || options.lastAttempt) {
-      await markFailed(scope, row.id);
+      await markFailed(scope, job.messageId);
       logChannelError("Mídia de mensagem não baixada", error);
       return "failed";
     }

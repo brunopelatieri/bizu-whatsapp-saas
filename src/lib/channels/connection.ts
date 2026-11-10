@@ -3,7 +3,13 @@ import type { Scope, Tx } from "@/db/rls";
 import { channel, channelEvent, channelEvolution } from "@/db/schema";
 import { audit, auditInTransaction } from "@/lib/audit";
 import { transferPairingSecrets } from "@/lib/channels/credentials";
-import { applyChannelStatus, electDefault, lockScopeType, scopeWhere } from "@/lib/channels/service";
+import {
+  applyChannelStatus,
+  channelHasConversations,
+  electDefault,
+  lockScopeType,
+  scopeWhere,
+} from "@/lib/channels/service";
 import type { ChannelContext, ChannelStatus } from "@/lib/channels/types";
 
 /**
@@ -96,6 +102,9 @@ async function readopt(
     .where(eq(channelEvolution.channelId, current.id))
     .for("update");
   if (!mine) return false;
+  // O canal novo já tem conversa (mensagens chegaram antes do aviso de conexão): o histórico não
+  // muda de número (`conversation.channel_id` é imutável e `restrict`), então não há readoção.
+  if (await channelHasConversations(tx, current.id)) return false;
 
   const oldId = previous.channel.id;
   const leftover = previous.evolution.remoteInstanceId;

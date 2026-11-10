@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { type Scope, withPlatformScope, withScope } from "@/db/rls";
@@ -478,7 +478,12 @@ describe("ingestão da caixa de entrada", () => {
       const none = (await contactsOf(platformScope)).find((row) => row.phoneKey === phoneValues(shared).phoneKey);
       expect(none).toMatchObject({ userId: null, customerId: null });
 
-      await read((tx) => tx.delete(chatContact).where(isNull(chatContact.tenantId)));
+      // Só os contatos deste teste: o banco pode ser o de desenvolvimento.
+      await read((tx) =>
+        tx
+          .delete(chatContact)
+          .where(and(isNull(chatContact.tenantId), inArray(chatContact.phoneKey, platformKeys))),
+      );
       await cleanUpChannels(owner, []);
     });
 
@@ -730,6 +735,42 @@ describe("ingestão da caixa de entrada", () => {
       expect(media.objects.has(second)).toBe(false);
     });
 
+    it("item descartado (LID desconhecido) leva a própria mídia embora, mesmo com o aviso processado", async () => {
+      setStorageForTests(media.storage);
+      const ch = await seedQrChannel(tenantScope(tenantA));
+      const orphan = `inbound/inbox-test-${randomUUID()}`;
+      media.objects.set(orphan, { body: JPEG });
+
+      await expect(
+        deliver(ch, [
+          inbound({
+            fromPhone: null,
+            fromExternalId: "111111111111111@lid",
+            messageType: "image",
+            media: { kind: "image", mime: "image/jpeg", filename: null, storage: { storageKey: orphan, mime: "image/jpeg", size: 10 } },
+          }),
+          inbound(),
+        ]),
+      ).resolves.toBe("processed");
+
+      expect(media.objects.has(orphan)).toBe(false);
+      expect(await messagesOf(ch.id)).toHaveLength(1);
+    });
+
+    it("Cloud: módulo fora do ar é falha passageira; só a última tentativa marca failed", async () => {
+      setStorageForTests(media.storage);
+      const ch = await seedCloudChannel(tenantScope(tenantA));
+      await deliver(ch, [
+        inbound({ messageType: "image", media: { kind: "image", mime: "image/jpeg", filename: null, providerMediaId: "m-1" } }),
+      ]);
+      setProvidersForTests([]);
+
+      await expect(processInboxMedia(jobs[0] as InboxMediaJob)).rejects.toThrow(/não está configurado/);
+      expect((await messagesOf(ch.id))[0]?.mediaStatus).toBe("pending");
+      await expect(processInboxMedia(jobs[0] as InboxMediaJob, { lastAttempt: true })).resolves.toBe("failed");
+      expect((await messagesOf(ch.id))[0]?.mediaStatus).toBe("failed");
+    });
+
     it("Cloud: nasce pending e enfileira inbox.media; o job baixa, confere o tipo pelo conteúdo e grava", async () => {
       setStorageForTests(media.storage);
       const ch = await seedCloudChannel(tenantScope(tenantA));
@@ -793,6 +834,10 @@ describe("ingestão da caixa de entrada", () => {
       expect(inboundMime(Buffer.from("OggS\0\0"), "audio/ogg; codecs=opus")).toBe("audio/ogg");
       expect(inboundMime(Buffer.from("<html><script>"), "image/jpeg")).toBe("application/octet-stream");
       expect(inboundMime(Buffer.from("a,b\n1,2"), "text/csv")).toBe("text/csv");
+      const box = (brand: string) => Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from(`ftyp${brand}`)]);
+      expect(inboundMime(box("heic"), "video/mp4")).toBe("image/heic");
+      expect(inboundMime(box("isom"), "video/mp4")).toBe("video/mp4");
+      expect(inboundMime(box("M4A "), "audio/mp4")).toBe("audio/mp4");
     });
   });
 

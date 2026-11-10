@@ -77,10 +77,11 @@ async function defer(after: AfterCommit | undefined, effect: () => Promise<void>
 }
 
 /**
- * Mensagem repetida descartada: a mídia que o aviso trouxe (gravada pelo webhook sob uma chave
- * nova) não é de ninguém e sai do armazenamento depois do commit. Só se nenhum `file` a cita.
+ * Item descartado (repetido, LID desconhecido, eco sem `deviceEcho`): a mídia que ele trouxe
+ * (gravada pelo webhook sob uma chave nova) não é de ninguém e sai do armazenamento depois do
+ * commit, mesmo que outro item do aviso seja aplicado. Só se nenhum `file` a cita.
  */
-async function discardDuplicateMedia(tx: Tx, event: NormalizedMessage, after?: AfterCommit) {
+async function discardMedia(tx: Tx, event: NormalizedMessage, after?: AfterCommit) {
   const key = event.media?.storage?.storageKey;
   if (!key || !isStoredMedia(event.media?.storage)) return;
 
@@ -193,6 +194,18 @@ export async function ingestMessage(
   event: NormalizedMessage,
   after?: AfterCommit,
 ): Promise<boolean> {
+  const applied = await applyMessage(tx, scope, target, event, after);
+  if (!applied) await discardMedia(tx, event, after);
+  return applied;
+}
+
+async function applyMessage(
+  tx: Tx,
+  scope: Scope,
+  target: ChannelRow,
+  event: NormalizedMessage,
+  after: AfterCommit | undefined,
+): Promise<boolean> {
   const echo = event.fromMe;
   if (echo && !can(target.type, "deviceEcho")) return false;
 
@@ -201,10 +214,7 @@ export async function ingestMessage(
   if (!event.fromPhone && !lid) return false;
   if (!event.providerMessageId) return false;
 
-  if (await knownMessage(tx, target.id, event.providerMessageId)) {
-    await discardDuplicateMedia(tx, event, after);
-    return false;
-  }
+  if (await knownMessage(tx, target.id, event.providerMessageId)) return false;
 
   const contactId = await resolveContact(tx, scope, event, lid);
   if (!contactId) return false;
@@ -293,8 +303,6 @@ export async function ingestMessage(
     });
   } catch (error) {
     if (!(error instanceof DuplicateMessage)) throw error;
-
-    await discardDuplicateMedia(tx, event, after);
     return false;
   }
 }
