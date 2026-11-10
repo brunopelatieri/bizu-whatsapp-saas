@@ -8,7 +8,7 @@ import {
   text,
   uuid,
 } from "drizzle-orm/pg-core";
-import { eq, isTable, like, sql } from "drizzle-orm";
+import { eq, inArray, isTable, like, sql } from "drizzle-orm";
 import type postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -671,6 +671,189 @@ describe("RLS do CRM da plataforma (tabelas reais)", () => {
 
       expect(await tx`select 1 from organization_tag where organization_id = ${doomed}`).toHaveLength(0);
       expect(await tx`select 1 from organization_profile where organization_id = ${doomed}`).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * Caixa de entrada (`docs/specs/caixa-de-entrada/spec.md`, passo 1): `chat_contact`,
+ * `chat_contact_identity`, `conversation`, `message` e `file` (agora com `tenant_id` anulável)
+ * nos três modos de `scopedPolicy()`, com as tabelas reais.
+ */
+describe("RLS da caixa de entrada (tabelas reais)", () => {
+  const { chatContact, chatContactIdentity, conversation, message, file } = schema;
+  let owner: postgres.Sql;
+  const marker = randomUUID().slice(0, 8);
+  const tenantA = randomUUID();
+  const tenantB = randomUUID();
+  const rowIds = () => ({
+    channel: randomUUID(),
+    contact: randomUUID(),
+    identity: randomUUID(),
+    conversation: randomUUID(),
+    message: randomUUID(),
+    file: randomUUID(),
+  });
+  /** Uma linha de cada tabela por escopo: A, B e plataforma. */
+  const ids = { A: rowIds(), B: rowIds(), P: rowIds() };
+  const scopes = [
+    ["A", () => tenantA],
+    ["B", () => tenantB],
+    ["P", () => null],
+  ] as const;
+
+  const inboxTables = [
+    ["chat_contact", chatContact, "contact"],
+    ["chat_contact_identity", chatContactIdentity, "identity"],
+    ["conversation", conversation, "conversation"],
+    ["message", message, "message"],
+    ["file", file, "file"],
+  ] as const;
+
+  type Key = (typeof inboxTables)[number][2];
+  const allIds = (key: Key) => [ids.A[key], ids.B[key], ids.P[key]];
+
+  /** Ids da tabela que a conexão enxerga, entre as linhas deste teste. */
+  async function visible(tx: Pick<Tx, "select">, key: Key) {
+    const entry = inboxTables.find(([, , name]) => name === key);
+    if (!entry) throw new Error(key);
+    const table = entry[1];
+    const rows = await tx
+      .select({ id: table.id })
+      .from(table)
+      .where(inArray(table.id, allIds(key)));
+    return rows.map(({ id }) => id).sort();
+  }
+
+  beforeAll(async () => {
+    owner = connectOwner();
+
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`
+        insert into organization (id, name, slug) values
+          (${tenantA}, 'Inbox A', ${`inbox-a-${marker}`}),
+          (${tenantB}, 'Inbox B', ${`inbox-b-${marker}`})
+      `;
+      for (const [name, tenantOf] of scopes) {
+        const row = ids[name];
+        const tenantId = tenantOf();
+        await tx`insert into channel (id, tenant_id, type, name) values (${row.channel}, ${tenantId}, 'whatsapp_qr', ${`inbox-${name}-${marker}`})`;
+        await tx`insert into chat_contact (id, tenant_id, phone, phone_key, created_via) values (${row.contact}, ${tenantId}, '5511988880001', '551188880001', 'inbound')`;
+        await tx`insert into chat_contact_identity (id, tenant_id, contact_id, kind, value) values (${row.identity}, ${tenantId}, ${row.contact}, 'lid', ${`${marker}@lid`})`;
+        await tx`insert into conversation (id, tenant_id, channel_id, contact_id) values (${row.conversation}, ${tenantId}, ${row.channel}, ${row.contact})`;
+        await tx`insert into file (id, tenant_id, owner_type, owner_id, key, name, size, mime, provider) values (${row.file}, ${tenantId}, 'message', ${row.message}, ${`inbound/${marker}-${name}`}, 'foto.jpg', 10, 'image/jpeg', 'memory')`;
+        await tx`insert into message (id, tenant_id, conversation_id, channel_id, direction, sender_type, type, text, file_id, media_status, provider_message_id) values (${row.message}, ${tenantId}, ${row.conversation}, ${row.channel}, 'in', 'contact', 'image', 'oi', ${row.file}, 'ready', ${`wamid.${marker}`})`;
+      }
+    });
+  });
+
+  afterAll(async () => {
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`delete from chat_contact where id = any(${allIds("contact")}::uuid[])`;
+      await tx`delete from file where id = any(${allIds("file")}::uuid[])`;
+      await tx`delete from channel where id = ${ids.P.channel}`;
+      await tx`delete from organization where id in (${tenantA}, ${tenantB})`;
+    });
+    await owner.end();
+  });
+
+  it.each(inboxTables.map(([name, , key]) => [name, key] as const))(
+    "%s: withTenant lê só o próprio tenant, withPlatformData só a plataforma, bypass tudo, cru nada",
+    async (_name, key) => {
+      expect(await withTenant(tenantA, (tx) => visible(tx, key))).toEqual([ids.A[key]]);
+      expect(await withTenant(tenantB, (tx) => visible(tx, key))).toEqual([ids.B[key]]);
+      expect(await withPlatformData((tx) => visible(tx, key))).toEqual([ids.P[key]]);
+      expect(await withPlatformScope("teste", (tx) => visible(tx, key))).toEqual(allIds(key).sort());
+      expect(await visible(getDb(), key)).toEqual([]);
+    },
+  );
+
+  const contactValues = (tenantId: string | null) => ({
+    tenantId,
+    phone: "5511977770001",
+    phoneKey: "551177770001",
+    createdVia: "inbound" as const,
+  });
+
+  it("withTenant não grava linha da plataforma nem de outro tenant", async () => {
+    for (const tenantId of [null, tenantB]) {
+      await expect(
+        withTenant(tenantA, (tx) => tx.insert(chatContact).values(contactValues(tenantId))),
+      ).rejects.toMatchObject({ cause: { code: "42501" } });
+    }
+  });
+
+  it("withPlatformData não grava linha com tenant_id; bizu_app cru não grava nada", async () => {
+    await expect(
+      withPlatformData((tx) => tx.insert(chatContact).values(contactValues(tenantA))),
+    ).rejects.toMatchObject({ cause: { code: "42501" } });
+    await expect(getDb().insert(chatContact).values(contactValues(null))).rejects.toMatchObject({
+      cause: { code: "42501" },
+    });
+  });
+
+  it("tenant não lê nem apaga arquivo da plataforma", async () => {
+    const result = await withTenant(tenantA, async (tx) => ({
+      read: await tx.select().from(file).where(eq(file.id, ids.P.file)),
+      deleted: await tx.delete(file).where(eq(file.id, ids.P.file)).returning(),
+    }));
+
+    expect(result).toEqual({ read: [], deleted: [] });
+    expect(await withPlatformData((tx) => visible(tx, "file"))).toEqual([ids.P.file]);
+  });
+
+  it("conversation.channel_id é imutável, inclusive com bypass", async () => {
+    const move = (tx: Tx) =>
+      tx
+        .update(conversation)
+        .set({ channelId: ids.B.channel })
+        .where(eq(conversation.id, ids.A.conversation));
+
+    await expect(withTenant(tenantA, move)).rejects.toMatchObject({ cause: { code: "23514" } });
+    await expect(withPlatformScope("teste", move)).rejects.toMatchObject({
+      cause: { code: "23514" },
+    });
+
+    // Os demais campos seguem editáveis, e repetir o mesmo canal não é troca.
+    const [row] = await withTenant(tenantA, (tx) =>
+      tx
+        .update(conversation)
+        .set({ status: "pending", channelId: ids.A.channel })
+        .where(eq(conversation.id, ids.A.conversation))
+        .returning(),
+    );
+    expect(row).toMatchObject({ status: "pending", channelId: ids.A.channel });
+  });
+
+  it("canal com conversa não é apagado (restrict); apagar a organização leva tudo por cascade", async () => {
+    await expect(
+      withTenant(tenantB, (tx) =>
+        tx.delete(schema.channel).where(eq(schema.channel.id, ids.B.channel)),
+      ),
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
+
+    const doomed = randomUUID();
+    const row = rowIds();
+    await owner.begin(async (tx) => {
+      await tx`select set_config('app.bypass_tenant', 'on', true)`;
+      await tx`insert into organization (id, name, slug) values (${doomed}, 'Inbox C', ${`inbox-c-${marker}`})`;
+      await tx`insert into channel (id, tenant_id, type, name) values (${row.channel}, ${doomed}, 'whatsapp_qr', 'c')`;
+      await tx`insert into chat_contact (id, tenant_id, phone, phone_key, created_via) values (${row.contact}, ${doomed}, '5511988880001', '551188880001', 'inbound')`;
+      await tx`insert into conversation (id, tenant_id, channel_id, contact_id) values (${row.conversation}, ${doomed}, ${row.channel}, ${row.contact})`;
+      await tx`insert into file (id, tenant_id, owner_type, owner_id, key, name, size, mime, provider) values (${row.file}, ${doomed}, 'message', ${row.message}, ${`inbound/${marker}-c`}, 'a.jpg', 1, 'image/jpeg', 'memory')`;
+      await tx`insert into message (id, tenant_id, conversation_id, channel_id, direction, sender_type, type, file_id) values (${row.message}, ${doomed}, ${row.conversation}, ${row.channel}, 'in', 'contact', 'image', ${row.file})`;
+      await tx`delete from organization where id = ${doomed}`;
+
+      const left = await tx`
+        select (select count(*) from channel where id = ${row.channel})
+             + (select count(*) from chat_contact where id = ${row.contact})
+             + (select count(*) from conversation where id = ${row.conversation})
+             + (select count(*) from message where id = ${row.message})
+             + (select count(*) from file where id = ${row.file}) as total
+      `;
+      expect(Number(left[0]?.total)).toBe(0);
     });
   });
 });

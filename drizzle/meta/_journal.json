@@ -225,6 +225,20 @@
       "when": 1794265591478,
       "tag": "0031_audit_escopo_plataforma",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794279090548,
+      "tag": "0032_caixa_de_entrada",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794279121747,
+      "tag": "0033_rls_caixa_de_entrada",
+      "breakpoints": true
     }
   ]
 }
