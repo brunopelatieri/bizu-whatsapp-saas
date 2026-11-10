@@ -1,4 +1,4 @@
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, notInArray } from "drizzle-orm";
 import type { Tx } from "@/db/rls";
 import { type chatContact, member, organization, user } from "@/db/schema";
 import { annotationsOfOrganizations, type OrgTagView } from "@/lib/crm/organization-profile";
@@ -24,8 +24,8 @@ export type PlatformContactLink =
   | { kind: "user"; user: { id: string; name: string }; organizations: PlatformOrganizationView[] }
   | { kind: "none" };
 
-/** Organizações em exclusão não entram no painel. */
-const LIVE = ne(organization.status, "deleted");
+/** Organizações em exclusão ou já apagadas não entram no painel (como o 404 da anotação). */
+const LIVE = notInArray(organization.status, ["deleting", "deleted"]);
 
 export async function platformLinkOf(
   tx: Tx,

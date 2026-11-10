@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { withScope } from "@/db/rls";
+import { type Tx, withScope } from "@/db/rls";
 import { chatContact, conversation, user } from "@/db/schema";
 import { requireChannelRow } from "@/lib/channels/service";
 import type { PlatformRole } from "@/lib/auth/types";
@@ -96,10 +96,7 @@ export async function linkPlatformContact(
 }
 
 /** O telefone do destino: o do usuário ou o digitado. Número avulso não procura cliente de owner. */
-async function destinationOf(
-  tx: Parameters<Parameters<typeof withScope>[1]>[0],
-  input: PlatformStartConversationInput,
-) {
+async function destinationOf(tx: Tx, input: PlatformStartConversationInput) {
   let raw: string;
   let link: { userId?: string } = {};
 

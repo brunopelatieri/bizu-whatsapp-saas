@@ -9,7 +9,7 @@ import {
   startPlatformConversation,
 } from "@/lib/inbox/platform";
 import { sendText } from "@/lib/inbox/send";
-import { visibleConversation } from "@/lib/inbox/visibility";
+import { noticeVisibleTo, ownerVisible } from "@/lib/inbox/visibility";
 import {
   platformConversationsQuerySchema,
   platformLinkContactSchema,
@@ -60,9 +60,13 @@ describe("platformCapabilities", () => {
   it("o ator da plataforma tem escopo plataforma, sem permissões de tenant", () => {
     const actor = platformActor({ id: "u1", platformRole: "platform_owner" }, "10.0.0.1");
     expect(actor).toMatchObject({ scope: { kind: "platform" }, userId: "u1", permissions: [], ip: "10.0.0.1" });
-    // Sem `inbox:read` o predicado é falso: a falha é fechada.
+    // Sem papel de plataforma não há leitura: o aviso do escopo também não chega (falha fechada).
     const none = platformActor({ id: "u2", platformRole: "user" });
-    expect(visibleConversation(none)).toBeDefined();
+    expect(none.can.read).toBe(false);
+    expect(noticeVisibleTo(none, { s: null, a: null })).toBe(false);
+    expect(ownerVisible(none, null)).toBe(false);
+    expect(noticeVisibleTo(actor, { s: null, a: null })).toBe(true);
+    expect(noticeVisibleTo(actor, { s: "um-tenant", a: null })).toBe(false);
   });
 });
 

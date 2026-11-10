@@ -226,7 +226,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
       await tx`delete from chat_contact where tenant_id is null and phone_key = any(${phoneKeys})`;
       await tx`delete from chat_contact where tenant_id = ${tenantId}`;
       await tx`delete from customer where tenant_id = ${tenantId}`;
-      await tx`delete from audit_log where tenant_id is null and action like 'inbox.%'`;
+      await tx`delete from audit_log where tenant_id is null and action like 'inbox.%' and actor_id in (${users.platformOwner?.id as string}, ${users.support?.id as string})`;
     });
     phoneKeys.length = 0;
   });
