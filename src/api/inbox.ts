@@ -29,12 +29,14 @@ import {
   unreadCounts,
 } from "@/lib/inbox/conversations";
 import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
+import { retryMessage, sendText } from "@/lib/inbox/send";
 import { type InboxActor, inboxCapabilities } from "@/lib/inbox/visibility";
 import {
   assignSchema,
   conversationStatusSchema,
   conversationsQuerySchema,
   messagesQuerySchema,
+  sendMessageSchema,
 } from "@/lib/schemas/inbox";
 
 /**
@@ -78,6 +80,8 @@ const perUser = (name: string, limit: number) =>
 /** Assumir, transferir, situação e lida: 60 por minuto por pessoa. */
 const queueLimit = perUser("inbox-queue", 60);
 const mediaRetryLimit = perUser("inbox-media-retry", 20);
+/** Envio e reenvio: 60 por minuto por pessoa (SPEC, "Contratos"). */
+const sendLimit = perUser("inbox-send", 60);
 
 const canRead = requirePermission("inbox", "read");
 const canReply = requirePermission("inbox", "reply");
@@ -171,6 +175,35 @@ inboxRoutes.post(
 inboxRoutes.post("/api/inbox/conversations/:id/read", canRead, queueLimit, validId, async (c) => {
   await markConversationRead(inboxActor(c), c.req.valid("param").id);
   return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Envio
+// ---------------------------------------------------------------------------
+
+/**
+ * Enviada ou ainda sem resposta do provedor: 201. Recusada pelo provedor: 200 com a mensagem
+ * `failed` e o motivo (a falha é dado, não erro de API; SPEC, "Envio").
+ */
+inboxRoutes.post(
+  "/api/inbox/conversations/:id/messages",
+  canReply,
+  sendLimit,
+  validId,
+  zValidator("json", sendMessageSchema, validationError),
+  async (c) => {
+    const { message, failed } = await sendText(
+      inboxActor(c),
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    );
+    return c.json({ message }, failed ? 200 : 201);
+  },
+);
+
+inboxRoutes.post("/api/inbox/messages/:id/retry", canReply, sendLimit, validId, async (c) => {
+  const { message, failed } = await retryMessage(inboxActor(c), c.req.valid("param").id);
+  return c.json({ message }, failed ? 200 : 201);
 });
 
 inboxRoutes.post(

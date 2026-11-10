@@ -110,6 +110,8 @@ const endpoints = [
   ["GET", "/api/inbox/assignees", "inbox:assign"],
   ["GET", `/api/inbox/messages/${anyId}/media`, "inbox:read"],
   ["POST", `/api/inbox/messages/${anyId}/media/retry`, "inbox:read"],
+  ["POST", `/api/inbox/conversations/${anyId}/messages`, "inbox:reply"],
+  ["POST", `/api/inbox/messages/${anyId}/retry`, "inbox:reply"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

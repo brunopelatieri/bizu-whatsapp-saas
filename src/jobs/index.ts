@@ -9,7 +9,7 @@ import {
 } from "@/jobs/billing";
 import { handleChannelHealth, handleChannelInbound } from "@/jobs/channels";
 import { handleEmailSend } from "@/jobs/email";
-import { handleInboxMedia } from "@/jobs/inbox";
+import { handleInboxMedia, handleInboxSweep } from "@/jobs/inbox";
 import { handleLgpdDelete, handleLgpdExport } from "@/jobs/lgpd";
 import { handleMaintenancePrune } from "@/jobs/maintenance";
 import { handleWebhookProcess } from "@/jobs/webhooks";
@@ -54,6 +54,7 @@ export async function registerWorkers(
   await boss.offWork(QUEUE.channelInbound);
   await boss.offWork(QUEUE.channelHealth);
   await boss.offWork(QUEUE.inboxMedia);
+  await boss.offWork(QUEUE.inboxSweep);
   await boss.work(
     QUEUE.emailSend,
     { includeMetadata: true, batchSize: 1, localConcurrency: 4, ...options },
@@ -86,6 +87,7 @@ export async function registerWorkers(
     { includeMetadata: true, batchSize: 1, localConcurrency: 2, ...options },
     handleInboxMedia,
   );
+  await boss.work(QUEUE.inboxSweep, options, handleInboxSweep);
 }
 
 /**

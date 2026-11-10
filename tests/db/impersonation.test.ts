@@ -574,6 +574,8 @@ describe("personificação", () => {
       ["POST", `/api/inbox/conversations/${anyId}/status`],
       ["POST", `/api/inbox/conversations/${anyId}/read`],
       ["POST", `/api/inbox/messages/${anyId}/media/retry`],
+      ["POST", `/api/inbox/conversations/${anyId}/messages`],
+      ["POST", `/api/inbox/messages/${anyId}/retry`],
     ])("%s %s responde IMPERSONATION_BLOCKED e audita", async (method, path) => {
       const response = await call(method, path, {
         cookie,
