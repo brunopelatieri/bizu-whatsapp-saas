@@ -23,6 +23,13 @@ import {
   setConversationStatus,
 } from "@/lib/inbox/assignment";
 import {
+  contactCandidates,
+  linkContact,
+  saveContactAsCustomer,
+  startConversation,
+  updateContact,
+} from "@/lib/inbox/contact-actions";
+import {
   getConversation,
   listConversations,
   listMessages,
@@ -35,8 +42,12 @@ import {
   assignSchema,
   conversationStatusSchema,
   conversationsQuerySchema,
+  linkContactSchema,
   messagesQuerySchema,
+  saveContactAsCustomerSchema,
   sendMessageSchema,
+  startConversationSchema,
+  updateContactSchema,
 } from "@/lib/schemas/inbox";
 
 /**
@@ -82,6 +93,8 @@ const queueLimit = perUser("inbox-queue", 60);
 const mediaRetryLimit = perUser("inbox-media-retry", 20);
 /** Envio e reenvio: 60 por minuto por pessoa (SPEC, "Contratos"). */
 const sendLimit = perUser("inbox-send", 60);
+/** Iniciar conversa: 20 por minuto por pessoa. */
+const startLimit = perUser("inbox-start", 20);
 
 const canRead = requirePermission("inbox", "read");
 const canReply = requirePermission("inbox", "reply");
@@ -205,6 +218,64 @@ inboxRoutes.post("/api/inbox/messages/:id/retry", canReply, sendLimit, validId, 
   const { message, failed } = await retryMessage(inboxActor(c), c.req.valid("param").id);
   return c.json({ message }, failed ? 200 : 201);
 });
+
+// ---------------------------------------------------------------------------
+// Contato e início de conversa
+// ---------------------------------------------------------------------------
+
+/** Acha ou cria; não envia nada. 201 quando nasceu agora. */
+inboxRoutes.post(
+  "/api/inbox/conversations",
+  canReply,
+  startLimit,
+  zValidator("json", startConversationSchema, validationError),
+  async (c) => {
+    const { conversation, created } = await startConversation(inboxActor(c), c.req.valid("json"));
+    return c.json({ conversation }, created ? 201 : 200);
+  },
+);
+
+inboxRoutes.patch(
+  "/api/inbox/contacts/:id",
+  canReply,
+  queueLimit,
+  validId,
+  zValidator("json", updateContactSchema, validationError),
+  async (c) =>
+    c.json(await updateContact(inboxActor(c), c.req.valid("param").id, c.req.valid("json").name)),
+);
+
+inboxRoutes.get("/api/inbox/contacts/:id/candidates", canReply, validId, async (c) =>
+  c.json(await contactCandidates(inboxActor(c), c.req.valid("param").id)),
+);
+
+/** Com `customerId`, também `customer:update` (conferido no serviço). */
+inboxRoutes.post(
+  "/api/inbox/contacts/:id/link",
+  canReply,
+  queueLimit,
+  validId,
+  zValidator("json", linkContactSchema, validationError),
+  async (c) =>
+    c.json(await linkContact(inboxActor(c), c.req.valid("param").id, c.req.valid("json"))),
+);
+
+inboxRoutes.post(
+  "/api/inbox/contacts/:id/customer",
+  canReply,
+  requirePermission("customer", "create"),
+  queueLimit,
+  validId,
+  zValidator("json", saveContactAsCustomerSchema, validationError),
+  async (c) => {
+    const customer = await saveContactAsCustomer(
+      inboxActor(c),
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    );
+    return c.json({ customer }, 201);
+  },
+);
 
 inboxRoutes.post(
   "/api/inbox/messages/:id/media/retry",

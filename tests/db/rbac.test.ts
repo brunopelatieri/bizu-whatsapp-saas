@@ -112,6 +112,12 @@ const endpoints = [
   ["POST", `/api/inbox/messages/${anyId}/media/retry`, "inbox:read"],
   ["POST", `/api/inbox/conversations/${anyId}/messages`, "inbox:reply"],
   ["POST", `/api/inbox/messages/${anyId}/retry`, "inbox:reply"],
+  ["POST", "/api/inbox/conversations", "inbox:reply"],
+  ["PATCH", `/api/inbox/contacts/${anyId}`, "inbox:reply"],
+  ["GET", `/api/inbox/contacts/${anyId}/candidates`, "inbox:reply"],
+  ["POST", `/api/inbox/contacts/${anyId}/link`, "inbox:reply"],
+  // Também `customer:create`, que todo papel estático com `inbox:reply` tem.
+  ["POST", `/api/inbox/contacts/${anyId}/customer`, "inbox:reply"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };
