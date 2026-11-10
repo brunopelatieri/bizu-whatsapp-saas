@@ -171,10 +171,15 @@ export async function getCustomer(tenantId: string, customerId: string) {
   return toCustomer(found.row, found.tags.get(found.row.id));
 }
 
+/**
+ * `afterCreate` roda na mesma transação, depois de gravar: se lançar, o cliente não é criado
+ * (a caixa de entrada vincula o contato ao "salvar como cliente").
+ */
 export async function createCustomer(
   tenantId: string,
   input: CustomerInput,
   actor: CustomerActor,
+  options: { afterCreate?: (tx: Tx, customerId: string) => Promise<void> } = {},
 ) {
   await assertWithinLimit(tenantId, "customers");
   const phone = phoneOf(input.phone);
@@ -199,6 +204,7 @@ export async function createCustomer(
       if (!created) throw new Error("cliente não criado");
 
       if (tagIds) await replaceCustomerTags(tx, tenantId, created.id, tagIds);
+      if (options.afterCreate) await options.afterCreate(tx, created.id);
 
       await auditInTransaction(tx, "customer.created", {
         actor: { id: actor.userId },

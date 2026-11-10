@@ -51,8 +51,14 @@
   `conversation` e `message` com `scopedPolicy()`, `file` com `tenant_id` anulável, ingestão de
   mensagens e status em `applyChannelEvent` (contato por `phone_key`, vínculo automático só com
   correspondência única, reabertura sem dono, eco, LID, idempotência) e o job `inbox.media`
-  (`tech/30-caixa-de-entrada.md`). **Pendente:** C2 em diante (API, visibilidade, envio, telas, tempo
-  real) e a LGPD das conversas (C7: exportação e exclusão ainda não cobrem as tabelas novas).
+  (`tech/30-caixa-de-entrada.md`).
+  **`caixa-de-entrada` C2 (API do atendimento) implementada:** `/api/inbox/*` com a visibilidade por
+  pessoa em toda consulta (`visibility.ts`), listas por cursor, assumir atômico, transferir, devolver,
+  situação, lida, mídia servida pelo tipo do conteúdo, envio de texto com janela de 24 h, reenvio,
+  `inbox.sweep`, vínculo do contato, salvar como cliente, iniciar conversa, permissão `inbox` e o
+  gancho de remoção de membro. **Pendente:** C3 (tela), C4 (SSE; `notifyInbox` segue vazio), C5
+  (anexo de saída, modelo), C6 (`/api/admin/inbox`) e a LGPD das conversas (C7: exportação e exclusão
+  ainda não cobrem as tabelas novas).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

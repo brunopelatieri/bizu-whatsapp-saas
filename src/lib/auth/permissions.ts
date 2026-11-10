@@ -48,6 +48,12 @@ export const statements = {
   channel: ["read", "manage"],
   tag: ["manage"],
   custom_field: ["manage"],
+  /**
+   * Caixa de entrada (`docs/specs/caixa-de-entrada/spec.md`, "Permissões"): `read` vê a fila e
+   * as próprias conversas; `reply` responde, assume e muda a situação; `assign` transfere e
+   * devolve a de outro; `supervise` vê todas. `supervise` sem `read` não tem efeito.
+   */
+  inbox: ["read", "reply", "assign", "supervise"],
 } as const;
 
 export type Resource = keyof typeof statements;
@@ -79,12 +85,14 @@ export const tenantRoles = {
     channel: ["read", "manage"],
     tag: ["manage"],
     custom_field: ["manage"],
+    inbox: ["read", "reply", "assign", "supervise"],
   }),
   member: tenantAccessControl.newRole({
     customer: ["read", "create", "update", "invite"],
     settings: ["read"],
     file: ["read", "upload"],
     channel: ["read"],
+    inbox: ["read", "reply"],
   }),
 };
 

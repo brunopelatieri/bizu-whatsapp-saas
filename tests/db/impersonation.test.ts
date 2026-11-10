@@ -568,6 +568,18 @@ describe("personificação", () => {
       ["POST", "/api/auth/two-factor/generate-backup-codes"],
       ["POST", "/api/auth/set-password"],
       ["POST", "/api/auth/delete-user"],
+      // Caixa de entrada: a sessão personificada lê, mas não escreve (RF-29).
+      ["POST", `/api/inbox/conversations/${anyId}/claim`],
+      ["POST", `/api/inbox/conversations/${anyId}/assign`],
+      ["POST", `/api/inbox/conversations/${anyId}/status`],
+      ["POST", `/api/inbox/conversations/${anyId}/read`],
+      ["POST", `/api/inbox/messages/${anyId}/media/retry`],
+      ["POST", `/api/inbox/conversations/${anyId}/messages`],
+      ["POST", `/api/inbox/messages/${anyId}/retry`],
+      ["POST", "/api/inbox/conversations"],
+      ["PATCH", `/api/inbox/contacts/${anyId}`],
+      ["POST", `/api/inbox/contacts/${anyId}/link`],
+      ["POST", `/api/inbox/contacts/${anyId}/customer`],
     ])("%s %s responde IMPERSONATION_BLOCKED e audita", async (method, path) => {
       const response = await call(method, path, {
         cookie,

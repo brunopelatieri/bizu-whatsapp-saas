@@ -31,6 +31,8 @@ export const QUEUE = {
   channelHealthDead: "channel.health.dead",
   inboxMedia: "inbox.media",
   inboxMediaDead: "inbox.media.dead",
+  inboxSweep: "inbox.sweep",
+  inboxSweepDead: "inbox.sweep.dead",
 } as const;
 
 /** Payload de `lgpd.export`: o pedido fica em `data_export`, a fila só leva o id. */
@@ -100,6 +102,7 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.channelInboundDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxMediaDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.inboxSweepDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
     options: {
@@ -207,6 +210,18 @@ export const queueDefinitions: QueueDefinition[] = [
       deadLetter: QUEUE.inboxMediaDead,
     },
   },
+  {
+    // Cron de 5 em 5 minutos: `queued` há mais de 2 min vira `failed` (`UNKNOWN_RESULT`).
+    // Uma tentativa a mais basta; a próxima passada pega o que sobrou.
+    name: QUEUE.inboxSweep,
+    options: {
+      retryLimit: 1,
+      retryDelay: 60,
+      expireInSeconds: 120,
+      deleteAfterSeconds: 24 * 3600,
+      deadLetter: QUEUE.inboxSweepDead,
+    },
+  },
 ];
 
 export type ScheduleDefinition = { queue: string; cron: string };
@@ -220,4 +235,5 @@ export const scheduleDefinitions: ScheduleDefinition[] = [
   { queue: QUEUE.maintenancePrune, cron: "30 4 * * *" },
   { queue: QUEUE.lgpdDelete, cron: "0 5 * * *" },
   { queue: QUEUE.channelHealth, cron: "*/15 * * * *" },
+  { queue: QUEUE.inboxSweep, cron: "*/5 * * * *" },
 ];

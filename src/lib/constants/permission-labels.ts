@@ -14,6 +14,7 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
   channel: "Canais de WhatsApp",
   tag: "Etiquetas",
   custom_field: "Campos adicionais",
+  inbox: "Atendimento",
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -45,4 +46,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "channel:manage": "Conectar e gerir números de WhatsApp",
   "tag:manage": "Criar, editar e excluir etiquetas",
   "custom_field:manage": "Criar, editar, arquivar e excluir campos adicionais",
+  "inbox:read": "Ver a fila e as próprias conversas",
+  "inbox:reply": "Responder, assumir e mudar a situação das conversas",
+  "inbox:assign": "Transferir conversas e devolver as de outros à fila",
+  "inbox:supervise": "Ver as conversas de todos os atendentes",
 };

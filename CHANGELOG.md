@@ -10,6 +10,18 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C2** (API do atendimento): `/api/inbox/*` com a visibilidade por pessoa em
+  toda consulta (o membro vê a fila e as próprias; quem supervisiona vê todas; fora disso, 404), lista
+  e mensagens paginadas por cursor, assumir (dois cliques ao mesmo tempo: um assume, o outro recebe
+  409 `ALREADY_ASSIGNED`), transferir, devolver, encerrar, reabrir, marcar como lida, não lidas, mídia
+  recebida servida pelo tipo do conteúdo, envio de texto (janela de 24 h conferida no servidor,
+  `clientId` idempotente, recusa do provedor vira mensagem `failed`), reenvio, varredura
+  `inbox.sweep`, vínculo do contato, "salvar como cliente" e iniciar conversa. Permissão nova `inbox`
+  (`read`, `reply`, `assign`, `supervise`); owner e admin têm as quatro, member `read` e `reply`.
+  Membro removido (ou com papel sem atendimento) tem as conversas devolvidas à fila. **Migração:** sem
+  migration; papéis personalizados não ganham `inbox:*` sozinhos (o owner edita o papel). A fila
+  `inbox.sweep` é criada na subida dos workers.
+
 - **Caixa de entrada, fase C1** (`docs/specs/caixa-de-entrada/spec.md`): tabelas `chat_contact`,
   `chat_contact_identity`, `conversation` e `message` (tenant e plataforma, `scopedPolicy()`), e a
   ingestão das mensagens e dos status de WhatsApp recebidos pelos canais: contato por telefone (com e

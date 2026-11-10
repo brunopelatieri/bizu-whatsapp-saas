@@ -133,7 +133,7 @@ o último valor e o Better Auth, o primeiro.
 
 | Rotas | Como |
 |---|---|
-| Mutações de `/api/billing/*`, `/api/team/*`, `/api/roles/*` | `blockMutationsWhileImpersonating` |
+| Mutações de `/api/billing/*`, `/api/team/*`, `/api/roles/*`, `/api/inbox/*` (enviar, assumir, transferir, situação, marcar como lida, contato) | `blockMutationsWhileImpersonating` |
 | `POST`/`DELETE /api/tenant`, `/api/tenant/active`, `/api/tenant/security`, `/api/tenant/support-grant*`, aceite de convite | `blockWhileImpersonating` |
 | `/api/me/sessions/*`, inclusive a leitura | idem: IP e navegador são da pessoa |
 | Todo `/api/auth/*`, exceto `get-session` e `sign-out` | `closedWhileImpersonating`, lista do que passa |
@@ -147,6 +147,23 @@ grava na requisição leva `impersonator_id`, sem cada rota lembrar disso.
 
 `POST /api/admin/stop-impersonating` fica fora de `adminRoutes`: quem sai está na sessão da pessoa
 personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota quando há personificação.
+
+## Caixa de entrada
+
+- **Visibilidade por pessoa** (o RLS isola tenant, não pessoa): `visibleConversation`
+  (`src/lib/inbox/visibility.ts`) entra em toda consulta de conversa, mensagem, mídia e contato; fora
+  dele, 404 igual a id inexistente. Teste de matriz em `tests/db/inbox-queue.test.ts`.
+- `ALREADY_ASSIGNED` (409) diz o nome do dono também a quem já não vê a conversa: só quem conhece o id
+  (por tê-la visto na fila) chega a isso, e é o aviso que o PRD pede.
+- Iniciar conversa com um membro (`userId`) mostra o telefone dele a quem tem `inbox:reply`: decisão
+  do PRD ("iniciar conversa com um cliente ou membro que tem telefone"). Pelo cliente, exige
+  `customer:read`, e ligar o contato ao cliente exige `customer:update`.
+- O texto de erro do provedor fica em `message.error_message` e aparece ao atendente (como o
+  `META_REJECTED` dos canais); nunca vai a log.
+- Mídia recebida nunca por URL pública do armazenamento: rota autenticada, tipo pelo conteúdo, `inline`
+  só para imagem, áudio e vídeo, `nosniff`.
+- Conteúdo de mensagem, telefone e nome não vão a log, auditoria nem Sentry; erro de provedor só por
+  `logChannelError`. Detalhes em `tech/30-caixa-de-entrada.md`.
 
 ## 2FA
 

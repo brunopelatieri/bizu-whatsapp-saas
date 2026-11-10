@@ -1,6 +1,18 @@
 import type { JobWithMetadata } from "pg-boss";
+import { logError } from "@/api/log";
 import type { InboxMediaJob } from "@/jobs/queues";
 import { processInboxMedia } from "@/lib/inbox/media";
+import { sweepQueuedMessages } from "@/lib/inbox/send";
+
+/** `inbox.sweep`: cron de 5 em 5 minutos; envio sem resposta do provedor vira `failed`. */
+export async function handleInboxSweep() {
+  try {
+    await sweepQueuedMessages();
+  } catch (error) {
+    logError("Falha na varredura de mensagens sem confirmação", error);
+    throw error;
+  }
+}
 
 /**
  * `inbox.media`: baixa a mídia de uma mensagem recebida pela Cloud API. `includeMetadata` traz

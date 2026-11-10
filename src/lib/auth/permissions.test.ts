@@ -45,6 +45,11 @@ const specMatrix: Record<string, [owner: boolean, admin: boolean, member: boolea
   // docs/specs/crm-cadastro/spec.md, "Permissões": aplicar etiqueta é `customer:update`.
   "tag:manage": [true, true, false],
   "custom_field:manage": [true, true, false],
+  // docs/specs/caixa-de-entrada/spec.md, "Permissões".
+  "inbox:read": [true, true, true],
+  "inbox:reply": [true, true, true],
+  "inbox:assign": [true, true, false],
+  "inbox:supervise": [true, true, false],
 };
 
 describe("catálogo de permissões", () => {

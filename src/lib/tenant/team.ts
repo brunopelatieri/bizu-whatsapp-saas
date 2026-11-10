@@ -6,9 +6,12 @@ import { auditInTransaction } from "@/lib/audit";
 import {
   canActOnRole,
   isOwner,
+  permissionsOf,
   type RoleCatalog,
   roleLabel,
 } from "@/lib/auth/permissions";
+import { releaseAssignments } from "@/lib/inbox/assignment";
+import { inboxCapabilities } from "@/lib/inbox/visibility";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Quem está agindo: permissões já resolvidas em `requireTenant`. */
@@ -205,6 +208,10 @@ export function changeMemberRole(
     if (isLastOwner(members, target) && !isOwner(role)) throw LAST_OWNER;
 
     await tx.update(member).set({ role }).where(eq(member.id, memberId));
+    // Papel novo sem atendimento: as conversas dele voltam à fila.
+    if (!inboxCapabilities(permissionsOf(actor.catalog, role)).reply) {
+      await releaseAssignments(tx, target.userId, tenantId);
+    }
     await auditInTransaction(tx, "member.role_changed", {
       actor: { id: actor.userId },
       tenantId,
@@ -233,6 +240,8 @@ export function removeMember(
     if (isLastOwner(members, target)) throw LAST_OWNER;
 
     await tx.delete(member).where(eq(member.id, memberId));
+    // As conversas dele voltam à fila (caixa de entrada, RF-25).
+    await releaseAssignments(tx, target.userId, tenantId);
     // `requireTenant` já recusaria; limpar deixa `/api/me` escolher outro tenant.
     await tx
       .update(session)

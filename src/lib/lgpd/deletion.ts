@@ -44,6 +44,7 @@ import { hashEmail, normalizeEmail } from "@/lib/email/address";
 import { sendEmail } from "@/lib/email/send";
 import { deletionConfirmTemplate } from "@/lib/email/templates/deletion-confirm";
 import { deletionScheduledTemplate } from "@/lib/email/templates/deletion-scheduled";
+import { releaseAssignments } from "@/lib/inbox/assignment";
 import { getStorage } from "@/lib/storage";
 import { TenantRuleError, notFound } from "@/lib/tenant/errors";
 import { soleOwnerTenants } from "@/lib/tenant/ownership";
@@ -760,6 +761,8 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await tx.delete(session).where(or(eq(session.userId, id), eq(session.impersonatedBy, id)));
   await tx.delete(emailVerificationIssue).where(eq(emailVerificationIssue.userId, id));
   await tx.delete(member).where(eq(member.userId, id));
+  // As conversas que a pessoa atendia voltam à fila, em todos os tenants.
+  await releaseAssignments(tx, id);
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
 
