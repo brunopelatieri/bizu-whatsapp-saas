@@ -110,6 +110,8 @@ export type MessageView = {
   sender: { id: string; name: string } | null;
   type: MessageType;
   text: string | null;
+  /** Mensagem de modelo: o nome do modelo (o texto já preenchido está em `text`). */
+  template: { name: string } | null;
   status: MessageStatus | null;
   error: { code: string | null; message: string | null } | null;
   media: {
@@ -154,6 +156,7 @@ export const inboxKeys = {
   messages: (tenantId: TenantId, id: string) => [INBOX_KEY, tenantId, "messages", id] as const,
   unread: (tenantId: TenantId) => [INBOX_KEY, tenantId, "unread"] as const,
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
+  templates: (tenantId: TenantId, id: string) => [INBOX_KEY, tenantId, "templates", id] as const,
 };
 
 /** O que uma mudança afeta em uma conversa: o detalhe e/ou as mensagens. */
@@ -401,8 +404,18 @@ export function useInboxMutation<T = unknown>(
   });
 }
 
+/** O anexo de um envio em andamento: o nome e, se for imagem, a prévia local (revogada ao terminar). */
+export type SendingAttachment = { name: string; previewUrl: string | null };
+
 /** Mensagem que a tela mostra enquanto o envio não voltou (não existe na API). */
-export type SendingMessage = { clientId: string; text: string; createdAt: string };
+export type SendingMessage = {
+  clientId: string;
+  /** Texto, legenda ou o modelo já preenchido. */
+  text: string;
+  createdAt: string;
+  attachment?: SendingAttachment;
+  template?: { name: string };
+};
 
 /** `crypto.randomUUID` sem hífens cabe no `clientIdSchema` (8 a 64, `[A-Za-z0-9_-]`). */
 export function newClientId() {
@@ -411,18 +424,75 @@ export function newClientId() {
 
 export type SendResult = { message: MessageView };
 
-export function useSendText(conversationId: string) {
+/** O que se envia: texto (com citação), anexo (com legenda e citação) ou modelo. */
+export type SendPayload =
+  | { kind: "text"; text: string; replyTo?: string }
+  | { kind: "media"; file: File; caption?: string; replyTo?: string }
+  | { kind: "template"; templateId: string; variables: string[] };
+
+/**
+ * Corpo da requisição: JSON para texto e modelo; `multipart/form-data` para o anexo. Sem
+ * `Content-Type` à mão no multipart: o navegador acrescenta a fronteira.
+ */
+function sendRequest(conversationId: string, clientId: string, payload: SendPayload) {
+  const path = `/api/inbox/conversations/${conversationId}/messages`;
+
+  if (payload.kind === "media") {
+    const form = new FormData();
+    form.set("file", payload.file);
+    form.set("clientId", clientId);
+    if (payload.caption) form.set("caption", payload.caption);
+    if (payload.replyTo) form.set("replyTo", payload.replyTo);
+    return apiFetch<SendResult>(path, { method: "POST", body: form });
+  }
+
+  const body =
+    payload.kind === "text"
+      ? { type: "text", text: payload.text, clientId, ...(payload.replyTo ? { replyTo: payload.replyTo } : {}) }
+      : { type: "template", templateId: payload.templateId, variables: payload.variables, clientId };
+  return apiFetch<SendResult>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
   const { tenant } = useAuth();
 
   return useMutation({
     mutationKey: INBOX_SEND_KEY,
-    mutationFn: ({ text, clientId }: { text: string; clientId: string }) =>
-      apiFetch<SendResult>(`/api/inbox/conversations/${conversationId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ type: "text", text, clientId }),
-      }),
+    mutationFn: ({ clientId, ...payload }: { clientId: string } & SendPayload) =>
+      sendRequest(conversationId, clientId, payload),
     // A janela fechada e o número caído se corrigem relendo a conversa.
     onSettled: () => invalidateInbox(queryClient, tenant?.id, { conversationId }),
+  });
+}
+
+/** Modelo aprovado do WABA do canal da conversa, já analisado pelo servidor (`send-template.ts`). */
+export type ConversationTemplate = {
+  id: string;
+  name: string;
+  language: string;
+  category: string | null;
+  /** `false`: listado, mas desabilitado (`reason` explica). */
+  supported: boolean;
+  reason: string | null;
+  slots: { component: "header" | "body"; name: string }[];
+  positional: boolean;
+  header: string | null;
+  body: string | null;
+  footer: string | null;
+};
+
+export function useConversationTemplates(conversationId: string, enabled: boolean) {
+  const { tenant } = useAuth();
+
+  return useQuery({
+    queryKey: inboxKeys.templates(tenant?.id, conversationId),
+    queryFn: () =>
+      apiFetch<{ templates: ConversationTemplate[] }>(
+        `/api/inbox/conversations/${conversationId}/templates`,
+      ).then(({ templates }) => templates),
+    enabled: enabled && Boolean(tenant),
+    staleTime: 60_000,
+    retry: false,
   });
 }

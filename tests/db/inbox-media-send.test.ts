@@ -626,7 +626,8 @@ describe("/api/inbox: anexo, modelo e citação (C5)", () => {
 
       const [row] = await messagesOf(q.id);
       expect(row).toMatchObject({ type: "template", templateName: "boas_vindas", direction: "out" });
-      expect((row?.payload as { template: { variables: string[] } }).template.variables).toEqual(["Maria", "4521"]);
+      const payload = (row?.payload ?? { template: { variables: [] } }) as { template: { variables: string[] } };
+      expect(payload.template.variables).toEqual(["Maria", "4521"]);
 
       // Mandar modelo não abre a janela (só a mensagem do contato abre) e assume a conversa.
       const [conv] = await readAll((tx) => tx.select().from(conversation).where(eq(conversation.id, q.id)));

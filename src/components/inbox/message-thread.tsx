@@ -4,6 +4,7 @@ import { QueryState } from "@/components/admin/query-state";
 import { dayKey, formatDayLabel } from "@/components/inbox/format";
 import {
   chronological,
+  type MessageView,
   type SendingMessage,
   useMessages,
 } from "@/components/inbox/inbox-api";
@@ -20,6 +21,8 @@ type MessageThreadProps = {
   canReply: boolean;
   /** Envios que ainda não voltaram do servidor. */
   sending: SendingMessage[];
+  /** "Responder" numa bolha: a citação ativa do composer. */
+  onReply?: (message: MessageView) => void;
 };
 
 /**
@@ -27,7 +30,7 @@ type MessageThreadProps = {
  * rolar para cima sem perder a posição; rola para o fim só se já estava no fim (ou na primeira
  * carga).
  */
-export function MessageThread({ conversationId, canReply, sending }: MessageThreadProps) {
+export function MessageThread({ conversationId, canReply, sending, onReply }: MessageThreadProps) {
   const query = useMessages(conversationId);
   const { data, hasNextPage, isFetchingNextPage, fetchNextPage } = query;
   const messages = useMemo(() => chronological(data), [data]);
@@ -128,13 +131,13 @@ export function MessageThread({ conversationId, canReply, sending }: MessageThre
                   </span>
                 </div>
               ) : null}
-              <MessageBubble message={message} canReply={canReply} />
+              <MessageBubble message={message} canReply={canReply} onReply={onReply} />
             </Fragment>
           );
         })}
 
         {sending.map((item) => (
-          <SendingBubble key={item.clientId} text={item.text} createdAt={item.createdAt} />
+          <SendingBubble key={item.clientId} item={item} />
         ))}
       </QueryState>
     </div>

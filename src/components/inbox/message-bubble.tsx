@@ -7,11 +7,18 @@ import {
   Loader2,
   MapPin,
   Download,
+  LayoutTemplate,
+  Reply,
   RotateCcw,
   User,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { type MessageView, errorText, useInboxMutation } from "@/components/inbox/inbox-api";
+import {
+  type MessageView,
+  errorText,
+  type SendingMessage,
+  useInboxMutation,
+} from "@/components/inbox/inbox-api";
 import { formatFileSize, formatTime, splitLinks } from "@/components/inbox/format";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -114,7 +121,7 @@ function MediaBody({ message }: { message: MessageView }) {
         <a href={media.url} target="_blank" rel="noopener noreferrer" className="block">
           <img
             src={media.url}
-            alt={media.name ?? "Imagem recebida"}
+            alt={media.name ?? "Imagem"}
             loading="lazy"
             className="max-h-72 max-w-full rounded-lg object-contain"
           />
@@ -155,9 +162,18 @@ function Body({ message }: { message: MessageView }) {
 
   switch (message.type) {
     case "text":
-    case "template":
     case "interactive":
       return caption ?? <p className="italic opacity-70">Mensagem sem texto.</p>;
+    case "template":
+      return (
+        <div className="space-y-1">
+          <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <LayoutTemplate className="size-3" aria-hidden />
+            Modelo{message.template ? ` · ${message.template.name}` : ""}
+          </p>
+          {caption ?? <p className="italic opacity-70">Mensagem sem texto.</p>}
+        </div>
+      );
     case "image":
     case "video":
     case "audio":
@@ -200,11 +216,20 @@ function Body({ message }: { message: MessageView }) {
 
 type MessageBubbleProps = {
   message: MessageView;
-  /** `false` esconde "Reenviar" (sem `inbox:reply`). */
+  /** `false` esconde "Reenviar" e "Responder" (sem `inbox:reply`). */
   canReply: boolean;
+  /** Citar esta mensagem na próxima resposta (a tela mantém a citação ativa no composer). */
+  onReply?: (message: MessageView) => void;
 };
 
-export function MessageBubble({ message, canReply }: MessageBubbleProps) {
+/** Só a mensagem que o provedor já conhece (recebida, ou enviada com id) pode ser citada. */
+const quotable = (message: MessageView) =>
+  message.direction === "in" ||
+  message.status === "sent" ||
+  message.status === "delivered" ||
+  message.status === "read";
+
+export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps) {
   const outgoing = message.direction === "out";
   const retry = useInboxMutation<{ message: MessageView }>({
     silent: true,
@@ -214,10 +239,10 @@ export function MessageBubble({ message, canReply }: MessageBubbleProps) {
   const label = message.sender?.name ?? (message.senderType === "device" ? "Celular" : null);
 
   return (
-    <div className={cn("flex", outgoing ? "justify-end" : "justify-start")}>
+    <div className={cn("group flex items-start gap-1", outgoing ? "flex-row-reverse" : "flex-row")}>
       <div
         className={cn(
-          "max-w-[85%] space-y-1 rounded-2xl px-3 py-2 text-sm shadow-xs sm:max-w-[70%]",
+          "min-w-0 max-w-[85%] space-y-1 rounded-2xl px-3 py-2 text-sm shadow-xs sm:max-w-[70%]",
           outgoing
             ? "rounded-br-md bg-primary/15 text-foreground dark:bg-primary/25"
             : "rounded-bl-md bg-muted text-foreground",
@@ -228,9 +253,12 @@ export function MessageBubble({ message, canReply }: MessageBubbleProps) {
           <p className="text-xs font-medium text-muted-foreground">{label}</p>
         ) : null}
         {message.replyTo ? (
-          <p className="truncate rounded-md border-l-2 border-primary/60 bg-background/60 px-2 py-1 text-xs text-muted-foreground">
-            {message.replyTo.preview}
-          </p>
+          <div className="rounded-md border-l-2 border-primary/60 bg-background/60 px-2 py-1 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground/80">
+              {message.replyTo.direction === "out" ? "Você" : "Contato"}
+            </p>
+            <p className="line-clamp-2 break-words">{message.replyTo.preview}</p>
+          </div>
         ) : null}
         <Body message={message} />
         <div className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
@@ -249,7 +277,7 @@ export function MessageBubble({ message, canReply }: MessageBubbleProps) {
             {retry.isError ? (
               <p className="text-destructive">{errorText(retry.error)}</p>
             ) : null}
-            {canReply && message.type === "text" ? (
+            {canReply && message.senderType === "user" ? (
               <Button
                 size="xs"
                 variant="outline"
@@ -265,18 +293,52 @@ export function MessageBubble({ message, canReply }: MessageBubbleProps) {
           </div>
         ) : null}
       </div>
+      {canReply && onReply && quotable(message) ? (
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Responder esta mensagem"
+          title="Responder esta mensagem"
+          // Aparece ao passar o mouse ou focar; em tela de toque, sempre visível.
+          className="mt-1 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          onClick={() => onReply(message)}
+        >
+          <Reply />
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-/** Mensagem que ainda não voltou do servidor: texto e relógio, sem ação. */
-export function SendingBubble({ text, createdAt }: { text: string; createdAt: string }) {
+/** Mensagem que ainda não voltou do servidor: texto (ou anexo, ou modelo) e relógio, sem ação. */
+export function SendingBubble({ item }: { item: SendingMessage }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] space-y-1 rounded-2xl rounded-br-md bg-primary/15 px-3 py-2 text-sm opacity-80 shadow-xs sm:max-w-[70%] dark:bg-primary/25">
-        <TextBody text={text} />
+      <div className="max-w-[85%] space-y-1.5 rounded-2xl rounded-br-md bg-primary/15 px-3 py-2 text-sm opacity-80 shadow-xs sm:max-w-[70%] dark:bg-primary/25">
+        {item.template ? (
+          <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <LayoutTemplate className="size-3" aria-hidden />
+            Modelo · {item.template.name}
+          </p>
+        ) : null}
+        {item.attachment ? (
+          item.attachment.previewUrl ? (
+            <img
+              src={item.attachment.previewUrl}
+              alt={item.attachment.name}
+              className="max-h-72 max-w-full rounded-lg object-contain"
+            />
+          ) : (
+            <p className="flex items-center gap-2 rounded-lg bg-background/60 p-2">
+              <FileText className="size-5 shrink-0" aria-hidden />
+              <span className="min-w-0 truncate text-sm font-medium">{item.attachment.name}</span>
+            </p>
+          )
+        ) : null}
+        {item.text ? <TextBody text={item.text} /> : null}
         <div className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
-          <time dateTime={createdAt}>{formatTime(createdAt)}</time>
+          <time dateTime={item.createdAt}>{formatTime(item.createdAt)}</time>
           <Clock className="size-3" aria-label="Enviando" />
         </div>
       </div>
