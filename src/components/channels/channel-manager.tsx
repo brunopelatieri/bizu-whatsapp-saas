@@ -1,7 +1,6 @@
 import { Plus } from "lucide-react";
 import { createElement, useState } from "react";
 import { QueryState } from "@/components/admin/query-state";
-import { useCan } from "@/components/auth/can";
 import { ChannelBadge } from "@/components/channels/channel-badge";
 import { CHANNEL_DIALOGS } from "@/components/channels/channel-dialogs";
 import { CHANNEL_KINDS } from "@/components/channels/channel-kinds";
@@ -9,6 +8,7 @@ import { ChannelStatus } from "@/components/channels/channel-status";
 import {
   type Channel,
   type ChannelsResponse,
+  TENANT_CHANNELS_PATH,
   useChannelMutation,
   useChannels,
 } from "@/components/channels/channels-api";
@@ -91,20 +91,30 @@ function TypeChooser({
 function TypeDialog({
   type,
   channel,
+  basePath,
   onClose,
 }: {
   type: ChannelType | null | undefined;
   channel?: Channel;
+  basePath: string;
   onClose: () => void;
 }) {
   const dialog = type ? CHANNEL_DIALOGS[type] : undefined;
   if (!dialog) return null;
 
-  return createElement(dialog, { open: true, channel, onClose });
+  return createElement(dialog, { open: true, channel, basePath, onClose });
 }
 
 /** Remover pede o nome digitado. Com conversas, o número é desativado e o histórico fica. */
-function RemoveDialog({ channel, onClose }: { channel: Channel | null; onClose: () => void }) {
+function RemoveDialog({
+  channel,
+  basePath,
+  onClose,
+}: {
+  channel: Channel | null;
+  basePath: string;
+  onClose: () => void;
+}) {
   const [typed, setTyped] = useState("");
   const remove = useChannelMutation<{ outcome: "deleted" | "disabled" }>();
 
@@ -117,7 +127,7 @@ function RemoveDialog({ channel, onClose }: { channel: Channel | null; onClose: 
     if (!channel) return;
     await remove
       .mutateAsync({
-        path: `/api/channels/${channel.id}`,
+        path: `${basePath}/${channel.id}`,
         method: "DELETE",
         body: { confirm: typed },
       })
@@ -165,13 +175,19 @@ function RemoveDialog({ channel, onClose }: { channel: Channel | null; onClose: 
 }
 
 /**
- * Números de WhatsApp do tenant (`/app/configuracoes/canais`): estado, tipo e padrão de cada
- * um; conectar, gerenciar, tornar padrão e remover para quem tem `channel:manage`. A API decide.
+ * Números de WhatsApp de um escopo: os do tenant (`/app/configuracoes/canais`, base padrão) ou os
+ * da plataforma (`/admin/configuracoes/canais`, `basePath = /api/admin/channels`). Mostra estado,
+ * tipo e padrão de cada um; conectar, gerenciar, tornar padrão e remover só com `canManage`
+ * (`channel:manage` no tenant, `platform_owner` na plataforma). A API decide.
  */
-export function ChannelManager() {
-  const can = useCan();
-  const canManage = can("channel", "manage");
-  const query = useChannels();
+export function ChannelManager({
+  basePath = TENANT_CHANNELS_PATH,
+  canManage,
+}: {
+  basePath?: string;
+  canManage: boolean;
+}) {
+  const query = useChannels(basePath);
   const setDefault = useChannelMutation("Número padrão alterado.");
   const [choosing, setChoosing] = useState(false);
   const [connecting, setConnecting] = useState<ChannelType | null>(null);
@@ -251,7 +267,7 @@ export function ChannelManager() {
                           disabled={setDefault.isPending}
                           onClick={() =>
                             setDefault.mutate({
-                              path: `/api/channels/${item.id}/default`,
+                              path: `${basePath}/${item.id}/default`,
                               method: "POST",
                             })
                           }
@@ -280,9 +296,14 @@ export function ChannelManager() {
           setConnecting(type);
         }}
       />
-      <TypeDialog type={connecting} onClose={() => setConnecting(null)} />
-      <TypeDialog type={managing?.type} channel={managing} onClose={() => setManagingId(null)} />
-      <RemoveDialog channel={removing} onClose={() => setRemoving(null)} />
+      <TypeDialog type={connecting} basePath={basePath} onClose={() => setConnecting(null)} />
+      <TypeDialog
+        type={managing?.type}
+        channel={managing}
+        basePath={basePath}
+        onClose={() => setManagingId(null)}
+      />
+      <RemoveDialog channel={removing} basePath={basePath} onClose={() => setRemoving(null)} />
     </Card>
   );
 }

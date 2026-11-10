@@ -116,10 +116,14 @@ deve voltar em escopo controlado.
 
 ## Canais WhatsApp
 
-`src/api/channels.ts` (`/api/channels/*`, `channel:read` e `channel:manage`) monta o `Scope` a
-partir de `requireTenant`; o serviço (`src/lib/channels/service.ts`) abre `withScope`. As rotas de
-cada tipo (`POST /api/channels/whatsapp-cloud`, `/:id/webhook`, `/:id/test`, `/:id/templates`...)
-são declaradas pelo módulo (`ChannelModule.routes`) e montadas aqui com o `ChannelRouteKit`.
+`src/api/channels.ts` escreve as rotas de canal uma vez (`buildChannelRoutes`) e as monta para os
+dois escopos: `/api/channels/*` (`channel:read` e `channel:manage`, `Scope` de `requireTenant`) e
+`/api/admin/channels/*` (`src/api/admin-channels.ts`: `Scope = platform`, leitura com
+`requirePlatform()`, escrita com `requirePlatform(["platform_owner"])`, montado antes de
+`adminRoutes`). O serviço (`src/lib/channels/service.ts`) abre `withScope`. As rotas de cada tipo
+(`POST <base>/whatsapp-cloud`, `/whatsapp-qr`, `/:id/webhook`, `/:id/qr`, `/:id/templates`...) são
+declaradas pelo módulo (`ChannelModule.routes`) e recebem base, escopo, ator e autorização pelo
+`ChannelRouteKit`. O `name` de cada rate limit leva o prefixo da base (`admin-` na plataforma).
 
 `src/api/webhooks-channels.ts` (`GET` e `POST /api/webhooks/whatsapp/<segmento>/:key`) fica antes do
 `csrfGuard`, fora de `sameOrigin`, como os de pagamento: acha o canal pela chave, verifica sobre o

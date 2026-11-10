@@ -41,9 +41,12 @@
   parear, estado e ciclo de vida, readoção do canal antigo e `qr-channel-dialog.tsx`, ligado à página
   `/app/configuracoes/canais`. **Pendente:** smoke com o servidor Evolution real (QR, código,
   desconectar no celular) e a medição B0.
-  **B4 parcial:** avisos de canal de todos os escopos em `/api/admin/channel-events` (listar sem
-  `raw`, reprocessar só pelo proprietário) e aba "Canais" em `/admin/webhooks`; faltam
-  `/api/admin/channels/*` e `/admin/configuracoes/canais`.
+  **B4 (canais da plataforma) implementada:** avisos de canal de todos os escopos em
+  `/api/admin/channel-events` (listar sem `raw`, reprocessar só pelo proprietário), aba "Canais" em
+  `/admin/webhooks`, as mesmas rotas de canal em `/api/admin/channels/*` com `Scope = platform`
+  (suporte lê, só o proprietário escreve, sem limite de plano) e a tela
+  `/admin/configuracoes/canais`. **Pendente:** os mesmos smokes reais de B2 e B3, agora também com
+  um número da plataforma.
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

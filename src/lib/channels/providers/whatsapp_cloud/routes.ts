@@ -17,9 +17,10 @@ import { type ChannelRouteKit, isProviderEnabled } from "@/lib/channels/registry
 import { createCloudChannelSchema, listTemplatesQuerySchema } from "@/lib/schemas/channels";
 
 /**
- * Rotas do WhatsApp Cloud, montadas por `src/api/channels.ts` (que já aplicou `sameOrigin`,
- * `requireAuth`, `requireTenant` e `blockMutationsWhileImpersonating`). O escopo vem do `kit`,
- * nunca do corpo. Segredo só entra; nenhuma resposta traz coluna `_enc`.
+ * Rotas do WhatsApp Cloud, montadas por `buildChannelRoutes` (`src/api/channels.ts`) para o
+ * tenant e para a plataforma; quem monta já aplicou `sameOrigin`, a autenticação e
+ * `blockMutationsWhileImpersonating`. O escopo vem do `kit`, nunca do corpo. Segredo só entra;
+ * nenhuma resposta traz coluna `_enc`.
  */
 export function cloudRoutes(kit: ChannelRouteKit) {
   const routes = new Hono();

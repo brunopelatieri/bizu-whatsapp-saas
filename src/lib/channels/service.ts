@@ -207,7 +207,7 @@ export async function runInScope<T>(
   const result = await withScope(scope, (tx) =>
     fn(tx, async (action, target) => {
       const entry = {
-        actor: { id: actor.userId },
+        actor: { type: actor.type, id: actor.userId },
         target: { type: "channel", id: target.id },
         metadata: { type: target.type, channelId: target.id },
         ip: actor.ip,

@@ -2,6 +2,7 @@ import {
   Building2,
   CreditCard,
   LayoutDashboard,
+  MessageCircle,
   Receipt,
   ScrollText,
   Settings,
@@ -23,6 +24,7 @@ export const adminMainNav: AppNavItem[] = [
 ];
 
 export const adminBottomNav: AppNavItem[] = [
+  { href: "/admin/configuracoes/canais", label: "Canais", icon: MessageCircle },
   { href: "/admin/configuracoes/seguranca", label: "Segurança", icon: ShieldCheck },
   { href: "/admin/configuracoes", label: "Configurações", icon: Settings, end: true },
 ];
@@ -39,6 +41,7 @@ const adminTitles: Record<string, string> = {
   "/admin/configuracoes/seguranca": "Segurança",
   "/admin/configuracoes/etiquetas": "Etiquetas das organizações",
   "/admin/configuracoes/campos": "Campos das organizações",
+  "/admin/configuracoes/canais": "Canais da plataforma",
 };
 
 export function adminTitleFromPath(pathname: string): string {

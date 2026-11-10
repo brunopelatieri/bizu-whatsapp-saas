@@ -2,7 +2,7 @@
 
 - **Escopo:** números de WhatsApp do tenant e da plataforma: módulos de canal, estado, caixa de avisos dos provedores, jobs de aplicação e de saúde, limites do plano. A caixa de entrada (chat) é de `docs/specs/caixa-de-entrada/`.
 - **Specs relacionadas:** `docs/specs/whatsapp-canais/spec.md` e `prd.md`; programa em `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T3, T8 a T10, T12, T14)
-- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `pairing.ts`, `connection.ts`, `inbound-pairing.ts`, `media.ts`, `send.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/webhooks-channels.ts`, `src/api/webhooks-channels-evolution.ts`, `src/api/admin-channel-events.ts`, `src/pages/admin/channel-events-tab.tsx`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
+- **Paths do código:** `src/lib/channels/` (`types.ts`, `capabilities.ts`, `errors.ts`, `payload.ts`, `registry.ts`, `credentials.ts`, `service.ts`, `events.ts`, `health.ts`, `log.ts`, `pairing.ts`, `connection.ts`, `inbound-pairing.ts`, `media.ts`, `send.ts`, `providers/whatsapp_cloud/`, `providers/whatsapp_qr/`), `src/db/schema/channels.ts`, `src/api/channels.ts`, `src/api/admin-channels.ts`, `src/api/webhooks-channels.ts`, `src/api/webhooks-channels-evolution.ts`, `src/api/admin-channel-events.ts`, `src/pages/admin/channel-events-tab.tsx`, `src/components/channels/`, `src/routes/app.settings.channels.tsx`, `src/routes/admin/channels.tsx`, `src/jobs/channels.ts`, `src/lib/schemas/channels.ts`, `src/lib/email/templates/channel-disconnected.ts`, `drizzle/0022_canais_whatsapp.sql`, `drizzle/0023_rls_canais.sql`, `tests/db/channels-*.test.ts`, `tests/fixtures/channels/`
 
 ## Estado
 
@@ -12,7 +12,7 @@
 | B1 dados e núcleo | Feito: tabelas, RLS, serviço, avisos, filas, saúde, retenção, rotas comuns (listar, renomear, padrão, remover) |
 | B2 Cloud (rotas, webhook, tela) | Feito: webhook HTTP comum, salvar/editar/endereço/diagnóstico/modelos e a tela `/app/configuracoes/canais`. **Pendente:** smoke com conta de teste da Meta e conferência da `GRAPH_VERSION` contra a conta real |
 | B3 Evolution | **Feito no servidor e no diálogo:** webhook, mídia no `StorageProvider`, rotas de criar/parear/estado/ciclo de vida, readoção, `qr-channel-dialog.tsx`. **Pendente:** smoke com o servidor Evolution real (B0) |
-| B4 plataforma | **Parcial.** Feito: avisos de todos os escopos em `/api/admin/channel-events` e a aba "Canais" de `/admin/webhooks`. Pendente: `/api/admin/channels/*` e a tela `/admin/configuracoes/canais` |
+| B4 plataforma | Feito: avisos de todos os escopos em `/api/admin/channel-events`, aba "Canais" de `/admin/webhooks`, `/api/admin/channels/*` (as mesmas rotas, `Scope = platform`) e a tela `/admin/configuracoes/canais`. **Pendente:** os smokes reais de B2 e B3 valem também para os números da plataforma |
 
 ## Modelo
 
@@ -42,7 +42,8 @@ comuns apenas iteram `getModules()` (um provedor novo não os edita):
 | Campo | Quem usa | O que é |
 |---|---|---|
 | `webhook` (`segment`, `maxBodyBytes`, `findTarget`, `handshake?`, `prepareRaw?`) | `src/api/webhooks-channels.ts` | Porta de entrada dos avisos: `/api/webhooks/whatsapp/<segment>/:key` |
-| `routes(kit)` | `src/api/channels.ts` | Rotas do tipo (criar, diagnosticar, modelos, QR); recebem escopo e autorização pelo `ChannelRouteKit` e respondem 404 com o módulo fora de `CHANNEL_PROVIDERS` |
+| `routes(kit)` | `buildChannelRoutes` (`src/api/channels.ts`) | Rotas do tipo (criar, diagnosticar, modelos, QR); recebem base, escopo, ator e autorização pelo `ChannelRouteKit`, e por isso servem ao tenant e à plataforma sem mudar. Cloud responde 404 com o módulo fora de `CHANNEL_PROVIDERS`; QR, 503 |
+| `requiredEnv` | `missingProviderEnv` (`registry.ts`) | Variáveis sem as quais o módulo não funciona; `/api/admin/channels` devolve o **nome** das que faltam |
 | `update(scope, id, input, actor)` | `updateChannel` (serviço comum) | Campos do `PATCH /:id` além do nome |
 
 `registry.ts` não tem `await` no topo: no app o `import.meta.glob` é estático; script `tsx` que
@@ -97,8 +98,9 @@ canal, em tempo constante → 200 `text/plain` com o desafio e `webhook_verified
 ## Canal por QR Code (Evolution Go, B3)
 
 O núcleo não conhece a Evolution: fala com `provider.pairing` (`PairingOperations` em `types.ts`), que
-só o módulo com a capacidade `pairing` implementa. Sem o módulo em `CHANNEL_PROVIDERS`, toda rota
-abaixo responde 503 `PROVIDER_UNAVAILABLE`.
+só o módulo com a capacidade `pairing` implementa. As rotas são do módulo
+(`providers/whatsapp_qr/routes.ts`, `qrRoutes(kit)`), sobre `pairing.ts`. Com o módulo fora de
+`CHANNEL_PROVIDERS`, toda rota abaixo responde 503 `PROVIDER_UNAVAILABLE`; sem a pasta, 404.
 
 - **Criar** (`pairing.ts`, `createPairingChannel`): teto do servidor (`EVOLUTION_MAX_INSTANCES_TOTAL`,
   o maior entre o que o servidor lista e os canais locais de todos os escopos) → limite do plano →
@@ -150,12 +152,22 @@ antes de gravar (em qualquer nível): `channel_event.raw` não guarda segredo.
 `QrChannelDialog` (`src/components/channels/qr-channel-dialog.tsx`) é autocontido: aviso de risco
 permanente, nome, abas "QR Code" (contagem de 60 s, "Gerar outro", um QR por abertura) e "Código",
 consulta `status` a cada 4 s e fecha ao conectar. Props: `trigger` ou `open`/`onOpenChange`, `channel`
-(parear de novo), `onChanged` (recarregar a lista) e `basePath` (`/api/admin/channels` na B4). A página da
-lista o chama pelo adaptador `QrDialog` de `channel-dialogs.tsx`.
+(parear de novo), `onChanged` (recarregar a lista) e `basePath` (`/api/admin/channels` na plataforma). A
+página da lista o chama pelo adaptador `QrDialog` de `channel-dialogs.tsx`.
 
 ## Rotas
 
-`/api/channels` (`src/api/channels.ts`): `GET` (`channel:read`; devolve `channels`, `providers` e
+`src/api/channels.ts` escreve as rotas **uma vez**, em `buildChannelRoutes(options)`, e as monta duas
+vezes. Quem monta entrega `base`, `guards` (a cadeia do grupo), `canRead`, `canManage`, `scopeOf`,
+`actorOf` e `limitPrefix` (separa os contadores de rate limit de cada base); o mesmo conjunto vai aos
+módulos no `ChannelRouteKit`. Rota nova de canal entra aqui ou no módulo, nunca só em uma das bases.
+
+| Base | Arquivo | Escopo | Ler | Escrever |
+|---|---|---|---|---|
+| `/api/channels` | `channels.ts` (`channelRoutes`) | tenant da sessão | `channel:read` | `channel:manage` |
+| `/api/admin/channels` | `admin-channels.ts` (`adminChannelRoutes`) | plataforma (fixo) | `requirePlatform()` | `requirePlatform(["platform_owner"])` |
+
+`/api/channels`: `GET` (`channel:read`; devolve `channels`, `providers` e
 `limits`), `PATCH /:id` (`updateChannelSchema`: só o nome renomeia; os outros campos vão ao
 `update` do módulo), `POST /:id/default`, `DELETE /:id` com `{ confirm: nome }`
 (`channel:manage`). Todas com `requireAuth` + `requireTenant`, `blockMutationsWhileImpersonating`,
@@ -183,7 +195,9 @@ antes da transação; falha dele é 503 `PROVIDER_UNAVAILABLE` e o canal fica co
 ## Tela
 
 `/app/configuracoes/canais` (`routes/app.settings.channels.tsx`, aba "Canais" de `SettingsNav` para
-quem tem `channel:read`). `src/components/channels/`: `channel-manager.tsx` (lista com estado, tipo
+quem tem `channel:read`). Os componentes recebem a base da API por props (`basePath`, padrão
+`/api/channels`) e `canManage` de quem os monta: a mesma tela serve à plataforma.
+`src/components/channels/`: `channel-manager.tsx` (lista com estado, tipo
 e padrão; "Conectar número" desabilitado com o motivo no limite do plano; remover com o nome
 digitado), `channel-badge.tsx` e `channel-status.tsx` (reaproveitados pelo atendimento),
 `channel-kinds.tsx` (rótulo, ícone e texto de cada tipo) e `channel-dialogs.tsx` (**uma linha por
@@ -191,11 +205,37 @@ tipo** liga o diálogo de conectar/gerenciar; sem diálogo, o tipo não aparece 
 `cloud-channel-dialog.tsx` (4 etapas, formulário com o schema da API, cartão com endereço e token
 para copiar, "Gerar novo endereço", "Diagnosticar"). Segredo só sobe: os campos nascem vazios.
 
-QR Code (B3), no mesmo arquivo: `POST /whatsapp-qr` (10 por minuto), `POST /:id/qr` e `/:id/pair` (15,
+QR Code (B3), em `providers/whatsapp_qr/routes.ts`: `POST /whatsapp-qr` (10 por minuto), `POST /:id/qr` e `/:id/pair` (15,
 `Cache-Control: no-store`), `GET /:id/status` (`channel:read`, 30), `POST /:id/disconnect`, `/logout`,
 `/reconnect` e `PATCH /:id/advanced-settings` (30). Limites por usuário. Códigos: 403
 `PLAN_LIMIT_REACHED`, 409 `SERVER_LIMIT_REACHED`, 503 `PROVIDER_UNAVAILABLE`, 409 `CHANNEL_DISABLED`,
 409 `CHANNEL_ALREADY_CONNECTED`, 400 `UNSUPPORTED_FOR_CHANNEL` (canal sem pareamento).
+
+### Plataforma: números próprios (`/api/admin/channels`)
+
+`src/api/admin-channels.ts` monta `buildChannelRoutes` com `Scope = platform` (fixo: nada da
+requisição escolhe o tenant), antes de `adminRoutes` em `app.ts`, com a cadeia `sameOrigin` →
+`jsonBodyLimit` → `authRateLimit` → `requireAuth` → `requirePlatform()` →
+`blockMutationsWhileImpersonating`. Todas as rotas de `/api/channels` existem aqui, com o mesmo
+contrato:
+
+- **Leitura** (`GET` da lista, `/:id/status`, `/:id/templates`) para `platform_owner` e
+  `platform_support`. **Escrita** só para `platform_owner`; o suporte recebe 403, inclusive no
+  `GET /:id/webhook` (lê o token de verificação).
+- **Sem limite de plano** (`channelLimit` devolve `limit: null`); o teto do servidor Evolution
+  (`EVOLUTION_MAX_INSTANCES_TOTAL`) soma todos os escopos e continua valendo. A instância da
+  plataforma nasce com `platform` no nome.
+- **Isolamento:** número de tenant por esta base é 404, e número da plataforma por `/api/channels`
+  também (RLS + `scopeWhere`).
+- **Auditoria:** as mesmas ações `channel.*`, com `actor_type = platform` e `tenant_id` nulo (o
+  `ChannelActor` leva `type: "platform"`); só `/admin/auditoria` as mostra.
+- **Configuração pendente:** `GET /api/admin/channels` acrescenta `providers[tipo].missing`, com o
+  **nome** das variáveis que faltam (`CHANNEL_PROVIDERS` quando o id não está na lista, mais o
+  `requiredEnv` do módulo). Nunca o valor; a rota do tenant não traz o campo.
+
+Tela: `/admin/configuracoes/canais` (`routes/admin/channels.tsx`), com o mesmo `ChannelManager`
+(`basePath = /api/admin/channels`, `canManage` = `platform_owner`) e o aviso "Configuração pendente
+no servidor". Links em `/admin/configuracoes` e no menu (`admin-nav.ts`).
 
 ### Plataforma: avisos de todos os escopos
 
@@ -242,3 +282,7 @@ tenants, `app_secret` mantido no `PATCH`, RBAC, 404 de outro tenant, resposta se
 (pg-boss real), `channels-http`, `admin-channel-events` (suporte 403, sem `raw`, 409, reenfileira) e a matriz de `rbac.test.ts`. Da B3, na pasta do módulo (`test:db`):
 `webhook.db.test.ts` (cadeia, dedupe, mídia, conexão, readoção) e `routes.db.test.ts` (limites, RBAC,
 404 entre tenants, resposta sem segredo), com servidor Evolution simulado (`db-test-support.ts`).
+Da B4: `tests/db/admin-channels.test.ts` (rotas comuns na plataforma: 401, 403 de tenant, de suporte
+e de sessão personificada; isolamento nos dois sentidos; lista sem segredo e com `missing`; auditoria
+de plataforma) e `admin-routes.db.test.ts` na pasta de cada módulo (criar sem tenant, suporte 403 em
+toda escrita, escopos que não se cruzam, teto do servidor sem limite de plano).

@@ -14,16 +14,19 @@ export type ChannelDialogProps = {
   open: boolean;
   /** Ausente: conectar um número novo. */
   channel?: Channel;
+  /** Base da API: `/api/channels` (tenant) ou `/api/admin/channels` (plataforma). */
+  basePath: string;
   onClose: () => void;
 };
 
 /** O diálogo de QR Code é autocontido (B3); aqui ele só ganha o contrato comum e recarrega a lista. */
-function QrDialog({ open, channel, onClose }: ChannelDialogProps) {
+function QrDialog({ open, channel, basePath, onClose }: ChannelDialogProps) {
   const queryClient = useQueryClient();
 
   return (
     <QrChannelDialog
       open={open}
+      basePath={basePath}
       channel={channel ? { id: channel.id, name: channel.name } : null}
       onOpenChange={(next) => !next && onClose()}
       onChanged={() => void queryClient.invalidateQueries({ queryKey: [CHANNELS_KEY] })}

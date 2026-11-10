@@ -251,6 +251,24 @@ export function AdminSettingsPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Canais da plataforma</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="text-muted-foreground">
+            Números de WhatsApp da própria plataforma, separados dos números de cada
+            organização.
+          </p>
+          <Link
+            to="/admin/configuracoes/canais"
+            className="font-medium text-primary hover:underline"
+          >
+            Números de WhatsApp da plataforma
+          </Link>
+        </CardContent>
+      </Card>
+
       <QueryState
         isPending={settings.isPending || plans.isPending}
         isError={settings.isError || plans.isError}

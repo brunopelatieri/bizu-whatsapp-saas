@@ -3,6 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import { zValidator } from "@hono/zod-validator";
 import { adminRoutes } from "@/api/admin";
 import { adminChannelEventRoutes } from "@/api/admin-channel-events";
+import { adminChannelRoutes } from "@/api/admin-channels";
 import { authRoutes } from "@/api/auth-ext";
 import { billingRoutes } from "@/api/billing";
 import { auditRoutes } from "@/api/audit-log";
@@ -93,6 +94,7 @@ api.route("/", auditRoutes);
 // Antes de `adminRoutes`: a saída da personificação vem de quem não tem papel de plataforma.
 api.route("/", impersonationRoutes);
 api.route("/", adminChannelEventRoutes);
+api.route("/", adminChannelRoutes);
 api.route("/", adminRoutes);
 
 api.post(

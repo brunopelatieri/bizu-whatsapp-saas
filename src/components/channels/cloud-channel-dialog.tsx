@@ -138,7 +138,7 @@ function WebhookCard({ webhook, children }: { webhook: Webhook; children?: React
   );
 }
 
-function Diagnostics({ channelId }: { channelId: string }) {
+function Diagnostics({ basePath, channelId }: { basePath: string; channelId: string }) {
   const diagnose = useChannelMutation<Diagnosis>();
   const result = diagnose.data;
 
@@ -150,7 +150,7 @@ function Diagnostics({ channelId }: { channelId: string }) {
           variant="outline"
           size="sm"
           disabled={diagnose.isPending}
-          onClick={() => diagnose.mutate({ path: `/api/channels/${channelId}/test`, method: "POST" })}
+          onClick={() => diagnose.mutate({ path: `${basePath}/${channelId}/test`, method: "POST" })}
         >
           {diagnose.isPending ? "Conferindo…" : "Diagnosticar"}
         </Button>
@@ -234,7 +234,7 @@ function TextField<T extends Record<string, unknown>>({
 const PIN_HELP = "Só se o número ainda não foi registrado na Cloud API (PIN de duas etapas, 6 números).";
 
 /** Etapas 1 a 4 de quem conecta um número novo. */
-function ConnectFlow({ onClose }: { onClose: () => void }) {
+function ConnectFlow({ basePath, onClose }: { basePath: string; onClose: () => void }) {
   const [step, setStep] = useState(0);
   const [created, setCreated] = useState<{ channel: Channel; webhook: Webhook } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -258,7 +258,7 @@ function ConnectFlow({ onClose }: { onClose: () => void }) {
     setFailure(null);
     try {
       const result = await save.mutateAsync({
-        path: "/api/channels/whatsapp-cloud",
+        path: `${basePath}/whatsapp-cloud`,
         method: "POST",
         body: values,
       });
@@ -365,7 +365,7 @@ function ConnectFlow({ onClose }: { onClose: () => void }) {
       {step === 3 && created ? (
         <div className="space-y-4">
           <WebhookCard webhook={created.webhook} />
-          <Diagnostics channelId={created.channel.id} />
+          <Diagnostics basePath={basePath} channelId={created.channel.id} />
         </div>
       ) : null}
 
@@ -396,15 +396,23 @@ function ConnectFlow({ onClose }: { onClose: () => void }) {
 }
 
 /** Número já conectado: editar, ver o endereço do webhook e diagnosticar. */
-function ManageView({ channel, onClose }: { channel: Channel; onClose: () => void }) {
+function ManageView({
+  basePath,
+  channel,
+  onClose,
+}: {
+  basePath: string;
+  channel: Channel;
+  onClose: () => void;
+}) {
   const [failure, setFailure] = useState<string | null>(null);
   const [rotated, setRotated] = useState<Webhook | null>(null);
   const [confirmingRotate, setConfirmingRotate] = useState(false);
   const save = useChannelMutation("Número atualizado.", { silent: true });
   const rotate = useChannelMutation<Webhook>("Novo endereço gerado. Atualize o webhook na Meta.");
   const webhook = useQuery({
-    queryKey: ["channel-webhook", channel.id],
-    queryFn: () => apiFetch<Webhook>(`/api/channels/${channel.id}/webhook`),
+    queryKey: ["channel-webhook", basePath, channel.id],
+    queryFn: () => apiFetch<Webhook>(`${basePath}/${channel.id}/webhook`),
     retry: false,
     // Tem o token de verificação: não fica guardado depois de fechar.
     gcTime: 0,
@@ -424,7 +432,7 @@ function ManageView({ channel, onClose }: { channel: Channel; onClose: () => voi
   async function onSubmit(values: EditOutput) {
     setFailure(null);
     try {
-      await save.mutateAsync({ path: `/api/channels/${channel.id}`, method: "PATCH", body: values });
+      await save.mutateAsync({ path: `${basePath}/${channel.id}`, method: "PATCH", body: values });
       form.reset({ ...form.getValues(), accessToken: "", appSecret: "", pin: "" });
     } catch (error) {
       setFailure(error instanceof Error ? error.message : "Não foi possível salvar.");
@@ -433,7 +441,7 @@ function ManageView({ channel, onClose }: { channel: Channel; onClose: () => voi
 
   async function rotateNow() {
     const next = await rotate
-      .mutateAsync({ path: `/api/channels/${channel.id}/webhook/rotate`, method: "POST" })
+      .mutateAsync({ path: `${basePath}/${channel.id}/webhook/rotate`, method: "POST" })
       .catch(() => null);
     setConfirmingRotate(false);
     if (next) setRotated(next);
@@ -528,7 +536,7 @@ function ManageView({ channel, onClose }: { channel: Channel; onClose: () => voi
         <h3 id="cloud-diagnostics-title" className="text-sm font-semibold">
           Diagnóstico
         </h3>
-        <Diagnostics channelId={channel.id} />
+        <Diagnostics basePath={basePath} channelId={channel.id} />
       </section>
 
       <DialogFooter>
@@ -540,7 +548,7 @@ function ManageView({ channel, onClose }: { channel: Channel; onClose: () => voi
   );
 }
 
-export function CloudChannelDialog({ open, channel, onClose }: ChannelDialogProps) {
+export function CloudChannelDialog({ open, channel, basePath, onClose }: ChannelDialogProps) {
   // Cada abertura começa do zero: nenhum segredo digitado sobra de uma vez para a outra.
   const [session, setSession] = useState(0);
   useEffect(() => {
@@ -560,9 +568,14 @@ export function CloudChannelDialog({ open, channel, onClose }: ChannelDialogProp
         </DialogHeader>
         {open ? (
           channel ? (
-            <ManageView key={`${channel.id}-${session}`} channel={channel} onClose={onClose} />
+            <ManageView
+              key={`${channel.id}-${session}`}
+              basePath={basePath}
+              channel={channel}
+              onClose={onClose}
+            />
           ) : (
-            <ConnectFlow key={session} onClose={onClose} />
+            <ConnectFlow key={session} basePath={basePath} onClose={onClose} />
           )
         ) : null}
       </DialogContent>

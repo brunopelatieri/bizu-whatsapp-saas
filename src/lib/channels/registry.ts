@@ -19,8 +19,8 @@ import type { UpdateChannelInput } from "@/lib/schemas/channels";
  * apagar a pasta e tirar o id remove o motor. Mesma descoberta de `payments/registry.ts`.
  */
 
-/** Quem fez a ação, para a auditoria. */
-export type ChannelActor = { userId: string | null; ip?: string };
+/** Quem fez a ação, para a auditoria. `type: "platform"` em `/api/admin/channels`. */
+export type ChannelActor = { userId: string | null; ip?: string; type?: "platform" };
 
 /** Canal achado pela chave do caminho do webhook, com o que a verificação precisa. */
 export type ChannelWebhookTarget = {
@@ -55,17 +55,18 @@ export type ChannelWebhook = {
 };
 
 /**
- * O que `src/api/channels.ts` entrega ao módulo para ele montar as rotas próprias. O escopo e
- * a autorização são de quem monta (tenant hoje; `/api/admin/channels` na B4).
+ * O que `buildChannelRoutes` (`src/api/channels.ts`) entrega ao módulo para ele montar as rotas
+ * próprias. O escopo e a autorização são de quem monta: o tenant em `/api/channels` e a
+ * plataforma em `/api/admin/channels`. O módulo nunca escreve o caminho nem lê a sessão.
  */
 export type ChannelRouteKit = {
-  /** `/api/channels`. */
+  /** `/api/channels` ou `/api/admin/channels`. */
   base: string;
   canRead: MiddlewareHandler;
   canManage: MiddlewareHandler;
   /** 30 escritas por minuto, por usuário. */
   writeLimit: MiddlewareHandler;
-  /** Limite próprio de uma ação, por usuário (`name` único). */
+  /** Limite próprio de uma ação, por usuário. Quem monta prefixa o `name` (único por base). */
   limit(name: string, perMinute: number): MiddlewareHandler;
   validId: MiddlewareHandler;
   scopeOf(c: Context): Scope;
@@ -77,6 +78,8 @@ export type ChannelModule = {
   /** Só monta o objeto: nada de rede nem erro por falta de provedor aqui. */
   createProvider(env: Env): ChannelProvider;
   webhook?: ChannelWebhook;
+  /** Variáveis sem as quais o módulo não funciona; `/admin` mostra as que faltam (só o nome). */
+  requiredEnv?: readonly (keyof Env)[];
   /** Rotas do tipo (criar, testar, modelos, QR...). Cada uma confere se o módulo está ativo. */
   // biome-ignore lint/suspicious/noExplicitAny: o ambiente do Hono é de quem monta.
   routes?(kit: ChannelRouteKit): Hono<any>;
@@ -170,6 +173,20 @@ export function getProvider(type: string): ChannelProvider {
 
 export function isProviderEnabled(type: ChannelType) {
   return findProvider(type) !== null;
+}
+
+/**
+ * O que falta no `.env` para o tipo funcionar: `CHANNEL_PROVIDERS` (o id fora da lista) e as
+ * variáveis que o módulo declara. Só nomes, nunca valores; só a plataforma recebe.
+ */
+export function missingProviderEnv(type: ChannelType): string[] {
+  const env = getEnv();
+  const required = getModules().find((module) => module.id === type)?.requiredEnv ?? [];
+
+  return [
+    ...(env.CHANNEL_PROVIDERS.includes(type) ? [] : ["CHANNEL_PROVIDERS"]),
+    ...required.filter((name) => !env[name]),
+  ];
 }
 
 /** Todas as pastas de módulo, ativas ou não: as rotas são montadas antes de o `.env` ser lido. */

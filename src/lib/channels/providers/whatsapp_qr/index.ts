@@ -26,6 +26,7 @@ import {
   externalizeEvolutionMedia,
   resolveEvolutionMedia,
 } from "@/lib/channels/providers/whatsapp_qr/media";
+import { qrRoutes } from "@/lib/channels/providers/whatsapp_qr/routes";
 import { normalizeEvolutionEvents } from "@/lib/channels/providers/whatsapp_qr/normalize";
 import { verifyEvolutionWebhook } from "@/lib/channels/providers/whatsapp_qr/webhook";
 import type { ChannelModule } from "@/lib/channels/registry";
@@ -225,6 +226,8 @@ export function createEvolutionProvider(config: EvolutionConfig | null): Channel
 const channelModule: ChannelModule = {
   id: "whatsapp_qr",
   createProvider: (env) => createEvolutionProvider(readEvolutionConfig(env)),
+  requiredEnv: ["EVOLUTION_API_URL", "EVOLUTION_GLOBAL_API_KEY"],
+  routes: qrRoutes,
 };
 
 export default channelModule;
