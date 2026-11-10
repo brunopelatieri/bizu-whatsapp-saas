@@ -243,6 +243,52 @@ describe("/api/inbox: contato e início de conversa", () => {
       expect((await contactRow(q.contactId))?.customerId).toBeNull();
     });
 
+    it("número do WhatsApp que o cadastro recusa: o atendente corrige o telefone; o contato guarda o do provedor", async () => {
+      // 11 dígitos com DDI 55: a regra do cadastro não aceita (faltam dígitos do celular).
+      const q = await seedConversation(scope(), channelId, { phone: "55119123456" });
+
+      const refused = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+        cookie: as("memberA"),
+        body: { name: "Número curto" },
+      });
+      expect(refused.status).toBe(400);
+      expect(await bodyOf(refused)).toMatchObject({ code: "INVALID_PHONE" });
+
+      const stillBad = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+        cookie: as("memberA"),
+        body: { name: "Número curto", phone: "123" },
+      });
+      expect(stillBad.status).toBe(400);
+      expect((await contactRow(q.contactId))?.customerId).toBeNull();
+
+      const fixed = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+        cookie: as("memberA"),
+        body: { name: "Número corrigido", phone: "(11) 91234-5678" },
+      });
+      expect(fixed.status).toBe(201);
+      const created = (await bodyOf(fixed)).customer as { id: string; phoneNormalized: string };
+      expect(created.phoneNormalized).toBe("5511912345678");
+
+      // O contato continua com o número como o provedor entregou e agora está vinculado.
+      const contact = await contactRow(q.contactId);
+      expect(contact).toMatchObject({ phone: "55119123456", customerId: created.id });
+    });
+
+    it("o telefone corrigido que já é de outro cliente: 409 PHONE_IN_USE", async () => {
+      const phone = randomMobile();
+      const existing = await createCustomer(phone.slice(2));
+      const q = await seedConversation(scope(), channelId);
+
+      const response = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+        cookie: as("memberA"),
+        body: { name: "Duplicado", phone: `+${phone}` },
+      });
+
+      expect(response.status).toBe(409);
+      expect(await bodyOf(response)).toMatchObject({ code: "PHONE_IN_USE", customerId: existing.id });
+      expect((await contactRow(q.contactId))?.customerId).toBeNull();
+    });
+
     it("plano no limite: 403 PLAN_LIMIT_REACHED e a conversa continua", async () => {
       const plan = await createPlanRow(owner, { isFree: false, limits: { customers: 0 } });
       await ensureSubscription(owner, tenantId, plan.id);
