@@ -311,6 +311,10 @@ export async function startConversation(actor: InboxActor, input: StartConversat
     }
 
     const destination = await destinationPhone(tx, tenantId, input);
+    // Ligar o contato ao cliente é editar o cadastro (como em `linkContact`): só com `customer:update`.
+    if (destination.link.customerId && !actor.permissions.includes("customer:update")) {
+      destination.link = {};
+    }
     const known = await findContactByPhoneKey(tx, actor.scope, destination.key);
     if (!known && !canWhatsApp(destination.kind)) {
       throw new TenantRuleError(

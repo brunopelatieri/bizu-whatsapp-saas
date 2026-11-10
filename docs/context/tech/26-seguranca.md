@@ -155,6 +155,11 @@ personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota
   dele, 404 igual a id inexistente. Teste de matriz em `tests/db/inbox-queue.test.ts`.
 - `ALREADY_ASSIGNED` (409) diz o nome do dono também a quem já não vê a conversa: só quem conhece o id
   (por tê-la visto na fila) chega a isso, e é o aviso que o PRD pede.
+- Iniciar conversa com um membro (`userId`) mostra o telefone dele a quem tem `inbox:reply`: decisão
+  do PRD ("iniciar conversa com um cliente ou membro que tem telefone"). Pelo cliente, exige
+  `customer:read`, e ligar o contato ao cliente exige `customer:update`.
+- O texto de erro do provedor fica em `message.error_message` e aparece ao atendente (como o
+  `META_REJECTED` dos canais); nunca vai a log.
 - Mídia recebida nunca por URL pública do armazenamento: rota autenticada, tipo pelo conteúdo, `inline`
   só para imagem, áudio e vídeo, `nosniff`.
 - Conteúdo de mensagem, telefone e nome não vão a log, auditoria nem Sentry; erro de provedor só por
