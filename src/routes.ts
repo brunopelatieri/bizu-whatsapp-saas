@@ -43,6 +43,8 @@ export default [
       index("routes/app.tsx"),
       route("clientes", "routes/app.customers.tsx"),
       route("clientes/:id", "routes/app.customers.$id.tsx"),
+      // Caixa de entrada (C3): o id da conversa é opcional na mesma rota.
+      route("atendimento/:conversationId?", "routes/app.inbox.tsx"),
       route("equipe", "routes/app.team.tsx"),
       route("assinatura", "routes/app.subscription.tsx"),
       route("assinatura/faturas", "routes/app.subscription.invoices.tsx"),

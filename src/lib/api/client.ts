@@ -3,6 +3,8 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** Campos extras do corpo do erro (ex.: `assignedTo` em `ALREADY_ASSIGNED`). */
+    readonly details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -52,6 +54,13 @@ async function leaveExpiredSession() {
   );
 }
 
+/** O corpo do erro sem `error` e `code`: o que a regra de negócio anexou. */
+function extraDetails(body: unknown): Record<string, unknown> {
+  if (!body || typeof body !== "object") return {};
+  const { error: _error, code: _code, ...rest } = body as Record<string, unknown>;
+  return rest;
+}
+
 /** Chama a API do próprio app, com cookies, e padroniza os erros em `ApiError`. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -74,6 +83,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       body?.error ?? "Não foi possível concluir a solicitação.",
       response.status,
       body?.code,
+      extraDetails(body),
     );
   }
 

@@ -634,6 +634,22 @@ describe("escalada de permissão", () => {
     expect(team.invitations).toEqual([]);
   });
 
+  it("a lista da equipe traz só o tipo do telefone (para o botão Conversar), nunca o número", async () => {
+    const tenantOwner = await createUser(owner);
+    const tenant = await createTenant(tenantOwner);
+    const colleague = await createUser(owner);
+    await addMember(owner, tenant.id, colleague, "member");
+
+    const response = await call("GET", "/api/team", { cookie: colleague.cookie });
+    const team = await response.json();
+
+    expect(team.members).toHaveLength(2);
+    for (const member of team.members) {
+      expect(member.phoneKind).toBe("mobile");
+      expect(JSON.stringify(member)).not.toMatch(/11987654321|phone_|phoneNormalized|"phone"/);
+    }
+  });
+
   it("admin não altera nem remove owner", async () => {
     const tenantOwner = await createUser(owner);
     const tenant = await createTenant(tenantOwner);

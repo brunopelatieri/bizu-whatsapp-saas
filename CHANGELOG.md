@@ -22,6 +22,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   migration; papéis personalizados não ganham `inbox:*` sozinhos (o owner edita o papel). A fila
   `inbox.sweep` é criada na subida dos workers.
 
+- **Caixa de entrada, fase C3 (tela do atendimento do tenant)**: `/app/atendimento` e
+  `/app/atendimento/:conversationId` (lista com Fila, Minhas e Todas, filtros e busca; conversa com envio de
+  texto, estados de entrega, reenvio e mídia recebida; painel do contato com "Salvar como cliente", vínculo,
+  etiquetas e campos; "Nova conversa"), item "Atendimento" no menu com ponto de não lidas e "Conversar" no
+  cliente e na equipe. Atualiza por polling de 20 s (o tempo real é a C4). `GET /api/team` passa a trazer
+  `phoneKind` por membro (tipo do telefone, nunca o número). **Migração:** nenhuma.
+
 - **Caixa de entrada, fase C1** (`docs/specs/caixa-de-entrada/spec.md`): tabelas `chat_contact`,
   `chat_contact_identity`, `conversation` e `message` (tenant e plataforma, `scopedPolicy()`), e a
   ingestão das mensagens e dos status de WhatsApp recebidos pelos canais: contato por telefone (com e

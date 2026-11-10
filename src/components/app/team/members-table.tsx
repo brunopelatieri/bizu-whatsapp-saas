@@ -7,6 +7,7 @@ import {
   useTeamMutation,
 } from "@/components/app/team/team-api";
 import { Can, useCan } from "@/components/auth/can";
+import { StartConversationButton } from "@/components/inbox/new-conversation-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,7 +84,15 @@ export function MembersTable({ members, roles }: MembersTableProps) {
                     <Badge variant="secondary">{roleLabel(member.role)}</Badge>
                   )}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="space-x-1 text-right">
+                  {member.userId !== user?.id ? (
+                    <StartConversationButton
+                      target={{ userId: member.userId }}
+                      name={member.name}
+                      phoneKind={member.phoneKind}
+                      size="sm"
+                    />
+                  ) : null}
                   {canManage(member) ? (
                     <Can resource="member" action="delete">
                       <Button

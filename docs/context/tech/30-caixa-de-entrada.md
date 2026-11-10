@@ -9,6 +9,10 @@
   `ingest.ts`, `media.ts`, `notify.ts`, `channel-usage.ts`; da C2: `visibility.ts`, `cursor.ts`,
   `views.ts`, `conversations.ts`, `assignment.ts`, `media-access.ts`, `send.ts`, `window.ts`,
   `contact-actions.ts`), `src/api/inbox.ts`, `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
+  da C3: `src/components/inbox/` (`inbox-api.ts`, `format.ts`, `labels.ts`, `conversation-list.tsx`,
+  `conversation-item.tsx`, `conversation-header.tsx`, `message-thread.tsx`, `message-bubble.tsx`,
+  `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`),
+  `src/pages/inbox-page.tsx`, `src/routes/app.inbox.tsx`,
   `drizzle/0032_caixa_de_entrada.sql`, `drizzle/0033_rls_caixa_de_entrada.sql`,
   `tests/db/inbox-ingest.test.ts`, `tests/db/inbox-{queue,send,contacts}.test.ts`,
   `tests/db/inbox-helpers.ts`, `tests/db/rls.test.ts` (bloco da caixa de entrada),
@@ -20,7 +24,7 @@
 |---|---|---|
 | C1 | Dados e ingestão (mensagens, status, eco, LID, mídia de entrada) | **Feita** |
 | C2 | API: leitura paginada, fila, assumir, transferir, envio de texto, janela de 24 h, visibilidade, contato | **Feita** |
-| C3 | Tela `/app/atendimento` | Pendente |
+| C3 | Tela `/app/atendimento` (polling de 20 s, só tenant) | **Feita** |
 | C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | Pendente (`notifyInbox` já é chamado; corpo vazio) |
 | C5 | Mídia de saída, modelos, citação no envio | Pendente |
 | C6 | Atendimento da plataforma em `/admin` | Pendente |
@@ -229,6 +233,57 @@ Lê os primeiros 4 KB do fluxo, decide o tipo com `inboundMime` (conteúdo prime
 inteiro. `inline` só para `INLINE_SAFE_MIME` (imagem, áudio e vídeo); o resto `attachment`. Sempre
 `nosniff` e `private, max-age=300`. Objeto ausente no armazenamento: 404 e `logChannelError` sem dado.
 
+## Tela do atendimento (C3)
+
+Rota `/app/atendimento/:conversationId?` (`routes/app.inbox.tsx` → `pages/inbox-page.tsx`), client-only, sem
+`loader`: TanStack Query + `apiFetch`. Item "Atendimento" em `app-nav.ts` (`inbox:read`), com o ponto de não
+lidas de `GET /api/inbox/unread`. `AppLayout` tira o padding e o overflow do `<main>` nesta rota (a tela rola
+por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
+
+- **Camada de dados** (`inbox-api.ts`): tipos (datas em ISO), `inboxKeys` (todas sob `["inbox", tenantId, …]`),
+  hooks de leitura (`useConversations` e `useMessages` com cursor, `useConversation`, `useInboxUnread`,
+  `useAssignees`, `useContactCandidates`) e de escrita (`useInboxMutation`, `useSendText`). Erros de regra
+  (409 `ALREADY_ASSIGNED`, `SESSION_WINDOW_CLOSED`, `CHANNEL_NOT_CONNECTED`, 403 `PLAN_LIMIT_REACHED`) chegam como
+  `ApiError` e viram toast com a mensagem da API (`errorText`); `ApiError.details` carrega os campos extras do
+  corpo (`assignedTo`, `customerId` e `name` do `PHONE_IN_USE`).
+- **Atualização:** polling de `INBOX_POLL_MS` (20 s) em lista, conversa, mensagens e contador, pausado durante um
+  envio (`useInboxRefetchInterval`). **Ponto de encaixe da C4:** `use-inbox-events` chama
+  `invalidateInbox(queryClient, tenantId, { conversationId })` com os ids do evento e faz
+  `useInboxRefetchInterval` devolver `false` com o SSE de pé; nenhuma tela muda.
+- **Lista** (`conversation-list.tsx`): abas Fila, Minhas e Todas (a última só com `supervise`), situação, não
+  lidas, número (com mais de um), etiqueta (com `customer:read`), atendente (`supervise` + `assign`, só em "Todas"),
+  busca com espera de 300 ms e rolagem infinita por cursor (`IntersectionObserver` e botão "Carregar mais").
+- **Conversa:** `message-thread` mostra da mais antiga para a mais nova, com separador por dia; ao rolar perto
+  do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
+  um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
+  (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar".
+- **Envio:** `composer.tsx` só texto. O texto vai como bolha "enviando" local e some quando a releitura traz a
+  mensagem do servidor; erro devolve o texto ao campo, e o `clientId` é reaproveitado no reenvio depois de
+  erro de rede. Um envio por vez. O campo é bloqueado, com a explicação, para: sessão personificada, sem
+  `inbox:reply`, tenant `read_only`, número não conectado e janela de 24 h encerrada. Rascunho por conversa só
+  em memória.
+- **Cabeçalho:** Assumir (sem dono, com `reply`), Devolver à fila (dono com `reply` ou `assign`), Transferir
+  (`assign`, lista de `/api/inbox/assignees`) e Situação (pendente, encerrar, reabrir).
+- **Painel do contato** (`contact-panel.tsx`, `contact-dialogs.tsx`): telefone, nome no WhatsApp, renomear;
+  cliente vinculado com `TagPicker` e `CustomFieldInput` (gravam por `PATCH /api/customers/:id`, só com
+  `customer:update`), "Desvincular"; sem vínculo, "Salvar como cliente" (`customer:create`; `PHONE_IN_USE`
+  oferece "Vincular a ele"), "Vincular a cliente" (`customer:read` + `update`) e os candidatos do mesmo
+  telefone. Sem `customer:read` o painel mostra só "vinculado a um cliente".
+- **Novas conversas:** `new-conversation-dialog.tsx` (cliente, equipe ou telefone + número de saída) e o botão
+  "Conversar" (`StartConversationButton`) no detalhe do cliente e na lista de equipe, com `inbox:reply` e telefone.
+  Telefone fixo ou celular de 8 dígitos troca o botão pela explicação; com um só número conectado a conversa abre
+  direto. `GET /api/team` passou a trazer `phoneKind` (só o tipo, nunca o número).
+- **Erro de releitura:** só o erro **sem dados** troca a tela (`isError && !data`); uma releitura que falha no
+  polling mantém a conversa, a lista e o rascunho abertos.
+- **Releitura por escopo:** `invalidateInbox` sempre relê lista e contador; com `conversationId`, o detalhe e (salvo
+  `messages: false`) as mensagens daquela conversa. Assumir, devolver, transferir, situação e marcar como lida
+  passam `messages: false`.
+- **Limite conhecido:** o polling de 20 s de `useInfiniteQuery` relê **todas** as páginas já carregadas (lista e
+  mensagens), em sequência. Quem rolou muito faz várias requisições por ciclo; a C4 elimina o polling com o SSE.
+  Rascunhos do composer ficam em memória, com chave de tenant, pessoa e conversa.
+- **Tela estreita:** uma coluna por vez (lista → conversa → painel, com "voltar"); a partir de `xl` o painel é
+  a terceira coluna.
+
 ## Segurança e privacidade
 
 - Conteúdo de mensagem, telefone e nome nunca vão a `logError`, `audit_log` ou Sentry; o erro do
@@ -264,6 +319,18 @@ inteiro. `inline` só para `INLINE_SAFE_MIME` (imagem, áudio e vídeo); o resto
   antes do id, reenvio) e `inbox-contacts.test.ts` (vínculo, candidatos, salvar como cliente com
   limite do plano e `PHONE_IN_USE`, iniciar conversa). As rotas entram em `rbac.test.ts` e as escritas
   no `it.each` de `impersonation.test.ts`; `src/lib/inbox/window.test.ts` cobre a janela.
+
+## Desvios da SPEC (C3)
+
+- Polling de 20 s no lugar de SSE (a C4 entrega o tempo real); `use-inbox-events.ts` não existe ainda.
+- Sem "Enviar modelo", anexo nem citação (C5): a faixa da janela de 24 h só explica.
+- "Conversar" esconde fixo e celular de 8 dígitos com a explicação; a exceção da SPEC (cliente salvo a partir
+  de um contato que já escreveu) não aparece no botão, porque o cliente não diz se o contato existe. O servidor
+  continua decidindo: pelo diálogo "Nova conversa" com telefone, o número que já escreveu vale.
+- `GET /api/team` ganhou `phoneKind` (única mudança de API da C3, fora de `src/lib/inbox/`).
+- `INVALID_PHONE` em "Salvar como cliente" aparece como erro do formulário, sem campo de telefone para corrigir:
+  `saveContactAsCustomerSchema` não tem `phone`. **Pendência para a C2/C5**, se a regra do cadastro recusar um
+  número que o WhatsApp entrega.
 
 ## Desvios da SPEC (C2)
 

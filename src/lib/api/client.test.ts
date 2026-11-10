@@ -22,6 +22,21 @@ describe("apiFetch", () => {
     await expect(apiFetch("/api/publica")).resolves.toEqual({ ok: true });
   });
 
+  it("leva os campos extras do corpo do erro em `details`", async () => {
+    mockFetch(
+      Response.json(
+        { error: "Já tem dono.", code: "ALREADY_ASSIGNED", assignedTo: { id: "u1", name: "Ana" } },
+        { status: 409 },
+      ),
+    );
+
+    const error = await apiFetch("/api/x").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("ALREADY_ASSIGNED");
+    expect((error as ApiError).details).toEqual({ assignedTo: { id: "u1", name: "Ana" } });
+  });
+
   it("marca corpo em texto como JSON", async () => {
     const fetchMock = mockFetch(Response.json({ ok: true }));
 
