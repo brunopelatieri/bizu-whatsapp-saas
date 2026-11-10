@@ -2,14 +2,14 @@
 
 - **Escopo:** Área do proprietário da plataforma: rotas `/admin/**`, API `/api/admin/*`, papéis, suspensão, usuários, planos e configurações.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-rotas-api.md`, `spec-tenant-rbac.md`, `spec-billing.md`
-- **Paths do código:** `src/api/admin.ts`, `src/api/admin-channels.ts`, `src/api/admin-channel-events.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`
+- **Paths do código:** `src/api/admin.ts`, `src/api/admin-channels.ts`, `src/api/admin-channel-events.ts`, `src/api/admin-inbox.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`
 
 ## Acesso
 
 | Papel (`user.role`) | Lê | Escreve |
 |---|---|---|
 | `platform_owner` | tudo | planos, preços, configurações, suspender/reativar, trocar plano, banir |
-| `platform_support` | tudo | nada (403) |
+| `platform_support` | tudo | **só o atendimento** (responder, situação, iniciar conversa, vincular contato; resto 403) |
 | `user` | nada | nada (403 `PLATFORM_FORBIDDEN`) |
 
 `adminRoutes` aplica, em `/api/admin/*`: `sameOrigin` → `jsonBodyLimit` → `authRateLimit` →
@@ -17,6 +17,14 @@
 **antes** da validação. O `AdminLayout` manda quem não é da plataforma de volta a `/app`, mas é
 só o caminho da interface. Sem `loader` de servidor. Em produção, sem 2FA, toda rota responde 403
 `PLATFORM_2FA_REQUIRED`, e o layout leva a `/admin/configuracoes/seguranca`.
+
+## Atendimento (`/admin/atendimento`, `/api/admin/inbox/*`)
+
+Caixa de entrada da plataforma, sem fila e **sem acesso a clientes dos owners** (`tech/30-caixa-de-entrada.md`, "Atendimento da
+plataforma"). Leitura: qualquer papel de plataforma. Responder, mudar a situação, iniciar conversa, vincular e renomear o contato:
+`platform_owner` **e `platform_support`** (decisão do proprietário): é a **única escrita do suporte** em `/admin`; canal, etiqueta e
+campo seguem só do `platform_owner`. A sessão personificada não alcança a rota. `GET /api/admin/users` traz `phoneKind` (só o tipo) para
+o botão "Conversar" da lista de usuários.
 
 ## API
 

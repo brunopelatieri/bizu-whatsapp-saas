@@ -80,7 +80,7 @@ Cada fase cabe em um PR revisável e termina com `npm run lint`, `typecheck`, `t
 | C3 | Tela do atendimento (tenant) | inbox | C2, A2, A3 | `/app/atendimento`: lista, conversa, composer, painel do contato | Sonnet |
 | C4 | Tempo real | inbox | C2 | SSE, `NOTIFY`, ressincronização e contador de não lidas no menu | Opus |
 | C5 | Mídia, modelos e resposta citada (**implementada**) | inbox | C3, B2 | Anexos de saída, envio de modelo, citar mensagem | Sonnet |
-| C6 | Atendimento da plataforma | inbox | C3, B4, A4 | `/admin/atendimento`, sem fila | Sonnet + `/security-review` |
+| C6 | Atendimento da plataforma (**implementada**) | inbox | C3, B4, A4 | `/admin/atendimento`, sem fila | Sonnet + `/security-review` |
 | C7 | LGPD, contexto e fechamento | todas | todas | Exportação e exclusão cobrindo conversas, retenção de `channel_event`, `docs/context/`, rules, skills, README | Opus |
 
 **Trilhas paralelas:** depois de F0, a trilha A (cadastro) e a trilha B (canais) não tocam os
