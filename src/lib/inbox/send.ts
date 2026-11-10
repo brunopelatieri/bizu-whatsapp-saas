@@ -418,7 +418,7 @@ async function recordFailure(scope: Scope, prepared: Prepared, error: unknown) {
 }
 
 async function outcomeOf(actor: InboxActor, messageId: string): Promise<SendOutcome> {
-  const view = await withScope(actor.scope, (tx) => messageView(tx, messageId));
+  const view = await withScope(actor.scope, (tx) => messageView(tx, actor.scope, messageId));
   return { message: view, failed: view.status === "failed" };
 }
 

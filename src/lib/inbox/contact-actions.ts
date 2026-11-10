@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { scopeTenantId, type Tx, withScope } from "@/db/rls";
+import { type Scope, scopeTenantId, type Tx, withScope } from "@/db/rls";
 import { chatContact, conversation, customer, user } from "@/db/schema";
 import { requireChannelRow } from "@/lib/channels/service";
 import { activeMemberRole, alreadyAssigned, auditInbox } from "@/lib/inbox/assignment";
@@ -17,7 +17,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { notifyInbox } from "@/lib/inbox/notify";
 import { type InboxActor, readsCustomers, visibleConversation } from "@/lib/inbox/visibility";
-import { canWhatsApp, normalizePhone, phoneErrorMessage } from "@/lib/phone/br";
+import { canWhatsApp, normalizePhone, type PhoneKind, phoneErrorMessage } from "@/lib/phone/br";
 import type {
   LinkContactInput,
   SaveContactAsCustomerInput,
@@ -43,7 +43,7 @@ const visibleConversationsOf = (tx: Tx, actor: InboxActor, contactId: string) =>
     .from(conversation)
     .where(and(eq(conversation.contactId, contactId), visibleConversation(actor)));
 
-async function requireVisibleContact(tx: Tx, actor: InboxActor, contactId: string) {
+export async function requireVisibleContact(tx: Tx, actor: InboxActor, contactId: string) {
   const [row] = await tx
     .select()
     .from(chatContact)
@@ -74,7 +74,7 @@ async function displayNameFor(tx: Tx, actor: InboxActor, contact: ContactRow) {
 }
 
 /** Avisa as conversas do contato (o painel e a lista relêem o vínculo). */
-async function notifyContactConversations(tx: Tx, actor: InboxActor, contactId: string) {
+export async function notifyContactConversations(tx: Tx, actor: InboxActor, contactId: string) {
   const rows = await tx
     .select({ id: conversation.id, assignedUserId: conversation.assignedUserId })
     .from(conversation)
@@ -91,7 +91,7 @@ async function notifyContactConversations(tx: Tx, actor: InboxActor, contactId: 
   }
 }
 
-async function contactResponse(tx: Tx, actor: InboxActor, contactId: string) {
+export async function contactResponse(tx: Tx, actor: InboxActor, contactId: string) {
   const [row] = await tx.select().from(chatContact).where(eq(chatContact.id, contactId));
   if (!row) throw notFound(CONTACT_NOT_FOUND);
 
@@ -252,7 +252,7 @@ export async function saveContactAsCustomer(
 // Iniciar conversa
 // ---------------------------------------------------------------------------
 
-const phoneRequired = () =>
+export const phoneRequired = () =>
   new TenantRuleError(400, "PHONE_REQUIRED", "Cadastre um telefone para conversar pelo WhatsApp.");
 
 /** O telefone do destino: do cliente, do membro ou o digitado. */
@@ -292,6 +292,63 @@ async function destinationPhone(tx: Tx, tenantId: string, input: StartConversati
 }
 
 /**
+ * O contato do destino: o que já escreveu (mesma `phone_key`; ligado ao cliente ou membro, se estava
+ * sem vínculo) ou um novo (`outbound`, com o vínculo pedido ou o automático). Sem contato, só celular
+ * ou estrangeiro (`canWhatsApp`); senão 400 `PHONE_NOT_WHATSAPP`. Serve aos dois escopos: na
+ * plataforma o `link` só traz `userId` e o vínculo automático nunca olha `customer` (`linkCandidates`).
+ */
+export async function contactForStart(
+  tx: Tx,
+  scope: Scope,
+  destination: {
+    phone: string;
+    key: string;
+    kind: PhoneKind;
+    link: { customerId?: string; userId?: string };
+  },
+) {
+  const known = await findContactByPhoneKey(tx, scope, destination.key);
+  if (!known && !canWhatsApp(destination.kind)) {
+    throw new TenantRuleError(
+      400,
+      "PHONE_NOT_WHATSAPP",
+      "Este número não pode receber WhatsApp (fixo ou celular sem o 9º dígito).",
+    );
+  }
+
+  if (known) {
+    // Contato sem vínculo que acabou de ser identificado pela tela: liga.
+    const { customerId, userId } = destination.link;
+    if (!known.customerId && !known.userId && (customerId || userId)) {
+      await tx
+        .update(chatContact)
+        .set({ customerId: customerId ?? null, userId: userId ?? null })
+        .where(eq(chatContact.id, known.id));
+    }
+    return known.id;
+  }
+
+  const contact = await upsertContact(tx, scope, {
+    phone: destination.phone,
+    phoneKey: destination.key,
+    waName: null,
+    createdVia: "outbound",
+  });
+  if (contact.inserted) {
+    const { customerId, userId } = destination.link;
+    if (customerId || userId) {
+      await tx
+        .update(chatContact)
+        .set({ customerId: customerId ?? null, userId: userId ?? null })
+        .where(eq(chatContact.id, contact.id));
+    } else {
+      await autoLinkContact(tx, scope, contact.id, destination.key);
+    }
+  }
+  return contact.id;
+}
+
+/**
  * Acha ou cria a conversa com um cliente, um membro ou um telefone, pelo número de saída escolhido.
  * Não envia nada. O número precisa poder ter WhatsApp (`canWhatsApp`) **ou já ter escrito**: com
  * `chat_contact` da mesma `phone_key`, a conversa usa esse contato e o número dele, mesmo que o
@@ -316,46 +373,7 @@ export async function startConversation(actor: InboxActor, input: StartConversat
     if (destination.link.customerId && !actor.permissions.includes("customer:update")) {
       destination.link = {};
     }
-    const known = await findContactByPhoneKey(tx, actor.scope, destination.key);
-    if (!known && !canWhatsApp(destination.kind)) {
-      throw new TenantRuleError(
-        400,
-        "PHONE_NOT_WHATSAPP",
-        "Este número não pode receber WhatsApp (fixo ou celular sem o 9º dígito).",
-      );
-    }
-
-    let contactId: string;
-    if (known) {
-      contactId = known.id;
-      // Contato sem vínculo que acabou de ser identificado pela tela: liga.
-      const { customerId, userId } = destination.link;
-      if (!known.customerId && !known.userId && (customerId || userId)) {
-        await tx
-          .update(chatContact)
-          .set({ customerId: customerId ?? null, userId: userId ?? null })
-          .where(eq(chatContact.id, known.id));
-      }
-    } else {
-      const contact = await upsertContact(tx, actor.scope, {
-        phone: destination.phone,
-        phoneKey: destination.key,
-        waName: null,
-        createdVia: "outbound",
-      });
-      contactId = contact.id;
-      if (contact.inserted) {
-        const { customerId, userId } = destination.link;
-        if (customerId || userId) {
-          await tx
-            .update(chatContact)
-            .set({ customerId: customerId ?? null, userId: userId ?? null })
-            .where(eq(chatContact.id, contact.id));
-        } else {
-          await autoLinkContact(tx, actor.scope, contact.id, destination.key);
-        }
-      }
-    }
+    const contactId = await contactForStart(tx, actor.scope, destination);
 
     const [inserted] = await tx
       .insert(conversation)

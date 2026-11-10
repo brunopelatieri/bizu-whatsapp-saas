@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import type { Tx } from "@/db/rls";
+import type { Scope, Tx } from "@/db/rls";
 import { channel, chatContact, conversation, customer, file, message, user } from "@/db/schema";
 import type { ChannelType } from "@/lib/channels/types";
 import type { CustomerTagView } from "@/lib/crm/tags";
@@ -55,17 +55,34 @@ const itemFields = {
   cursorAt: cursorTime(conversation.lastMessageAt),
 };
 
-/** `SELECT` da linha de conversa com contato, número, cliente, membro vinculado e dono. */
-export function selectConversationRows(tx: Tx) {
-  return tx
-    .select(itemFields)
+/**
+ * `SELECT` da linha de conversa com contato, número, cliente, membro vinculado e dono. Na plataforma
+ * a consulta **nem menciona** `customer` (decisão do proprietário: o cliente é do owner): o nome do
+ * cliente sai como `null` e a junção não existe.
+ */
+export function selectConversationRows(tx: Tx, scope: Scope) {
+  const fields =
+    scope.kind === "tenant"
+      ? itemFields
+      : { ...itemFields, customerName: sql<string | null>`null::text` };
+
+  const base = tx
+    .select(fields)
     .from(conversation)
     .innerJoin(chatContact, eq(chatContact.id, conversation.contactId))
     .innerJoin(channel, eq(channel.id, conversation.channelId))
-    .leftJoin(customer, eq(customer.id, chatContact.customerId))
+    .$dynamic();
+
+  return (
+    scope.kind === "tenant" ? base.leftJoin(customer, eq(customer.id, chatContact.customerId)) : base
+  )
     .leftJoin(contactUser, eq(contactUser.id, chatContact.userId))
     .leftJoin(assignee, eq(assignee.id, conversation.assignedUserId));
 }
+
+/** Raiz da API do escopo: a mídia da mensagem aponta para a rota autenticada dele. */
+export const inboxBase = (scope: Scope) =>
+  scope.kind === "tenant" ? "/api/inbox" : "/api/admin/inbox";
 
 export type ConversationItem = {
   id: string;

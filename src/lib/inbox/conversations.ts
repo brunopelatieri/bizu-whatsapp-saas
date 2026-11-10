@@ -1,14 +1,16 @@
 import { and, desc, eq, gt, ilike, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
-import { type Tx, withScope } from "@/db/rls";
+import { type Scope, type Tx, withScope } from "@/db/rls";
 import { chatContact, conversation, customer, message, user } from "@/db/schema";
 import { escapeLike } from "@/lib/admin/tenants";
 import { type CustomerTagView, tagsOfCustomers } from "@/lib/crm/tags";
 import { linkCandidates, providerPhone } from "@/lib/inbox/contacts";
+import { type PlatformContactLink, platformLinkOf } from "@/lib/inbox/platform-link";
 import { afterCursor, decodeCursor, encodeCursor } from "@/lib/inbox/cursor";
 import {
   contactUser,
   type ConversationItem,
   displayNameOf,
+  inboxBase,
   type ItemRow,
   selectConversationRows,
   selectMessageRows,
@@ -66,7 +68,7 @@ async function pageTags(tx: Tx, actor: InboxActor, rows: ItemRow[]) {
 
 /** Uma linha da lista, já com as etiquetas, para quem acabou de mudar a conversa. */
 export async function conversationItem(tx: Tx, actor: InboxActor, conversationId: string) {
-  const [row] = await selectConversationRows(tx).where(eq(conversation.id, conversationId));
+  const [row] = await selectConversationRows(tx, actor.scope).where(eq(conversation.id, conversationId));
   if (!row) throw notFound(CONVERSATION_NOT_FOUND);
   return toConversationItem(row, actor, await pageTags(tx, actor, [row]));
 }
@@ -98,7 +100,15 @@ function searchFilter(q: string, actor: InboxActor): SQL {
 }
 
 export async function listConversations(actor: InboxActor, query: ConversationsQuery) {
-  if ((query.tab === "all" || query.assignedTo) && !actor.can.supervise) throw permissionDenied();
+  // Na plataforma só existe a lista (sem fila, abas nem dono): a rota fixa `tab = all` e o servidor
+  // não pede `supervise`, que lá não existe.
+  if (
+    actor.scope.kind === "tenant" &&
+    (query.tab === "all" || query.assignedTo) &&
+    !actor.can.supervise
+  ) {
+    throw permissionDenied();
+  }
   if (query.tagIds?.length && !readsCustomers(actor)) throw permissionDenied();
 
   const filters: (SQL | undefined)[] = [visibleConversation(actor)];
@@ -125,7 +135,7 @@ export async function listConversations(actor: InboxActor, query: ConversationsQ
   }
 
   return withScope(actor.scope, async (tx) => {
-    const rows = await selectConversationRows(tx)
+    const rows = await selectConversationRows(tx, actor.scope)
       .where(and(...filters))
       .orderBy(sql`${conversation.lastMessageAt} desc nulls last`, desc(conversation.id))
       .limit(query.limit + 1);
@@ -172,7 +182,14 @@ export type ContactLink =
  * os candidatos (mesma `phone_key`) só para quem responde, e os clientes entre eles também só
  * para quem lê clientes.
  */
-export async function linkOf(tx: Tx, actor: InboxActor, contact: ContactRow): Promise<ContactLink> {
+export async function linkOf(
+  tx: Tx,
+  actor: InboxActor,
+  contact: ContactRow,
+): Promise<ContactLink | PlatformContactLink> {
+  // Plataforma: o usuário e as organizações dele; nada de `customer` de tenant.
+  if (actor.scope.kind === "platform") return platformLinkOf(tx, contact);
+
   if (contact.customerId) {
     if (!readsCustomers(actor)) {
       return { kind: "customer", customer: { id: contact.customerId, name: null }, tags: [], customFields: {} };
@@ -235,7 +252,7 @@ export function contactView(contact: ContactRow, displayName: string | null) {
 
 export async function getConversation(actor: InboxActor, conversationId: string) {
   return withScope(actor.scope, async (tx) => {
-    const [row] = await selectConversationRows(tx).where(
+    const [row] = await selectConversationRows(tx, actor.scope).where(
       and(eq(conversation.id, conversationId), visibleConversation(actor)),
     );
     if (!row) throw notFound(CONVERSATION_NOT_FOUND);
@@ -284,7 +301,7 @@ export async function listMessages(actor: InboxActor, conversationId: string, qu
     const last = page.at(-1);
 
     return {
-      items: page.map((row) => toMessageView(row)),
+      items: page.map((row) => toMessageView(row, inboxBase(actor.scope))),
       nextCursor:
         rows.length > query.limit && last ? encodeCursor({ at: last.cursorAt, id: last.id }) : null,
     };
@@ -292,10 +309,10 @@ export async function listMessages(actor: InboxActor, conversationId: string, qu
 }
 
 /** Uma mensagem já gravada, na forma da API. */
-export async function messageView(tx: Tx, messageId: string) {
+export async function messageView(tx: Tx, scope: Scope, messageId: string) {
   const [row] = await selectMessageRows(tx).where(eq(message.id, messageId));
   if (!row) throw notFound("Mensagem não encontrada.");
-  return toMessageView(row);
+  return toMessageView(row, inboxBase(scope));
 }
 
 /** Mensagem cuja conversa o ator vê. `null` fora do predicado. */

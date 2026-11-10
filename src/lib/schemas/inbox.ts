@@ -170,3 +170,37 @@ export const saveContactAsCustomerSchema = z.object({
   customFields: customFieldValuesSchema.optional(),
 });
 export type SaveContactAsCustomerInput = z.infer<typeof saveContactAsCustomerSchema>;
+
+// ---------------------------------------------------------------------------
+// Plataforma (`/api/admin/inbox/*`): só a lista, sem fila, dono nem cliente de owner
+// ---------------------------------------------------------------------------
+
+/** Sem `tab` (só existe a lista), `tagIds` (etiqueta é de cliente) e `assignedTo` (sem dono). */
+export const platformConversationsQuerySchema = conversationsQuerySchema.omit({
+  tab: true,
+  tagIds: true,
+  assignedTo: true,
+});
+export type PlatformConversationsQuery = z.infer<typeof platformConversationsQuerySchema>;
+
+/**
+ * Iniciar conversa na plataforma: um usuário ou um telefone. `.strict()` recusa `customerId` (400):
+ * o cliente é do owner e a plataforma não o alcança (decisão do proprietário).
+ */
+export const platformStartConversationSchema = z
+  .object({
+    channelId: z.uuid("Número inválido."),
+    userId: z.uuid("Usuário inválido.").optional(),
+    phone: z.string().trim().min(1).max(30).optional(),
+  })
+  .strict()
+  .refine((input) => [input.userId, input.phone].filter((value) => value !== undefined).length === 1, {
+    message: "Informe um usuário ou um telefone.",
+  });
+export type PlatformStartConversationInput = z.infer<typeof platformStartConversationSchema>;
+
+/** Vincular a um usuário, ou desfazer (`null`). Sem `customerId`. */
+export const platformLinkContactSchema = z
+  .object({ userId: z.uuid("Usuário inválido.").nullable() })
+  .strict();
+export type PlatformLinkContactInput = z.infer<typeof platformLinkContactSchema>;
