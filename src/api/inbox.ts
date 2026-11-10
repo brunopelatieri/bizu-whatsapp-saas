@@ -11,6 +11,7 @@ import {
   validId,
 } from "@/api/guards";
 import { blockMutationsWhileImpersonating } from "@/api/impersonation";
+import { streamInboxEvents } from "@/api/inbox-events";
 import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
@@ -125,6 +126,9 @@ inboxRoutes.get(
 );
 
 inboxRoutes.get("/api/inbox/unread", canRead, async (c) => c.json(await unreadCounts(inboxActor(c))));
+
+/** SSE só com ids, filtrado por pessoa no servidor (`src/api/inbox-events.ts`). */
+inboxRoutes.get("/api/inbox/events", canRead, (c) => streamInboxEvents(c, inboxActor(c)));
 
 inboxRoutes.get("/api/inbox/assignees", requirePermission("inbox", "assign"), async (c) =>
   c.json({ users: await listAssignees(inboxActor(c)) }),

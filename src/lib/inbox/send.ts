@@ -171,6 +171,7 @@ async function queueText(
     m: inserted.id,
     a: owner,
     p: current.assignedUserId,
+    u: actor.userId,
   });
 
   return {

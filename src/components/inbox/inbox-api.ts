@@ -19,6 +19,7 @@ import type {
   MessageStatus,
   MessageType,
 } from "@/lib/inbox/constants";
+import { type InboxRealtimeMode, useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
 import type { ConversationTab } from "@/lib/schemas/inbox";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -27,12 +28,14 @@ import { useAuth } from "@/providers/auth-provider";
  * a API devolve (datas em ISO); `src/lib/inbox/views.ts` é a fonte, e nada daqui importa código de
  * servidor.
  *
- * Atualização: nesta fase, polling (`INBOX_POLL_MS`). A C4 troca o polling por SSE sem tocar nas
- * telas: `useInboxRefetchInterval()` passa a devolver `false` quando o fluxo está de pé, e
- * `invalidateInbox()` é o ponto único que o `use-inbox-events` chama com os ids do evento.
+ * Atualização (C4): com o SSE de pé (`use-inbox-events.ts`), os eventos invalidam as queries pelos
+ * ids e só a lista e o contador são relidos a cada `INBOX_LIVE_LIST_MS` (rede de segurança); a
+ * conversa e as mensagens dependem só dos eventos. Sem SSE, polling de `INBOX_POLL_MS` em tudo.
  */
 
 export const INBOX_POLL_MS = 20_000;
+/** Releitura da lista e do contador com o SSE de pé (SPEC: "a cada 60 s refaz a lista"). */
+export const INBOX_LIVE_LIST_MS = 60_000;
 /** Raiz das chaves; `invalidateInbox` e a C4 invalidam por aqui. */
 export const INBOX_KEY = "inbox";
 
@@ -153,10 +156,34 @@ export const inboxKeys = {
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
 };
 
+/** O que uma mudança afeta em uma conversa: o detalhe e/ou as mensagens. */
+export type ConversationChange = { detail: boolean; messages: boolean };
+
 /**
- * Invalida o que um evento da caixa afeta: sempre a lista e o contador. Com `conversationId`, o detalhe
+ * Fonte única das chaves que uma mudança afeta. `lists` = lista e contador; por conversa, o detalhe e
+ * as mensagens conforme `ConversationChange`. Usada pelas escritas da tela (`invalidateInbox`) e pelos
+ * eventos do SSE (`use-inbox-events.ts`, que junta uma rajada numa chamada só).
+ */
+export function invalidateInboxChanges(
+  queryClient: QueryClient,
+  tenantId: TenantId,
+  changes: { lists: boolean; conversations?: Iterable<[string, ConversationChange]> },
+) {
+  const keys: (readonly unknown[])[] = [];
+
+  if (changes.lists) keys.push(inboxKeys.conversations(tenantId), inboxKeys.unread(tenantId));
+  for (const [conversationId, change] of changes.conversations ?? []) {
+    if (change.detail) keys.push(inboxKeys.conversation(tenantId, conversationId));
+    if (change.messages) keys.push(inboxKeys.messages(tenantId, conversationId));
+  }
+
+  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+}
+
+/**
+ * Invalida o que uma escrita da tela afeta: sempre a lista e o contador. Com `conversationId`, o detalhe
  * e (salvo `messages: false`) as mensagens daquela conversa; sem ele, o detalhe de todas e nenhuma
- * mensagem. A C4 chama isto com os ids do evento SSE (nunca escreve o evento no cache).
+ * mensagem. Nunca escreve no cache.
  */
 export function invalidateInbox(
   queryClient: QueryClient,
@@ -164,30 +191,43 @@ export function invalidateInbox(
   scope: { conversationId?: string; messages?: boolean } = {},
 ) {
   const { conversationId, messages = true } = scope;
-  const keys: (readonly unknown[])[] = [
-    inboxKeys.conversations(tenantId),
-    inboxKeys.unread(tenantId),
-  ];
 
   if (!conversationId) {
-    keys.push([INBOX_KEY, tenantId, "conversation"]);
-  } else {
-    keys.push(inboxKeys.conversation(tenantId, conversationId));
-    if (messages) keys.push(inboxKeys.messages(tenantId, conversationId));
+    return Promise.all([
+      invalidateInboxChanges(queryClient, tenantId, { lists: true }),
+      queryClient.invalidateQueries({ queryKey: [INBOX_KEY, tenantId, "conversation"] }),
+    ]);
   }
+  return invalidateInboxChanges(queryClient, tenantId, {
+    lists: true,
+    conversations: [[conversationId, { detail: true, messages }]],
+  });
+}
 
-  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+/** Chave das mutações de envio: os eventos esperam o envio terminar para reler as mensagens. */
+export const INBOX_SEND_KEY = [INBOX_KEY, "send"] as const;
+
+/**
+ * Intervalo pelo modo. `list`: lista, contador e o detalhe da conversa (que traz a janela de 24 h,
+ * calculada no servidor e que expira sem evento); `detail`: as mensagens, que só mudam com evento.
+ */
+export function refetchIntervalFor(
+  mode: InboxRealtimeMode,
+  kind: "list" | "detail",
+): number | false {
+  if (mode === "live") return kind === "list" ? INBOX_LIVE_LIST_MS : false;
+  return INBOX_POLL_MS;
 }
 
 /**
  * Intervalo de atualização das queries da caixa. Em pausa enquanto há envio em andamento (uma
  * releitura no meio do envio mostraria a mensagem `queued` do servidor ao lado da otimista).
- * A C4: devolver `false` quando o SSE estiver conectado.
  */
-export function useInboxRefetchInterval() {
-  const sending = useIsMutating({ mutationKey: [INBOX_KEY, "send"] }) > 0;
+export function useInboxRefetchInterval(kind: "list" | "detail" = "list") {
+  const sending = useIsMutating({ mutationKey: INBOX_SEND_KEY }) > 0;
+  const mode = useInboxRealtimeMode();
 
-  return sending ? false : INBOX_POLL_MS;
+  return sending ? false : refetchIntervalFor(mode, kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +267,8 @@ export function useConversations(filters: ConversationFilters) {
 
 export function useConversation(id: string | undefined) {
   const { tenant } = useAuth();
-  const interval = useInboxRefetchInterval();
+  // A janela de 24 h expira sem evento: o detalhe segue o ciclo da lista (60 s ao vivo).
+  const interval = useInboxRefetchInterval("list");
 
   return useQuery({
     queryKey: inboxKeys.conversation(tenant?.id, id ?? ""),
@@ -241,7 +282,7 @@ export function useConversation(id: string | undefined) {
 /** Da mais nova para a mais antiga, por página; a tela inverte para ler de cima para baixo. */
 export function useMessages(conversationId: string | undefined) {
   const { tenant } = useAuth();
-  const interval = useInboxRefetchInterval();
+  const interval = useInboxRefetchInterval("detail");
 
   return useInfiniteQuery({
     queryKey: inboxKeys.messages(tenant?.id, conversationId ?? ""),
@@ -260,15 +301,16 @@ export function useMessages(conversationId: string | undefined) {
   });
 }
 
-/** Conversas com não lidas na fila e nas minhas (o ponto do menu). */
+/** Conversas com não lidas na fila e nas minhas (o ponto do menu); os eventos o invalidam. */
 export function useInboxUnread(enabled = true) {
   const { tenant, permissions } = useAuth();
+  const mode = useInboxRealtimeMode();
 
   return useQuery({
     queryKey: inboxKeys.unread(tenant?.id),
     queryFn: () => apiFetch<{ queue: number; mine: number }>("/api/inbox/unread"),
     enabled: enabled && Boolean(tenant) && permissions.includes("inbox:read"),
-    refetchInterval: INBOX_POLL_MS,
+    refetchInterval: refetchIntervalFor(mode, "list"),
     refetchIntervalInBackground: false,
     retry: false,
   });
@@ -374,7 +416,7 @@ export function useSendText(conversationId: string) {
   const { tenant } = useAuth();
 
   return useMutation({
-    mutationKey: [INBOX_KEY, "send"],
+    mutationKey: INBOX_SEND_KEY,
     mutationFn: ({ text, clientId }: { text: string; clientId: string }) =>
       apiFetch<SendResult>(`/api/inbox/conversations/${conversationId}/messages`, {
         method: "POST",

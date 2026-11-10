@@ -9,7 +9,7 @@
 | Rota | Estado |
 |---|---|
 | `/app` | visão geral com `AccountCard` e cards de clientes, equipe e assinatura |
-| `/app/atendimento`, `/app/atendimento/:conversationId` | caixa de entrada: lista (Fila, Minhas, Todas), conversa e painel do contato; polling de 20 s; ocupa a altura toda (`tech/30-caixa-de-entrada.md`) |
+| `/app/atendimento`, `/app/atendimento/:conversationId` | caixa de entrada: lista (Fila, Minhas, Todas), conversa e painel do contato; tempo real por SSE (`use-inbox-events.ts`, montado no `AppLayout` para o ponto de não lidas do menu andar em toda tela) e, sem ele, polling de 20 s com o aviso "Atualização em tempo real indisponível"; ocupa a altura toda (`tech/30-caixa-de-entrada.md`) |
 | `/app/clientes`, `/app/clientes/:id` | lista com busca, filtro e paginação; criar, editar, remover, bloquear, enviar acesso ao portal e último acesso (`tech/25-portal-clientes.md`) |
 | `/app/onboarding` | criação do tenant e convites abertos; fora do layout com sidebar |
 | `/app/equipe` | membros, convites, reenvio, revogação, troca de papel e remoção |

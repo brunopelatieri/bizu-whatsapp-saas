@@ -8,14 +8,17 @@
 - **Paths do código:** `src/db/schema/inbox.ts`, `src/lib/inbox/` (`constants.ts`, `contacts.ts`,
   `ingest.ts`, `media.ts`, `notify.ts`, `channel-usage.ts`; da C2: `visibility.ts`, `cursor.ts`,
   `views.ts`, `conversations.ts`, `assignment.ts`, `media-access.ts`, `send.ts`, `window.ts`,
-  `contact-actions.ts`), `src/api/inbox.ts`, `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
+  `contact-actions.ts`; da C4: `realtime.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4),
+  `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
   da C3: `src/components/inbox/` (`inbox-api.ts`, `format.ts`, `labels.ts`, `conversation-list.tsx`,
   `conversation-item.tsx`, `conversation-header.tsx`, `message-thread.tsx`, `message-bubble.tsx`,
-  `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`),
-  `src/pages/inbox-page.tsx`, `src/routes/app.inbox.tsx`,
+  `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`; da C4:
+  `use-inbox-events.ts`, `realtime-mode.ts`), `src/pages/inbox-page.tsx`, `src/routes/app.inbox.tsx`,
+  `src/components/app/app-layout.tsx` (monta o `InboxEvents`),
   `drizzle/0032_caixa_de_entrada.sql`, `drizzle/0033_rls_caixa_de_entrada.sql`,
   `tests/db/inbox-ingest.test.ts`, `tests/db/inbox-{queue,send,contacts}.test.ts`,
   `tests/db/inbox-helpers.ts`, `tests/db/rls.test.ts` (bloco da caixa de entrada),
+  `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
   `src/lib/channels/providers/*/inbox.db.test.ts`
 
 ## Estado
@@ -25,7 +28,7 @@
 | C1 | Dados e ingestão (mensagens, status, eco, LID, mídia de entrada) | **Feita** |
 | C2 | API: leitura paginada, fila, assumir, transferir, envio de texto, janela de 24 h, visibilidade, contato | **Feita** |
 | C3 | Tela `/app/atendimento` (polling de 20 s, só tenant) | **Feita** |
-| C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | Pendente (`notifyInbox` já é chamado; corpo vazio) |
+| C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | **Feita** |
 | C5 | Mídia de saída, modelos, citação no envio | Pendente |
 | C6 | Atendimento da plataforma em `/admin` | Pendente |
 | C7 | LGPD (exportação e exclusão cobrindo conversas) e fechamento | Pendente |
@@ -85,7 +88,7 @@ canais); `undefined` volta à ingestão real. Retorno `false` = aviso `ignored`.
    (lista `after` do aviso). Sem fonte utilizável, `failed` já na chegada.
 6. **Eco do aparelho** (`fromMe` com `deviceEcho`): `direction = out`, `sender_type = device`,
    `status = sent`; não soma não lida nem mexe na situação, no dono e em `last_inbound_at`.
-7. `notifyInbox(tx, { s, c, k, m, a })` na mesma transação: ponto de extensão da C4, hoje vazio.
+7. `notifyInbox(tx, { s, c, k, m, a })` na mesma transação (`pg_notify` no `COMMIT`; seção "Tempo real").
 
 Item descartado (repetido, LID desconhecido, eco sem `deviceEcho`) apaga a mídia que trouxe, se
 nenhum `file` a cita, depois do commit, mesmo que outro item do aviso seja aplicado. O aviso inteiro
@@ -246,10 +249,8 @@ por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
   (409 `ALREADY_ASSIGNED`, `SESSION_WINDOW_CLOSED`, `CHANNEL_NOT_CONNECTED`, 403 `PLAN_LIMIT_REACHED`) chegam como
   `ApiError` e viram toast com a mensagem da API (`errorText`); `ApiError.details` carrega os campos extras do
   corpo (`assignedTo`, `customerId` e `name` do `PHONE_IN_USE`).
-- **Atualização:** polling de `INBOX_POLL_MS` (20 s) em lista, conversa, mensagens e contador, pausado durante um
-  envio (`useInboxRefetchInterval`). **Ponto de encaixe da C4:** `use-inbox-events` chama
-  `invalidateInbox(queryClient, tenantId, { conversationId })` com os ids do evento e faz
-  `useInboxRefetchInterval` devolver `false` com o SSE de pé; nenhuma tela muda.
+- **Atualização:** pelo SSE da C4 (seção "Tempo real"); sem ele, polling de `INBOX_POLL_MS` (20 s) em lista,
+  conversa, mensagens e contador, pausado durante um envio (`useInboxRefetchInterval`).
 - **Lista** (`conversation-list.tsx`): abas Fila, Minhas e Todas (a última só com `supervise`), situação, não
   lidas, número (com mais de um), etiqueta (com `customer:read`), atendente (`supervise` + `assign`, só em "Todas"),
   busca com espera de 300 ms e rolagem infinita por cursor (`IntersectionObserver` e botão "Carregar mais").
@@ -278,11 +279,58 @@ por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
 - **Releitura por escopo:** `invalidateInbox` sempre relê lista e contador; com `conversationId`, o detalhe e (salvo
   `messages: false`) as mensagens daquela conversa. Assumir, devolver, transferir, situação e marcar como lida
   passam `messages: false`.
-- **Limite conhecido:** o polling de 20 s de `useInfiniteQuery` relê **todas** as páginas já carregadas (lista e
-  mensagens), em sequência. Quem rolou muito faz várias requisições por ciclo; a C4 elimina o polling com o SSE.
+- **Limite conhecido:** a releitura de `useInfiniteQuery` (polling, evento ou o ciclo de 60 s da lista) relê
+  **todas** as páginas já carregadas, em sequência. Com o SSE de pé, as mensagens só são relidas quando chega
+  evento daquela conversa; no modo polling, a cada 20 s.
   Rascunhos do composer ficam em memória, com chave de tenant, pessoa e conversa.
 - **Tela estreita:** uma coluna por vez (lista → conversa → painel, com "voltar"); a partir de `xl` o painel é
   a terceira coluna.
+
+## Tempo real (C4)
+
+Plano T11: o aviso leva só ids e a tela relê pela API, que aplica a visibilidade; funciona com o worker
+separado porque o aviso sai do banco, não do processo.
+
+- **Emissão** (`notify.ts`): `notifyInbox(tx, aviso)` faz `pg_notify('inbox', json)` na transação de quem
+  grava; sai no `COMMIT` (rollback não avisa) para todo processo que escuta, inclusive quando quem grava é o
+  `--worker`. Carga `{ s, c, k, m?, a?, p?, u? }`, montada só com essas chaves (`noticePayload`): `s` tenant
+  ou `null`, `c` conversa, `k` (`message`, `status`, `conversation`), `m` mensagem, `a` dono depois, `p`
+  dono antes (omitido = não mudou), `u` quem mudou (assumir, transferir, responder, iniciar). Sem `a` (status
+  de entrega, `inbox.sweep`, mídia), `notifyInbox` lê o dono atual na mesma transação; sem achar, o aviso
+  sai sem `a` e só vai a quem supervisiona. Toda escrita da C1/C2 já chamava aqui.
+- **Escuta** (`realtime.ts`): **uma** conexão `LISTEN inbox` por processo web, aberta na primeira
+  assinatura (o `--worker` nunca assina), em `REALTIME_DATABASE_URL` (padrão `DATABASE_URL`; direta ou
+  pooler em modo sessão). `max_lifetime` desligado, `select 1` a cada 30 s para achar conexão meio aberta,
+  reconexão com backoff de 1 s a 30 s. Caiu: `lost()` a todo assinante (o SSE se encerra) e
+  `realtimeAvailable()` falso até voltar. A carga é conferida por `parseInboxNotice` (só ids e as chaves
+  conhecidas, até 1 KB); o resto é descartado. Log só da mudança de estado da conexão.
+- **SSE** (`GET /api/inbox/events`, rota em `inbox.ts`, lógica em `inbox-events.ts`): `requireAuth` +
+  `requireTenant` + `inbox:read`. Assina o escopo do ator e entrega o aviso só se
+  `noticeVisibleTo(actor, aviso)`: mesmo escopo e dono antes **ou** depois visível pelo mesmo predicado de
+  `visibleConversation` (`reachOf`, em `visibility.ts`; `ownerVisible` é a forma em memória). O evento
+  `inbox` leva `{ c, k, m?, a?, p?, u? }` (sem `s`). Ao abrir, `event: ready` com `retry: 5000`; batimento
+  `: ping` a cada 25 s; encerrado a cada 15 min (a reconexão passa por `requireAuth`); até 3 fluxos por pessoa
+  **neste processo** (429 `TOO_MANY_STREAMS`); escuta fora do ar → 503 `REALTIME_UNAVAILABLE` (na primeira
+  assinatura do processo espera até 3 s a conexão abrir); cliente que não lê (100 escritas pendentes) é
+  desligado. `Cache-Control: no-cache, no-transform` e `X-Accel-Buffering: no`. A plataforma (C6) só chama
+  `streamInboxEvents(c, atorDaPlataforma)`.
+- **Cliente** (`use-inbox-events.ts`, `InboxEvents` no `AppLayout` para quem tem `inbox:read`):
+  `connectInboxEvents` fecha o `EventSource` no erro e decide a reconexão: fluxo que chegou a abrir (fim dos
+  15 min) reconecta em 1 s sem mudar de modo; falha ao abrir (503, 429, rede) ou tentativa sem resposta em
+  10 s → modo `polling` e nova tentativa em 2, 5, 10, 30 e 60 s. O modo fica em `realtime-mode.ts`
+  (`useInboxRealtimeMode`) e `refetchIntervalFor` o traduz: `live` = lista, contador e detalhe da conversa (a
+  janela de 24 h expira sem evento) a cada 60 s, mensagens só por evento; `polling`/`connecting` = 20 s em
+  tudo, com o aviso "Atualização em tempo real indisponível" no topo da tela. Os eventos de uma rajada
+  (250 ms) viram uma chamada de `invalidateInboxChanges` (a mesma fonte de chaves de `invalidateInbox`), por
+  tipo (`changeOf`): `message` relê lista, contador, detalhe e mensagens; `conversation`, lista, contador e
+  detalhe; `status`, só as mensagens. Com envio em andamento, espera (a releitura duplicaria a bolha
+  otimista). Nunca escreve o evento no cache. A **cada abertura** do fluxo e ao voltar o foco, relê tudo da
+  caixa (e, no foco, tenta reconectar já). `a = eu`, `p ≠ eu` e `u ≠ eu` em `conversation` → toast "Uma
+  conversa foi atribuída a você." com "Abrir".
+- **Limites conhecidos:** (a) sessão revogada, papel trocado ou membro removido seguem recebendo **ids** por
+  até 15 min (a releitura pela API já os barra); (b) o teto de 3 fluxos é por processo (com réplicas, 3 por
+  réplica); (c) evento perdido na queda é coberto pela releitura ao reconectar, não por reenvio; (d) aviso
+  sem `a` (status de entrega, `inbox.sweep`) custa um `SELECT` do dono por aviso na transação de quem grava.
 
 ## Segurança e privacidade
 
@@ -319,10 +367,28 @@ por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
   antes do id, reenvio) e `inbox-contacts.test.ts` (vínculo, candidatos, salvar como cliente com
   limite do plano e `PHONE_IN_USE`, iniciar conversa). As rotas entram em `rbac.test.ts` e as escritas
   no `it.each` de `impersonation.test.ts`; `src/lib/inbox/window.test.ts` cobre a janela.
+- C4: `tests/db/inbox-realtime.test.ts` (Postgres real): sessão, tenant e `inbox:read`; o membro A não recebe
+  evento de conversa do membro B, e entrar e sair da fila chega a quem deve; status de entrega com o dono
+  completado no servidor; ingestão num **processo à parte** (`fixtures/inbox-realtime-worker.ts`, o papel do
+  `--worker`) chegando ao SSE deste, com a carga crua sem texto, telefone nem nome; batimento; limite de 3;
+  reautenticação (fluxo encerrado e reconexão com sessão revogada → 401); queda do `LISTEN` → fluxo
+  encerrado, 503 e volta. Unitários: `src/lib/inbox/realtime.test.ts` (carga, `parseInboxNotice`,
+  `noticeVisibleTo`) e `src/components/inbox/use-inbox-events.test.ts` (modo, backoff, releitura, toast).
+
+## Desvios da SPEC (C4)
+
+- A carga ganhou `u` (quem fez a mudança, só id): sem ele, quem assume a própria conversa (`a = eu`,
+  `p = null`) receberia o toast "atribuída a você", que a SPEC reserva à atribuição feita por outra pessoa.
+- `a` vira obrigatório na prática: quem grava sem saber o dono (status, varredura, mídia) tem o dono lido na
+  mesma transação; aviso sem dono conhecido só chega a quem supervisiona (a SPEC não dizia).
+- O SSE recusa a 4ª conexão (429) em vez de derrubar uma antiga, e o teto é por processo.
+- O `useInboxEvents` é montado no layout do `/app` (não só na tela do atendimento), para o ponto de não lidas
+  do menu andar pelos eventos em qualquer tela; uma conexão por aba.
+- `docker/caddy/Caddyfile`: o caminho do SSE sai do `encode` (a SPEC só pedia "sem buffer").
 
 ## Desvios da SPEC (C3)
 
-- Polling de 20 s no lugar de SSE (a C4 entrega o tempo real); `use-inbox-events.ts` não existe ainda.
+- Polling de 20 s no lugar de SSE (entregue na C4).
 - Sem "Enviar modelo", anexo nem citação (C5): a faixa da janela de 24 h só explica.
 - "Conversar" esconde fixo e celular de 8 dígitos com a explicação; a exceção da SPEC (cliente salvo a partir
   de um contato que já escreveu) não aparece no botão, porque o cliente não diz se o contato existe. O servidor

@@ -1,4 +1,4 @@
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { QueryState } from "@/components/admin/query-state";
@@ -14,51 +14,66 @@ import {
 } from "@/components/inbox/inbox-api";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { NewConversationDialog } from "@/components/inbox/new-conversation-dialog";
+import { useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
 /**
  * Atendimento do tenant: lista, conversa e painel do contato. Em tela larga as três colunas
  * aparecem juntas (o painel a partir de `xl`); em tela estreita, uma de cada vez (lista → conversa
- * → painel), com "voltar". Sem `loader`: tudo vem pela API, com polling de 20 s (a C4 troca por SSE).
+ * → painel), com "voltar". Sem `loader`: tudo vem pela API, atualizado pelo SSE
+ * (`use-inbox-events.ts`, montado no layout) ou, sem ele, por polling de 20 s com o aviso no topo.
  */
 export function InboxPage() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const [panelOpen, setPanelOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const realtime = useInboxRealtimeMode();
 
   // Outra conversa: o painel (tela à parte, abaixo de xl) fecha.
   // biome-ignore lint/correctness/useExhaustiveDependencies: o id é o gatilho
   useEffect(() => setPanelOpen(false), [conversationId]);
 
   return (
-    <div className="flex h-full min-h-0 bg-background">
-      <ConversationList
-        selectedId={conversationId}
-        onNewConversation={() => setCreating(true)}
-        className={cn(
-          "w-full shrink-0 border-r border-border lg:w-80 xl:w-96",
-          // Tela estreita: com conversa aberta, a lista dá lugar a ela.
-          conversationId ? "hidden lg:flex" : "flex",
-        )}
-      />
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      {realtime === "polling" ? (
+        <p
+          role="status"
+          className="flex shrink-0 items-center gap-2 border-b border-border bg-muted px-4 py-1.5 text-xs text-muted-foreground"
+        >
+          <WifiOff className="size-3.5 shrink-0" aria-hidden />
+          Atualização em tempo real indisponível. A caixa é atualizada a cada 20 segundos.
+        </p>
+      ) : null}
 
-      {conversationId ? (
-        <ConversationView
-          key={conversationId}
-          conversationId={conversationId}
-          panelOpen={panelOpen}
-          onOpenPanel={() => setPanelOpen(true)}
-          onClosePanel={() => setPanelOpen(false)}
-          onBack={() => navigate("/app/atendimento")}
+      <div className="flex min-h-0 flex-1">
+        <ConversationList
+          selectedId={conversationId}
+          onNewConversation={() => setCreating(true)}
+          className={cn(
+            "w-full shrink-0 border-r border-border lg:w-80 xl:w-96",
+            // Tela estreita: com conversa aberta, a lista dá lugar a ela.
+            conversationId ? "hidden lg:flex" : "flex",
+          )}
         />
-      ) : (
-        <div className="hidden min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-muted/30 text-center text-muted-foreground lg:flex">
-          <MessageSquare className="size-10" aria-hidden />
-          <p className="text-sm">Escolha uma conversa na lista para começar.</p>
-        </div>
-      )}
+
+        {conversationId ? (
+          <ConversationView
+            key={conversationId}
+            conversationId={conversationId}
+            panelOpen={panelOpen}
+            onOpenPanel={() => setPanelOpen(true)}
+            onClosePanel={() => setPanelOpen(false)}
+            onBack={() => navigate("/app/atendimento")}
+          />
+        ) : (
+          <div className="hidden min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-muted/30 text-center text-muted-foreground lg:flex">
+            <MessageSquare className="size-10" aria-hidden />
+            <p className="text-sm">Escolha uma conversa na lista para começar.</p>
+          </div>
+        )}
+      </div>
 
       <NewConversationDialog open={creating} onClose={() => setCreating(false)} />
     </div>

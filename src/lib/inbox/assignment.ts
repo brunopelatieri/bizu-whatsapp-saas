@@ -100,6 +100,7 @@ export async function claimConversation(actor: InboxActor, conversationId: strin
       k: "conversation",
       a: actor.userId,
       p: null,
+      u: actor.userId,
     });
     return conversationItem(tx, actor, conversationId);
   });
@@ -175,7 +176,14 @@ export async function assignConversation(
       });
     }
 
-    await notifyInbox(tx, { s: tenantId, c: conversationId, k: "conversation", a: userId, p: previous });
+    await notifyInbox(tx, {
+      s: tenantId,
+      c: conversationId,
+      k: "conversation",
+      a: userId,
+      p: previous,
+      u: actor.userId,
+    });
     return conversationItem(tx, actor, conversationId);
   });
 }

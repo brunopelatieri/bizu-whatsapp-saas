@@ -100,6 +100,13 @@ export const envSchema = z
 
     DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
     DIRECT_URL: z.url({ protocol: /^postgres(ql)?$/ }),
+    // `LISTEN` do tempo real da caixa de entrada (`src/lib/inbox/realtime.ts`), uma conexão por
+    // processo web. Padrão: DATABASE_URL. Precisa ser conexão direta ou pooler em modo sessão:
+    // em modo transaction o `LISTEN` não recebe nada.
+    REALTIME_DATABASE_URL: z.preprocess(
+      emptyToUndefined,
+      z.url({ protocol: /^postgres(ql)?$/ }).optional(),
+    ),
 
     BETTER_AUTH_SECRET: secret,
     CREDENTIALS_ENCRYPTION_KEY: encryptionKey,
@@ -267,8 +274,9 @@ export const envSchema = z
           message: "use o valor gerado no servidor Evolution, não o exemplo do .env.example",
         });
       }
-      for (const key of ["DATABASE_URL", "DIRECT_URL"] as const) {
-        const message = databasePasswordProblem(env[key]);
+      for (const key of ["DATABASE_URL", "DIRECT_URL", "REALTIME_DATABASE_URL"] as const) {
+        const url = env[key];
+        const message = url ? databasePasswordProblem(url) : undefined;
         if (message) ctx.addIssue({ code: "custom", path: [key], message });
       }
       // Com memória, cada réplica contaria sozinha e o limite cairia em silêncio no

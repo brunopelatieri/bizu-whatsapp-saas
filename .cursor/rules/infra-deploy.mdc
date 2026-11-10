@@ -15,6 +15,7 @@ alwaysApply: false
 - Segredos nunca são versionados; `.env.example` leva só valores de exemplo.
 - Migrations são etapa separada do container da aplicação: `docker compose ... --profile tools run --rm migrate`. Nunca as ligue ao `up` com `depends_on`: em produção, `app` e `worker` recusam subir quando faltam migrations (`src/db/schema-status.ts`).
 - Atrás de reverse proxy, defina `TRUSTED_PROXY_HOPS`; sem isso, todos dividem o mesmo rate limit.
+- SSE (`/api/inbox/events`): sem buffer nem compressão no proxy (o `Caddyfile` o tira do `encode`); a conexão `LISTEN` (`REALTIME_DATABASE_URL`, padrão `DATABASE_URL`) é direta ou de pooler em modo sessão, nunca transaction.
 - HSTS é configurado no reverse proxy, não no app.
 - Produção exige `RATE_LIMIT_STORE=postgres` e `CREDENTIALS_ENCRYPTION_KEY` com 32 bytes em base64. `CSP_REPORT_ONLY=true` só relata: valide nas telas reais antes de virar para `false`.
 - `VITE_*` vai para o navegador: nunca use esse prefixo em segredos.

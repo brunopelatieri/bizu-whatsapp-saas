@@ -1,7 +1,10 @@
 # Reverse proxy do docker/compose.prod.yml: TLS automático (Let's Encrypt) para o domínio
 # em SITE_ADDRESS. Para testar sem TLS, use SITE_ADDRESS=http://localhost.
 {$SITE_ADDRESS:localhost} {
-	encode zstd gzip
+	# O SSE do atendimento (text/event-stream) passa sem compressão: o compressor seguraria os
+	# eventos e o batimento. O reverse_proxy já descarrega text/event-stream na hora.
+	@compressible not path /api/inbox/events /api/admin/inbox/events
+	encode @compressible zstd gzip
 
 	header {
 		# HSTS aqui, não no app. Sem includeSubDomains: só inclua se todo subdomínio tiver HTTPS.

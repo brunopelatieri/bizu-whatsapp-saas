@@ -1,6 +1,6 @@
 ---
 description: Caixa de entrada (contatos, conversas, mensagens e ingestão)
-globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts,src/api/inbox.ts,src/lib/schemas/inbox.ts
+globs: src/lib/inbox/**,src/components/inbox/**,src/db/schema/inbox.ts,src/jobs/inbox.ts,src/api/inbox.ts,src/api/inbox-events.ts,src/lib/schemas/inbox.ts
 alwaysApply: false
 ---
 
@@ -18,10 +18,11 @@ alwaysApply: false
 - Status de entrega sobe a escada `queued < sent < delivered < read` em um `UPDATE` condicional; `failed` só a partir de `queued` ou `sent`.
 - Falar com o provedor (baixar mídia) vem antes da transação. O tipo da mídia é conferido pelo conteúdo (`inboundMime`), nunca só pelo que o provedor diz; mídia vai para `file` com `owner_type = 'message'`.
 - Trabalho que não pode rodar antes do commit (enfileirar `inbox.media`, apagar objeto) vai para a lista `after` do aviso.
-- Toda escrita chama `notifyInbox(tx, ...)` na mesma transação (só ids; o corpo é da C4).
+- Toda escrita chama `notifyInbox(tx, ...)` na mesma transação: `pg_notify('inbox')` no `COMMIT`, carga só de ids (`s, c, k, m, a, p, u`; nunca texto, telefone ou nome). Quem muda o dono informa `a` e `p`; quem não sabe o dono omite `a` e o `notifyInbox` o lê.
+- Tempo real (C4): uma conexão `LISTEN` por processo web (`realtime.ts`); o SSE (`src/api/inbox-events.ts`) filtra por pessoa com `noticeVisibleTo` (mesmo `reachOf` de `visibleConversation`; nunca outra regra à mão) e o cliente (`use-inbox-events.ts`) só **invalida** queries pelos ids, nunca escreve o evento no cache.
 - Conteúdo de mensagem, telefone e nome nunca vão a `logError`, `audit_log`, Sentry ou `channel_event.error`. Erro de provedor só por `logChannelError`.
 - Dado pessoal novo entra na exportação e na anonimização (C7 cobre as conversas: até lá, `docs/context/lgpd.md` marca como pendente).
-- Tela (C3, `src/components/inbox/`): client-only, só pela API com TanStack Query (`inbox-api.ts`: chaves em `["inbox", tenantId, …]`, `invalidateInbox` é o ponto de encaixe da C4); o cliente só esconde botões, o servidor decide; texto de mensagem sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`; conteúdo de mensagem nunca em `console.*` nem em log.
+- Tela (C3, `src/components/inbox/`): client-only, só pela API com TanStack Query (`inbox-api.ts`: chaves em `["inbox", tenantId, …]`, SSE com modo polling de reserva em `realtime-mode.ts`); o cliente só esconde botões, o servidor decide; texto de mensagem sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`; conteúdo de mensagem nunca em `console.*` nem em log.
 - Mudança aqui atualiza `docs/context/tech/30-caixa-de-entrada.md`.
 
 Para entender este domínio, leia: docs/context/tech/30-caixa-de-entrada.md e docs/specs/caixa-de-entrada/spec.md
