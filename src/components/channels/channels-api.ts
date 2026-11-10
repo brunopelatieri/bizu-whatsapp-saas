@@ -32,20 +32,28 @@ export type ChannelLimit = { limit: number | null; used: number; allowed: boolea
 
 export type ChannelsResponse = {
   channels: Channel[];
-  providers: Record<ChannelType, { enabled: boolean }>;
+  /** `missing` (nomes de variáveis que faltam no servidor) só vem em `/api/admin/channels`. */
+  providers: Record<ChannelType, { enabled: boolean; missing?: string[] }>;
   limits: Record<ChannelType, ChannelLimit>;
 };
 
 export const CHANNELS_KEY = "channels";
 
-/** Números do tenant, módulos ativos e uso do plano (`GET /api/channels`). */
-export function useChannels() {
+export const TENANT_CHANNELS_PATH = "/api/channels";
+export const PLATFORM_CHANNELS_PATH = "/api/admin/channels";
+
+/**
+ * Números do escopo, módulos ativos e uso do plano (`GET <basePath>`). A base decide o escopo:
+ * a do tenant espera a organização ativa; a da plataforma não depende dela.
+ */
+export function useChannels(basePath: string = TENANT_CHANNELS_PATH) {
   const { tenant } = useAuth();
+  const tenantScoped = basePath === TENANT_CHANNELS_PATH;
 
   return useQuery({
-    queryKey: [CHANNELS_KEY, tenant?.id],
-    queryFn: () => apiFetch<ChannelsResponse>("/api/channels"),
-    enabled: Boolean(tenant),
+    queryKey: [CHANNELS_KEY, basePath, tenantScoped ? tenant?.id : null],
+    queryFn: () => apiFetch<ChannelsResponse>(basePath),
+    enabled: !tenantScoped || Boolean(tenant),
     retry: false,
   });
 }

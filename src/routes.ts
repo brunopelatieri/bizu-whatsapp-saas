@@ -78,6 +78,8 @@ export default [
       // crm-cadastro A4: etiquetas e campos que a plataforma usa nas organizações.
       route("configuracoes/etiquetas", "routes/admin/crm-tags.tsx"),
       route("configuracoes/campos", "routes/admin/crm-fields.tsx"),
+      // whatsapp-canais B4: números de WhatsApp da plataforma.
+      route("configuracoes/canais", "routes/admin/channels.tsx"),
     ]),
   ]),
 

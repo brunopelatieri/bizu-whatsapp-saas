@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PhoneField } from "@/components/ui/phone-field";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TENANT_CHANNELS_PATH } from "@/components/channels/channels-api";
 import { ApiError, apiFetch } from "@/lib/api/client";
 import {
   CHANNEL_NAME_MAX,
@@ -380,7 +381,7 @@ export function QrChannelDialog({
   open: controlledOpen,
   onOpenChange,
   onChanged,
-  basePath = "/api/channels",
+  basePath = TENANT_CHANNELS_PATH,
 }: QrChannelDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [created, setCreated] = useState<{ id: string; name: string } | null>(null);
