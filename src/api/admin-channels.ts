@@ -32,6 +32,7 @@ export const adminChannelRoutes = buildChannelRoutes({
   canRead: createMiddleware((_c, next) => next()),
   canManage: requirePlatform(["platform_owner"]),
   limitPrefix: "admin-",
+  describeSetup: true,
   // O escopo é fixo: nada da requisição escolhe o tenant.
   scopeOf: () => ({ kind: "platform" }),
   actorOf: (c) => ({
