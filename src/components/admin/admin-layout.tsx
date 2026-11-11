@@ -20,6 +20,8 @@ import {
   adminTitleFromPath,
 } from "@/lib/constants/admin-nav";
 import { ConsentGate } from "@/components/app/consent-gate";
+import { InboxEvents } from "@/components/inbox/use-inbox-events";
+import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
 const NAV = { main: adminMainNav, bottom: adminBottomNav };
@@ -55,6 +57,8 @@ export function AdminLayout() {
   return (
     <div className="flex h-svh overflow-hidden bg-background">
       <ConsentGate />
+      {/* Tempo real do atendimento da plataforma: o ponto do menu anda em qualquer tela do /admin. */}
+      <InboxEvents mode="platform" />
       <AppSidebar
         collapsed={collapsed}
         nav={NAV}
@@ -91,7 +95,15 @@ export function AdminLayout() {
           title={adminTitleFromPath(pathname)}
           subtitle="Administração da plataforma"
         />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        {/* O atendimento ocupa a altura toda e rola por dentro; as demais telas rolam aqui. */}
+        <main
+          className={cn(
+            "flex-1",
+            pathname.startsWith("/admin/atendimento")
+              ? "min-h-0 overflow-hidden"
+              : "overflow-y-auto p-4 sm:p-6",
+          )}
+        >
           <Outlet />
         </main>
       </div>

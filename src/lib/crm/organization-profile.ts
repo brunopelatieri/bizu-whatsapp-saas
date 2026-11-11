@@ -56,6 +56,30 @@ async function tagsOfOrganizations(tx: Tx, organizationIds: string[]) {
   return result;
 }
 
+/**
+ * Etiquetas e valores de campo de várias organizações, por id (duas consultas, na transação de
+ * quem chama, que precisa ser `withPlatformData`). Serve ao painel do atendimento da plataforma.
+ */
+export async function annotationsOfOrganizations(tx: Tx, organizationIds: string[]) {
+  const result = new Map<string, OrganizationAnnotation>();
+  if (organizationIds.length === 0) return result;
+
+  const tags = await tagsOfOrganizations(tx, organizationIds);
+  const profiles = await tx
+    .select({
+      organizationId: organizationProfile.organizationId,
+      customFields: organizationProfile.customFields,
+    })
+    .from(organizationProfile)
+    .where(inArray(organizationProfile.organizationId, organizationIds));
+  const fields = new Map(profiles.map((row) => [row.organizationId, row.customFields]));
+
+  for (const id of organizationIds) {
+    result.set(id, { tags: tags.get(id) ?? [], customFields: fields.get(id) ?? {} });
+  }
+  return result;
+}
+
 /** Organizações que têm qualquer uma das etiquetas (filtro `tags=` de `/api/admin/tenants`). */
 export function organizationIdsWithTags(tagIds: string[]): Promise<string[]> {
   if (tagIds.length === 0) return Promise.resolve([]);

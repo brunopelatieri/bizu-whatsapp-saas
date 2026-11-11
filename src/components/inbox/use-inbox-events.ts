@@ -9,6 +9,7 @@ import {
   invalidateInboxChanges,
 } from "@/components/inbox/inbox-api";
 import { setInboxRealtimeMode } from "@/components/inbox/realtime-mode";
+import { type InboxMode, useInboxScope } from "@/components/inbox/inbox-scope";
 import { useAuth } from "@/providers/auth-provider";
 
 /**
@@ -216,11 +217,12 @@ function resyncAll(queryClient: QueryClient, tenantId: string) {
   void queryClient.invalidateQueries({ queryKey: inboxKeys.all(tenantId) });
 }
 
-export function useInboxEvents(enabled: boolean) {
+export function useInboxEvents(enabled: boolean, mode: InboxMode = "tenant") {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const { tenant, user } = useAuth();
-  const tenantId = tenant?.id;
+  const { user } = useAuth();
+  // O tenant ativo ou `"platform"`: a chave das queries e o fluxo (`/api/inbox` ou `/api/admin/inbox`).
+  const { key: tenantId, api, route } = useInboxScope(mode);
   const me = user?.id;
   // O toast navega; a função muda a cada render, a conexão não deve.
   const navigateRef = useRef(navigate);
@@ -248,6 +250,7 @@ export function useInboxEvents(enabled: boolean) {
     };
 
     const connection = connectInboxEvents({
+      url: `${api}/events`,
       onMode: setInboxRealtimeMode,
       onResync: () => resyncAll(queryClient, tenantId),
       onEvent: (event) => {
@@ -264,7 +267,7 @@ export function useInboxEvents(enabled: boolean) {
           toast.info("Uma conversa foi atribuída a você.", {
             action: {
               label: "Abrir",
-              onClick: () => navigateRef.current(`/app/atendimento/${event.c}`),
+              onClick: () => navigateRef.current(`${route}/${event.c}`),
             },
           });
         }
@@ -290,12 +293,19 @@ export function useInboxEvents(enabled: boolean) {
       window.removeEventListener("focus", onVisible);
       setInboxRealtimeMode("connecting");
     };
-  }, [enabled, tenantId, me, queryClient]);
+  }, [enabled, tenantId, me, queryClient, api, route]);
 }
 
-/** Monta o tempo real da caixa para quem lê o atendimento. Não desenha nada. */
-export function InboxEvents() {
-  const { tenant, permissions } = useAuth();
-  useInboxEvents(Boolean(tenant) && permissions.includes("inbox:read"));
+/**
+ * Monta o tempo real da caixa para quem lê o atendimento. Não desenha nada. No `/app` (padrão), exige
+ * tenant ativo e `inbox:read`; no `/admin` (`mode="platform"`), papel de plataforma (o servidor confere).
+ */
+export function InboxEvents({ mode = "tenant" }: { mode?: InboxMode }) {
+  const { tenant, permissions, user } = useAuth();
+  const allowed =
+    mode === "platform"
+      ? user?.platformRole === "platform_owner" || user?.platformRole === "platform_support"
+      : Boolean(tenant) && permissions.includes("inbox:read");
+  useInboxEvents(allowed, mode);
   return null;
 }

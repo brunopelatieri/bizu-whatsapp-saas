@@ -20,6 +20,7 @@ import {
   useInboxMutation,
 } from "@/components/inbox/inbox-api";
 import { formatFileSize, formatTime, splitLinks } from "@/components/inbox/format";
+import { useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,7 @@ export function DeliveryStatus({ message }: { message: MessageView }) {
 }
 
 function MediaFrame({ message, children }: { message: MessageView; children: ReactNode }) {
+  const { api } = useInboxScope();
   const media = message.media;
   const { mutate, isPending } = useInboxMutation({
     success: "Baixando de novo.",
@@ -100,7 +102,7 @@ function MediaFrame({ message, children }: { message: MessageView; children: Rea
           size="xs"
           variant="outline"
           disabled={isPending}
-          onClick={() => mutate({ path: `/api/inbox/messages/${message.id}/media/retry`, method: "POST" })}
+          onClick={() => mutate({ path: `${api}/messages/${message.id}/media/retry`, method: "POST" })}
         >
           <RotateCcw />
           Tentar de novo
@@ -230,6 +232,7 @@ const quotable = (message: MessageView) =>
   message.status === "read";
 
 export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps) {
+  const { api } = useInboxScope();
   const outgoing = message.direction === "out";
   const retry = useInboxMutation<{ message: MessageView }>({
     silent: true,
@@ -283,7 +286,7 @@ export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps
                 variant="outline"
                 disabled={retry.isPending}
                 onClick={() =>
-                  retry.mutate({ path: `/api/inbox/messages/${message.id}/retry`, method: "POST" })
+                  retry.mutate({ path: `${api}/messages/${message.id}/retry`, method: "POST" })
                 }
               >
                 <RotateCcw />

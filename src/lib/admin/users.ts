@@ -8,6 +8,7 @@ import {
   portalUser,
   user,
 } from "@/db/schema";
+import { normalizePhone } from "@/lib/phone/br";
 import { PAGE_SIZE } from "@/lib/schemas/admin";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -40,6 +41,7 @@ export async function listUsers(input: { q?: string; page: number }) {
         banned: user.banned,
         banReason: user.banReason,
         createdAt: user.createdAt,
+        phoneNormalized: user.phoneNormalized,
       })
       .from(user)
       .where(where)
@@ -52,11 +54,16 @@ export async function listUsers(input: { q?: string; page: number }) {
       tx,
       rows.map(({ id }) => id),
     );
-    const items = rows.map((row) => ({
-      ...row,
-      organizations: links.get(row.id)?.organizations ?? [],
-      more: links.get(row.id)?.more ?? 0,
-    }));
+    // `phoneKind` diz se há telefone e de que tipo (a tela decide se oferece "Conversar"); o número não sai.
+    const items = rows.map(({ phoneNormalized, ...row }) => {
+      const parsed = phoneNormalized ? normalizePhone(`+${phoneNormalized}`) : null;
+      return {
+        ...row,
+        phoneKind: parsed?.ok ? parsed.kind : null,
+        organizations: links.get(row.id)?.organizations ?? [],
+        more: links.get(row.id)?.more ?? 0,
+      };
+    });
 
     return { items, total: totalRow?.total ?? 0, pageSize: PAGE_SIZE };
   });

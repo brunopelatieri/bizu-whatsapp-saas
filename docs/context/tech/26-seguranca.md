@@ -133,7 +133,7 @@ o último valor e o Better Auth, o primeiro.
 
 | Rotas | Como |
 |---|---|
-| Mutações de `/api/billing/*`, `/api/team/*`, `/api/roles/*`, `/api/inbox/*` (enviar, assumir, transferir, situação, marcar como lida, contato) | `blockMutationsWhileImpersonating` |
+| Mutações de `/api/billing/*`, `/api/team/*`, `/api/roles/*`, `/api/inbox/*` e `/api/admin/inbox/*` (enviar, assumir, transferir, situação, marcar como lida, contato) | `blockMutationsWhileImpersonating` |
 | `POST`/`DELETE /api/tenant`, `/api/tenant/active`, `/api/tenant/security`, `/api/tenant/support-grant*`, aceite de convite | `blockWhileImpersonating` |
 | `/api/me/sessions/*`, inclusive a leitura | idem: IP e navegador são da pessoa |
 | Todo `/api/auth/*`, exceto `get-session` e `sign-out` | `closedWhileImpersonating`, lista do que passa |
@@ -164,6 +164,15 @@ personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota
   trocado ou membro removido param de receber em até 15 min (limite conhecido). Até 3 fluxos por
   pessoa **por processo** (429 `TOO_MANY_STREAMS`); com várias réplicas, o teto é 3 por réplica. Teste
   em `tests/db/inbox-realtime.test.ts`.
+- **Plataforma (C6):** `/api/admin/inbox/*` (`src/api/admin-inbox.ts`) usa `requireAuth` + `requirePlatform()` (leitura) e
+  `requirePlatform(["platform_owner", "platform_support"])` (escrita), sempre em `withPlatformData`: o RLS recusa linha de tenant e a
+  conversa de tenant responde 404 em toda rota (SSE incluído: `noticeVisibleTo` exige `s = null`). **Nenhuma rota, consulta ou vínculo
+  alcança `customer` de tenant** (decisão do proprietário: o cliente é do owner): `selectConversationRows` não junta `customer`
+  na plataforma, `customerId` é 400 e há teste que varre os arquivos (`withPlatformScope` e `customer` proibidos) e outro, de banco,
+  com um cliente de tenant de mesmo telefone. O `platform_support` responde, mas canal, etiqueta e campo seguem `ownerOnly`; a
+  sessão personificada não passa de `requirePlatform`. A auditoria sai com `actor_type = platform`, sem `tenant_id` e sem texto
+  nem telefone. `GET /api/admin/inbox/events` tem os mesmos limites do SSE do tenant (batimento, 15 min, 3 por pessoa, 503 sem
+  `LISTEN`).
 - `ALREADY_ASSIGNED` (409) diz o nome do dono também a quem já não vê a conversa: só quem conhece o id
   (por tê-la visto na fila) chega a isso, e é o aviso que o PRD pede.
 - Iniciar conversa com um membro (`userId`) mostra o telefone dele a quem tem `inbox:reply`: decisão

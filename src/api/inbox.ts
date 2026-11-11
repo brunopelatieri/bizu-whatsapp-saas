@@ -1,12 +1,9 @@
-import { Readable } from "node:stream";
 import { zValidator } from "@hono/zod-validator";
 import { type Context, Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { requireAuth } from "@/api/auth";
 import {
   authRateLimit,
-  jsonBodyLimit,
   MINUTE,
   sameOrigin,
   validationError,
@@ -14,11 +11,16 @@ import {
 } from "@/api/guards";
 import { blockMutationsWhileImpersonating } from "@/api/impersonation";
 import { streamInboxEvents } from "@/api/inbox-events";
+import {
+  inboxBodyLimit,
+  isMediaUpload,
+  mediaResponse,
+  sendJsonFrom,
+  sendMediaFrom,
+} from "@/api/inbox-shared";
 import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
-import { TenantRuleError } from "@/lib/tenant/errors";
-import { dispositionHeader } from "@/lib/files/types";
 import {
   assignConversation,
   claimConversation,
@@ -40,10 +42,8 @@ import {
   unreadCounts,
 } from "@/lib/inbox/conversations";
 import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
-import { MAX_OUTBOUND_MEDIA_BYTES } from "@/lib/inbox/media";
-import { retryMessage, sendText } from "@/lib/inbox/send";
-import { sendMedia } from "@/lib/inbox/send-media";
-import { listConversationTemplates, sendTemplate } from "@/lib/inbox/send-template";
+import { retryMessage } from "@/lib/inbox/send";
+import { listConversationTemplates } from "@/lib/inbox/send-template";
 import { type InboxActor, inboxCapabilities } from "@/lib/inbox/visibility";
 import {
   assignSchema,
@@ -52,8 +52,6 @@ import {
   linkContactSchema,
   messagesQuerySchema,
   saveContactAsCustomerSchema,
-  sendMediaFormSchema,
-  sendMessageSchema,
   startConversationSchema,
   updateContactSchema,
 } from "@/lib/schemas/inbox";
@@ -67,26 +65,6 @@ import {
  * assume nem marca como lida) e, pela regra geral de `requireTenant`, recusadas em `read_only`.
  */
 export const inboxRoutes = new Hono<TenantEnv>();
-
-/** Envio de anexo: `POST /api/inbox/conversations/:id/messages` com `multipart/form-data`. */
-const isMediaUpload = (c: Context) =>
-  c.req.method === "POST" &&
-  /^\/api\/inbox\/conversations\/[^/]+\/messages$/.test(c.req.path) &&
-  (c.req.header("content-type") ?? "").toLowerCase().startsWith("multipart/form-data");
-
-const limitUpload = bodyLimit({
-  // O arquivo (16 MB) mais os campos de texto e as fronteiras do multipart.
-  maxSize: MAX_OUTBOUND_MEDIA_BYTES + 64 * 1024,
-  onError: (c) =>
-    c.json({ error: "Arquivo grande demais. O máximo é 16 MB.", code: "FILE_TOO_LARGE" }, 413),
-});
-
-/** 16 KB para JSON; no envio de anexo, o limite do arquivo. Sem corpo declarado, não há o que limitar. */
-const inboxBodyLimit = createMiddleware(async (c, next) => {
-  if (!isMediaUpload(c)) return jsonBodyLimit(c, next);
-  if (!c.req.header("content-length") && !c.req.header("transfer-encoding")) return next();
-  return limitUpload(c, next);
-});
 
 inboxRoutes.onError(handleTenantError);
 inboxRoutes.use(
@@ -170,15 +148,7 @@ inboxRoutes.get("/api/inbox/assignees", requirePermission("inbox", "assign"), as
 inboxRoutes.get("/api/inbox/messages/:id/media", canRead, validId, async (c) => {
   const media = await openMessageMedia(inboxActor(c), c.req.valid("param").id);
 
-  return new Response(Readable.toWeb(media.body) as ReadableStream, {
-    headers: {
-      "Content-Type": media.mime,
-      "Content-Length": String(media.size),
-      "Content-Disposition": dispositionHeader(media.name, media.inline ? "inline" : "attachment"),
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "private, max-age=300",
-    },
-  });
+  return mediaResponse(media);
 });
 
 // ---------------------------------------------------------------------------
@@ -253,49 +223,6 @@ inboxRoutes.post(
     return c.json({ message: outcome.message }, outcome.failed ? 200 : 201);
   },
 );
-
-async function sendJsonFrom(c: Context<TenantEnv>, actor: InboxActor, conversationId: string) {
-  const parsed = sendMessageSchema.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) {
-    throw new TenantRuleError(400, "VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Dados inválidos.");
-  }
-
-  return parsed.data.type === "template"
-    ? sendTemplate(actor, conversationId, parsed.data)
-    : sendText(actor, conversationId, parsed.data);
-}
-
-async function sendMediaFrom(c: Context<TenantEnv>, actor: InboxActor, conversationId: string) {
-  const form = await c.req.parseBody().catch(() => null);
-  const upload = form?.file;
-  if (!(upload instanceof File)) {
-    throw new TenantRuleError(400, "FILE_REQUIRED", "Envie o arquivo no campo file.");
-  }
-  // Antes de ler o arquivo para a memória.
-  if (upload.size > MAX_OUTBOUND_MEDIA_BYTES) {
-    throw new TenantRuleError(413, "FILE_TOO_LARGE", "Arquivo grande demais. O máximo é 16 MB.");
-  }
-
-  const fields = sendMediaFormSchema.safeParse({
-    caption: form?.caption,
-    replyTo: form?.replyTo,
-    clientId: form?.clientId,
-  });
-  if (!fields.success) {
-    throw new TenantRuleError(400, "VALIDATION_ERROR", fields.error.issues[0]?.message ?? "Dados inválidos.");
-  }
-
-  return sendMedia(
-    actor,
-    conversationId,
-    {
-      name: upload.name,
-      declaredMime: upload.type || null,
-      body: Buffer.from(await upload.arrayBuffer()),
-    },
-    fields.data,
-  );
-}
 
 /** Modelos aprovados do WABA do canal da conversa (para o `template-dialog`). */
 inboxRoutes.get("/api/inbox/conversations/:id/templates", canReply, validId, async (c) =>

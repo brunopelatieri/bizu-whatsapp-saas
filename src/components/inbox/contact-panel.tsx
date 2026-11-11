@@ -20,6 +20,8 @@ import {
   invalidateInbox,
   useInboxMutation,
 } from "@/components/inbox/inbox-api";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
+import { PlatformContactSection } from "@/components/inbox/platform-contact-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,9 +40,11 @@ type ContactPanelProps = {
 /** Painel ao lado do chat: quem é o contato, o cadastro vinculado e o que o atendente pode fazer. */
 export function ContactPanel({ detail, onBack }: ContactPanelProps) {
   const { contact, link } = detail;
-  const can = useCan();
+  const can = useInboxCan();
+  const inbox = useInboxScope();
   const { user, billing } = useAuth();
-  const readOnly = Boolean(user?.impersonatedBy) || billing?.state === "read_only";
+  const readOnly =
+    Boolean(user?.impersonatedBy) || (inbox.mode === "tenant" && billing?.state === "read_only");
   const canReply = can("inbox", "reply") && !readOnly;
   const label = contactLabel({ displayName: contact.displayName, phone: contact.phone });
   const phone = displayPhone(`+${contact.phone}`) ?? contact.phone;
@@ -71,7 +75,9 @@ export function ContactPanel({ detail, onBack }: ContactPanelProps) {
           <DetailRow label="Nome no WhatsApp" value={contact.waName} />
         </dl>
 
-        {link.kind === "customer" ? (
+        {link.kind === "user" || (inbox.mode === "platform" && link.kind === "none") ? (
+          <PlatformContactSection contactId={contact.id} link={link as Extract<typeof link, { kind: "user" | "none" }>} canReply={canReply} />
+        ) : link.kind === "customer" ? (
           <CustomerSection detail={detail} link={link} canReply={canReply} />
         ) : link.kind === "member" ? (
           <MemberSection contactId={contact.id} name={link.user.name} canReply={canReply} />
@@ -97,6 +103,7 @@ function ContactName({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const rename = useInboxMutation({ success: "Nome atualizado." });
+  const { api } = useInboxScope();
   const { contact } = detail;
 
   if (!editing) {
@@ -126,7 +133,7 @@ function ContactName({
       onSubmit={(event) => {
         event.preventDefault();
         rename.mutate(
-          { path: `/api/inbox/contacts/${contact.id}`, method: "PATCH", body: { name: name.trim() || null } },
+          { path: `${api}/contacts/${contact.id}`, method: "PATCH", body: { name: name.trim() || null } },
           { onSuccess: () => setEditing(false) },
         );
       }}
@@ -356,7 +363,7 @@ function UnlinkedSection({
   const [saving, setSaving] = useState(false);
   const [linking, setLinking] = useState(false);
   const linkMember = useLinkContact(detail.contact.id);
-  const { candidates } = link;
+  const candidates = link.candidates ?? { customers: [], users: [] };
 
   const canSave = canReply && can("customer", "create");
   const canLinkCustomer = canReply && can("customer", "update") && can("customer", "read");

@@ -21,6 +21,7 @@ import type {
 } from "@/lib/inbox/constants";
 import { type InboxRealtimeMode, useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
 import type { ConversationTab } from "@/lib/schemas/inbox";
+import { type InboxMode, type InboxScope, useInboxScope } from "@/components/inbox/inbox-scope";
 import { useAuth } from "@/providers/auth-provider";
 
 /**
@@ -85,13 +86,25 @@ export type ContactLink =
       customFields: Record<string, unknown>;
     }
   | { kind: "member"; user: { id: string; name: string } }
+  /** Plataforma: o usuário vinculado e as organizações dele (nunca cliente de owner). */
+  | { kind: "user"; user: { id: string; name: string }; organizations: PlatformOrganization[] }
   | {
       kind: "none";
-      candidates: {
+      /** Ausente na plataforma (não há candidatos lá). */
+      candidates?: {
         customers: { id: string; name: string; phone: string | null }[];
         users: { id: string; name: string }[];
       };
     };
+
+export type PlatformOrganization = {
+  id: string;
+  name: string;
+  role: string;
+  tags: TagView[];
+  /** Valores por id do campo; as definições vêm de `/api/admin/crm/custom-fields`. */
+  customFields: Record<string, unknown>;
+};
 
 export type SessionWindow = { applies: boolean; open: boolean; expiresAt: string | null };
 
@@ -128,6 +141,7 @@ export type MessageView = {
 type Page<T> = { items: T[]; nextCursor: string | null };
 
 export type ConversationFilters = {
+  /** Na plataforma só existe a lista: o campo é ignorado (a API não tem aba). */
   tab: ConversationTab;
   status?: ConversationStatus;
   unread?: boolean;
@@ -237,46 +251,50 @@ export function useInboxRefetchInterval(kind: "list" | "detail" = "list") {
 // Leitura
 // ---------------------------------------------------------------------------
 
-function conversationsPath(filters: ConversationFilters, cursor: string | undefined) {
-  const search = new URLSearchParams({ tab: filters.tab, limit: String(PAGE_SIZE) });
+function conversationsPath(scope: InboxScope, filters: ConversationFilters, cursor: string | undefined) {
+  const search = new URLSearchParams({ limit: String(PAGE_SIZE) });
+
+  if (scope.mode === "tenant") search.set("tab", filters.tab);
 
   if (filters.status) search.set("status", filters.status);
   if (filters.unread) search.set("unread", "true");
   if (filters.channelId) search.set("channelId", filters.channelId);
-  if (filters.tagIds && filters.tagIds.length > 0) search.set("tagIds", filters.tagIds.join(","));
-  if (filters.assignedTo) search.set("assignedTo", filters.assignedTo);
+  if (scope.mode === "tenant") {
+    if (filters.tagIds && filters.tagIds.length > 0) search.set("tagIds", filters.tagIds.join(","));
+    if (filters.assignedTo) search.set("assignedTo", filters.assignedTo);
+  }
   if (filters.q) search.set("q", filters.q);
   if (cursor) search.set("cursor", cursor);
 
-  return `/api/inbox/conversations?${search}`;
+  return `${scope.api}/conversations?${search}`;
 }
 
 /** Lista por cursor; cada página é lida de novo no polling, na ordem. */
 export function useConversations(filters: ConversationFilters) {
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
   const interval = useInboxRefetchInterval();
 
   return useInfiniteQuery({
-    queryKey: inboxKeys.conversations(tenant?.id, filters),
+    queryKey: inboxKeys.conversations(scope.key, filters),
     queryFn: ({ pageParam }) =>
-      apiFetch<Page<ConversationItem>>(conversationsPath(filters, pageParam)),
+      apiFetch<Page<ConversationItem>>(conversationsPath(scope, filters, pageParam)),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: Boolean(tenant),
+    enabled: scope.ready,
     refetchInterval: interval,
     retry: false,
   });
 }
 
 export function useConversation(id: string | undefined) {
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
   // A janela de 24 h expira sem evento: o detalhe segue o ciclo da lista (60 s ao vivo).
   const interval = useInboxRefetchInterval("list");
 
   return useQuery({
-    queryKey: inboxKeys.conversation(tenant?.id, id ?? ""),
-    queryFn: () => apiFetch<ConversationResponse>(`/api/inbox/conversations/${id}`),
-    enabled: Boolean(tenant && id),
+    queryKey: inboxKeys.conversation(scope.key, id ?? ""),
+    queryFn: () => apiFetch<ConversationResponse>(`${scope.api}/conversations/${id}`),
+    enabled: scope.ready && Boolean(id),
     refetchInterval: interval,
     retry: false,
   });
@@ -284,35 +302,38 @@ export function useConversation(id: string | undefined) {
 
 /** Da mais nova para a mais antiga, por página; a tela inverte para ler de cima para baixo. */
 export function useMessages(conversationId: string | undefined) {
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
   const interval = useInboxRefetchInterval("detail");
 
   return useInfiniteQuery({
-    queryKey: inboxKeys.messages(tenant?.id, conversationId ?? ""),
+    queryKey: inboxKeys.messages(scope.key, conversationId ?? ""),
     queryFn: ({ pageParam }) => {
       const search = new URLSearchParams({ limit: "50" });
       if (pageParam) search.set("before", pageParam);
       return apiFetch<Page<MessageView>>(
-        `/api/inbox/conversations/${conversationId}/messages?${search}`,
+        `${scope.api}/conversations/${conversationId}/messages?${search}`,
       );
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: Boolean(tenant && conversationId),
+    enabled: scope.ready && Boolean(conversationId),
     refetchInterval: interval,
     retry: false,
   });
 }
 
 /** Conversas com não lidas na fila e nas minhas (o ponto do menu); os eventos o invalidam. */
-export function useInboxUnread(enabled = true) {
-  const { tenant, permissions } = useAuth();
+export function useInboxUnread(enabled = true, inboxMode?: InboxMode) {
+  const scope = useInboxScope(inboxMode);
+  const { permissions } = useAuth();
   const mode = useInboxRealtimeMode();
 
   return useQuery({
-    queryKey: inboxKeys.unread(tenant?.id),
-    queryFn: () => apiFetch<{ queue: number; mine: number }>("/api/inbox/unread"),
-    enabled: enabled && Boolean(tenant) && permissions.includes("inbox:read"),
+    queryKey: inboxKeys.unread(scope.key),
+    queryFn: () => apiFetch<{ queue: number; mine: number }>(`${scope.api}/unread`),
+    // Na plataforma, quem chega ao menu já é de plataforma (a API confere).
+    enabled:
+      enabled && scope.ready && (scope.mode === "platform" || permissions.includes("inbox:read")),
     refetchInterval: refetchIntervalFor(mode, "list"),
     refetchIntervalInBackground: false,
     retry: false,
@@ -321,15 +342,16 @@ export function useInboxUnread(enabled = true) {
 
 /** Membros que podem receber uma conversa (`inbox:assign`). */
 export function useAssignees(enabled: boolean) {
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useQuery({
-    queryKey: inboxKeys.assignees(tenant?.id),
+    queryKey: inboxKeys.assignees(scope.key),
     queryFn: () =>
       apiFetch<{ users: { id: string; name: string }[] }>("/api/inbox/assignees").then(
         ({ users }) => users,
       ),
-    enabled: enabled && Boolean(tenant),
+    // Só o tenant tem dono e transferência.
+    enabled: enabled && scope.mode === "tenant" && scope.ready,
     staleTime: 60_000,
     retry: false,
   });
@@ -382,7 +404,7 @@ export function useInboxMutation<T = unknown>(
   options: { success?: string; silent?: boolean; conversationId?: string; messages?: boolean } = {},
 ) {
   const queryClient = useQueryClient();
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useMutation({
     mutationFn: ({ path, method, body }: InboxRequest) =>
@@ -397,7 +419,7 @@ export function useInboxMutation<T = unknown>(
       if (!options.silent) toast.error(errorText(error));
     },
     onSettled: () =>
-      invalidateInbox(queryClient, tenant?.id, {
+      invalidateInbox(queryClient, scope.key, {
         conversationId: options.conversationId,
         messages: options.messages,
       }),
@@ -434,8 +456,8 @@ export type SendPayload =
  * Corpo da requisição: JSON para texto e modelo; `multipart/form-data` para o anexo. Sem
  * `Content-Type` à mão no multipart: o navegador acrescenta a fronteira.
  */
-function sendRequest(conversationId: string, clientId: string, payload: SendPayload) {
-  const path = `/api/inbox/conversations/${conversationId}/messages`;
+function sendRequest(scope: InboxScope, conversationId: string, clientId: string, payload: SendPayload) {
+  const path = `${scope.api}/conversations/${conversationId}/messages`;
 
   if (payload.kind === "media") {
     const form = new FormData();
@@ -455,14 +477,14 @@ function sendRequest(conversationId: string, clientId: string, payload: SendPayl
 
 export function useSendMessage(conversationId: string) {
   const queryClient = useQueryClient();
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useMutation({
     mutationKey: INBOX_SEND_KEY,
     mutationFn: ({ clientId, ...payload }: { clientId: string } & SendPayload) =>
-      sendRequest(conversationId, clientId, payload),
+      sendRequest(scope, conversationId, clientId, payload),
     // A janela fechada e o número caído se corrigem relendo a conversa.
-    onSettled: () => invalidateInbox(queryClient, tenant?.id, { conversationId }),
+    onSettled: () => invalidateInbox(queryClient, scope.key, { conversationId }),
   });
 }
 
@@ -483,15 +505,15 @@ export type ConversationTemplate = {
 };
 
 export function useConversationTemplates(conversationId: string, enabled: boolean) {
-  const { tenant } = useAuth();
+  const scope = useInboxScope();
 
   return useQuery({
-    queryKey: inboxKeys.templates(tenant?.id, conversationId),
+    queryKey: inboxKeys.templates(scope.key, conversationId),
     queryFn: () =>
       apiFetch<{ templates: ConversationTemplate[] }>(
-        `/api/inbox/conversations/${conversationId}/templates`,
+        `${scope.api}/conversations/${conversationId}/templates`,
       ).then(({ templates }) => templates),
-    enabled: enabled && Boolean(tenant),
+    enabled: enabled && scope.ready,
     staleTime: 60_000,
     retry: false,
   });

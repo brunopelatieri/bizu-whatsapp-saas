@@ -10,6 +10,9 @@
   `views.ts`, `conversations.ts`, `assignment.ts`, `media-access.ts`, `send.ts`, `window.ts`,
   `contact-actions.ts`; da C4: `realtime.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4), `src/api/inbox-media-out.ts` (C5),
   `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
+  da C6: `src/api/admin-inbox.ts`, `src/api/inbox-shared.ts`, `src/lib/inbox/platform.ts`, `src/lib/inbox/platform-link.ts`,
+  `src/components/inbox/inbox-scope.tsx`, `src/components/inbox/platform-contact-section.tsx`, `src/routes/admin/inbox.tsx`,
+  `tests/db/inbox-platform.test.ts`, `src/lib/inbox/platform.test.ts`,
   da C3: `src/components/inbox/` (`inbox-api.ts`, `format.ts`, `labels.ts`, `conversation-list.tsx`,
   `conversation-item.tsx`, `conversation-header.tsx`, `message-thread.tsx`, `message-bubble.tsx`,
   `composer.tsx`, `contact-panel.tsx`, `contact-dialogs.tsx`, `new-conversation-dialog.tsx`; da C5: `template-dialog.tsx`; da C4:
@@ -31,7 +34,7 @@
 | C3 | Tela `/app/atendimento` (polling de 20 s, só tenant) | **Feita** |
 | C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | **Feita** |
 | C5 | Mídia de saída, modelos, citação no envio | **Feita** |
-| C6 | Atendimento da plataforma em `/admin` | Pendente |
+| C6 | Atendimento da plataforma em `/admin` | **Feita** |
 | C7 | LGPD (exportação e exclusão cobrindo conversas) e fechamento | Pendente |
 
 ## Modelo
@@ -162,7 +165,7 @@ Assumir, transferir, situação, lida, vínculo e nome: 60 por minuto por pessoa
 
 `visibleConversation(actor)` é o predicado de **toda** consulta de conversa e mensagem; fora dele, 404
 igual a id inexistente. Sem `inbox:read`, `false`. Com `supervise`, o tenant inteiro; senão, sem dono
-ou com o próprio ator como dono. Na plataforma (C6), o escopo `tenant_id IS NULL`. Mensagem e mídia
+ou com o próprio ator como dono. Na plataforma (C6), o escopo `tenant_id IS NULL` (ver "Atendimento da plataforma (C6)"). Mensagem e mídia
 são alcançadas pelo `JOIN` com a conversa (`findVisibleMessage`, `openMessageMedia`); o contato, pelas
 conversas dele que o ator vê (`requireVisibleContact`). `readsCustomers(actor)` (`customer:read`)
 decide se o nome do cliente vinculado, as etiquetas e o cadastro aparecem na lista e no painel.
@@ -289,7 +292,7 @@ inteiro. `inline` só para `INLINE_SAFE_MIME` (imagem, áudio e vídeo); o resto
 Rota `/app/atendimento/:conversationId?` (`routes/app.inbox.tsx` → `pages/inbox-page.tsx`), client-only, sem
 `loader`: TanStack Query + `apiFetch`. Item "Atendimento" em `app-nav.ts` (`inbox:read`), com o ponto de não
 lidas de `GET /api/inbox/unread`. `AppLayout` tira o padding e o overflow do `<main>` nesta rota (a tela rola
-por dentro). `mode="platform"` é da C6: nada aqui conhece `/api/admin/inbox`.
+por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
 
 - **Camada de dados** (`inbox-api.ts`): tipos (datas em ISO), `inboxKeys` (todas sob `["inbox", tenantId, …]`),
   hooks de leitura (`useConversations` e `useMessages` com cursor, `useConversation`, `useInboxUnread`,
@@ -362,7 +365,7 @@ separado porque o aviso sai do banco, não do processo.
   **neste processo** (429 `TOO_MANY_STREAMS`); escuta fora do ar → 503 `REALTIME_UNAVAILABLE` (na primeira
   assinatura do processo espera até 3 s a conexão abrir); cliente que não lê (100 escritas pendentes) é
   desligado. `Cache-Control: no-cache, no-transform` e `X-Accel-Buffering: no`. A plataforma (C6) só chama
-  `streamInboxEvents(c, atorDaPlataforma)`.
+  `streamInboxEvents(c, atorDaPlataforma)` em `GET /api/admin/inbox/events`.
 - **Cliente** (`use-inbox-events.ts`, `InboxEvents` no `AppLayout` para quem tem `inbox:read`):
   `connectInboxEvents` fecha o `EventSource` no erro e decide a reconexão: fluxo que chegou a abrir (fim dos
   15 min) reconecta em 1 s sem mudar de modo; falha ao abrir (503, 429, rede) ou tentativa sem resposta em
@@ -380,6 +383,69 @@ separado porque o aviso sai do banco, não do processo.
   até 15 min (a releitura pela API já os barra); (b) o teto de 3 fluxos é por processo (com réplicas, 3 por
   réplica); (c) evento perdido na queda é coberto pela releitura ao reconectar, não por reenvio; (d) aviso
   sem `a` (status de entrega, `inbox.sweep`) custa um `SELECT` do dono por aviso na transação de quem grava.
+
+## Atendimento da plataforma (C6)
+
+A caixa de entrada da plataforma (`tenant_id` nulo, `Scope = platform`, sempre em `withPlatformData`) é a mesma
+tubulação do tenant com três diferenças: **sem fila** (não há dono, `claim`, `assign`, `assignees`, abas `queue` e
+`mine`, `supervise`), **sem clientes dos owners** (decisão do proprietário: o cliente é do owner, controlador; a
+plataforma é operadora) e **o `platform_support` responde**. Nada do atendimento da plataforma usa `withPlatformScope`.
+
+**API** (`src/api/admin-inbox.ts`, montada em `app.ts` antes de `adminRoutes`, como `admin-channels`; traz a própria
+cadeia: `sameOrigin` → `inboxBodyLimit` → `authRateLimit` → `requireAuth` → `requirePlatform()` →
+`blockMutationsWhileImpersonating`). `src/api/inbox-shared.ts` guarda o que as duas APIs repartem (limite de corpo,
+leitura do envio JSON ou `multipart`, resposta da mídia).
+
+| Rota | Quem | Serviço |
+|---|---|---|
+| `GET /api/admin/inbox/conversations?status&unread&channelId&q&cursor&limit` | plataforma | `listConversations` com `tab = all` fixo (a rota não tem `tab`, `tagIds` nem `assignedTo`; `platformConversationsQuerySchema`) |
+| `GET .../conversations/:id`, `.../messages`, `.../templates` | plataforma (`templates`: quem responde) | `getConversation`, `listMessages`, `listConversationTemplates` |
+| `GET .../unread` | plataforma | `unreadCounts` (`{ queue, mine }`: a plataforma só usa `queue`, o total com não lidas) |
+| `GET .../events` | plataforma | `streamInboxEvents` com o ator da plataforma: só avisos `s = null`; batimento, 15 min, 3 por pessoa, 503 sem `LISTEN` |
+| `GET .../messages/:id/media` | plataforma | `openMessageMedia` (a mídia da mensagem aponta para `/api/admin/inbox/messages/:id/media`: `inboxBase(scope)`) |
+| `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
+
+Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-queue` 60/min, `-media-retry` 20/min.
+`claim`, `assign`, `assignees`, `candidates` e `customer` **não existem** (404, teste de matriz).
+
+- **Ator** (`platform.ts`): `platformActor(user, ip)` monta o `InboxActor` com `scope = platform`, `permissions = []` e
+  `platformCapabilities(role)`: `read` para qualquer papel de plataforma, `reply` para `PLATFORM_REPLY_ROLES`
+  (`platform_owner`, `platform_support`), `assign` e `supervise` sempre falsos. A rota confere o papel
+  (`requirePlatform([...PLATFORM_REPLY_ROLES])`) e o serviço confere `actor.can.reply` de novo.
+- **Visibilidade:** `visibleConversation` na plataforma é `tenant_id IS NULL` para quem lê (`reachOf = all`); conversa de
+  tenant responde 404 em toda rota, e a da plataforma responde 404 em `/api/inbox`. O SSE usa o mesmo `noticeVisibleTo`
+  (`s` do aviso precisa ser `null` para o escopo da plataforma). Teste em `tests/db/inbox-platform.test.ts`.
+- **Sem `customer`:** `selectConversationRows(tx, scope)` **não faz a junção** com `customer` no escopo da plataforma
+  (o nome do cliente sai `null`); `linkOf` na plataforma devolve `platformLinkOf`; `linkCandidates` já não consulta cliente
+  fora do tenant. `customerId` na criação de conversa e no vínculo é 400 (`.strict()` nos schemas da plataforma).
+  Número avulso que pertença a um cliente de owner fica "não identificado".
+- **Vínculo** (`platform-link.ts`): `{ kind: "user", user, organizations: [{ id, name, role, tags, customFields }] }` com as
+  organizações do usuário (até 50, sem as apagadas) e a anotação de `organization_tag` e `organization_profile`
+  (`annotationsOfOrganizations`, em `src/lib/crm/organization-profile.ts`, na mesma `withPlatformData`); `{ kind: "none" }`
+  sem vínculo, **sem candidatos**. `linkPlatformContact` aceita `{ userId }` (usuário existente e não banido, senão 400
+  `INVALID_LINK`) ou `{ userId: null }`; audita `inbox.contact_linked` (`customerId: null`). A ingestão já vincula só com
+  `user` de número único (C1); o vínculo manual escolhe o usuário pela busca de `/api/admin/users`.
+- **Iniciar conversa** (`startPlatformConversation`): `{ channelId, userId | phone }`; canal do escopo (404 para canal de tenant),
+  não `disabled`; `userId` exige telefone (400 `PHONE_REQUIRED`); mesma regra de `canWhatsApp` ou "já escreveu" do tenant
+  (`contactForStart`, extraído de `startConversation` e usado pelos dois). A conversa nasce `open`, sem dono (`tenant_id` nulo).
+- **Envio:** nenhum atendente assume ao responder (`claims` só no tenant); a conversa continua sem dono. Anexos, modelos
+  (WABA do canal da plataforma), citação, reenvio e janela de 24 h são os do tenant. Mídia da plataforma grava em
+  `inbox/platform/…`, sem cota de plano (`storage_mb` é do tenant).
+- **Auditoria:** `actor_type = platform`, sem `tenant_id`, só ids (`inbox.conversation_closed`, `_reopened`,
+  `inbox.contact_linked`); a conversa da plataforma não tem `claimed`, `assigned` nem `released`.
+- **Escrita do suporte:** responder, mudar a situação, iniciar conversa, vincular e renomear são a **única** escrita do
+  `platform_support` em `/admin`. Canal, etiqueta e campo seguem só com o `platform_owner` (`ownerOnly`; teste em
+  `inbox-platform.test.ts` e nos de `admin-channels` e `crm-platform`). A sessão personificada (o suporte dentro do
+  tenant) nem passa de `requirePlatform` (o usuário da sessão é o do tenant): 403 na leitura e na escrita.
+- **Tela** (`/admin/atendimento`, `routes/admin/inbox.tsx` → `InboxPage mode="platform"`): os componentes de
+  `src/components/inbox/` leem o escopo de `inbox-scope.tsx` (`InboxModeProvider`, `useInboxScope`: raiz da API, rota, chave das
+  queries `["inbox", "platform", …]`, caminho dos canais; `useInboxCan`: no tenant, as permissões; na plataforma, só `inbox:read`,
+  `inbox:reply` e `channel:read` por papel). Sem abas, sem "Assumir", "Devolver", "Transferir", "Salvar como cliente"; o título
+  da lista mostra o total de não lidas. Painel: `PlatformContactSection` (usuário e organizações com etiquetas e campos
+  **somente leitura**, links para `/admin/usuarios/:id` e `/admin/tenants/:id`; "Vincular a usuário" busca em
+  `/api/admin/users`). "Nova conversa" por usuário ou telefone; "Conversar" na lista `/admin/usuarios` (`phoneKind` do usuário
+  vem em `GET /api/admin/users`, o número não). Item "Atendimento" em `admin-nav.ts` com o ponto de não lidas
+  (`useInboxUnread(…, "platform")`); `InboxEvents mode="platform"` monta o SSE no `AdminLayout`.
 
 ## Segurança e privacidade
 
@@ -424,6 +490,13 @@ separado porque o aviso sai do banco, não do processo.
   `file`; eco do aparelho que leva o `file`; modelo (lista, janela fechada, variáveis, pendente, outro WABA, mídia no
   cabeçalho, Evolution, reenvio). Unitários: `templates.test.ts`, `media.test.ts` (`classifyOutbound`) e
   `media-out.test.ts` (token). `inbox-contacts.test.ts`: telefone corrigido em "salvar como cliente".
+- C6: `tests/db/inbox-platform.test.ts` (Postgres real, provedor e armazenamento simulados): acesso (anônimo 401; dono de tenant e membro
+  403 em toda rota; `claim`, `assign`, `assignees`, `candidates` e `customer` 404), suporte e proprietário respondem (texto, anexo, modelo,
+  situação, iniciar conversa, vincular, renomear) e o suporte recebe 403 em canal, etiqueta e campo; isolamento (nenhuma conversa de tenant
+  na plataforma, por lista, id, mensagens, mídia, envio, contato e SSE, e nenhuma da plataforma no tenant); `customerId` é 400; cliente
+  de tenant com o mesmo telefone não aparece (nem na busca) e a consulta da lista não menciona `customer`; SSE só do escopo (carga só de
+  ids, limite de 3); sessão personificada 403. Unitário: `src/lib/inbox/platform.test.ts` (capacidades, schemas, varredura que impede
+  `withPlatformScope` e `customer` nos arquivos da plataforma).
 - C4: `tests/db/inbox-realtime.test.ts` (Postgres real): sessão, tenant e `inbox:read`; o membro A não recebe
   evento de conversa do membro B, e entrar e sair da fila chega a quem deve; status de entrega com o dono
   completado no servidor; ingestão num **processo à parte** (`fixtures/inbox-realtime-worker.ts`, o papel do
@@ -431,6 +504,20 @@ separado porque o aviso sai do banco, não do processo.
   reautenticação (fluxo encerrado e reconexão com sessão revogada → 401); queda do `LISTEN` → fluxo
   encerrado, 503 e volta. Unitários: `src/lib/inbox/realtime.test.ts` (carga, `parseInboxNotice`,
   `noticeVisibleTo`) e `src/components/inbox/use-inbox-events.test.ts` (modo, backoff, releitura, toast).
+
+## Desvios da SPEC (C6)
+
+- `GET /api/admin/inbox/conversations` não tem `tab` (a SPEC dizia "só existe a lista", mas o serviço do tenant pedia `supervise` para
+  `tab = all`): a rota fixa `tab = all` e `listConversations` só pede `supervise` no tenant.
+- `GET /api/admin/inbox/unread` devolve o mesmo `{ queue, mine }` do tenant (`mine` sempre 0): a tela soma os dois para o ponto.
+- `selectConversationRows` passou a receber o escopo e deixa de juntar `customer` na plataforma (a SPEC pedia só "nenhuma consulta a
+  `customer`"; a junção era uma consulta, vazia pelo RLS, e agora nem existe).
+- `marcar como lida` na plataforma exige papel que responde (`canReply`), como no tenant (zera o contador de todos).
+- Vínculo manual na plataforma escolhe o usuário na busca de `/api/admin/users` (não há `candidates`); aceita qualquer usuário não banido,
+  não só quem tem o mesmo telefone.
+- `GET /api/admin/users` ganhou `phoneKind` por usuário (só o tipo, como `/api/team`), para o "Conversar".
+- Não existe papel de plataforma "só de leitura" hoje (`PLATFORM_ROLES` = `user`, `platform_owner`, `platform_support`): a distinção
+  `read` × `reply` está em `platformCapabilities` e no teste unitário, pronta para um papel futuro.
 
 ## Desvios da SPEC (C5)
 

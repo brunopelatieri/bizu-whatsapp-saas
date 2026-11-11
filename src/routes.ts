@@ -64,6 +64,8 @@ export default [
     // API (`requirePlatform`), nunca só do cliente.
     route("admin", "components/admin/admin-layout.tsx", [
       index("routes/admin/index.tsx"),
+      // Caixa de entrada da plataforma (C6): o id da conversa é opcional na mesma rota.
+      route("atendimento/:conversationId?", "routes/admin/inbox.tsx"),
       route("tenants", "routes/admin/tenants.tsx"),
       route("tenants/:id", "routes/admin/tenant.tsx"),
       route("usuarios", "routes/admin/users.tsx"),

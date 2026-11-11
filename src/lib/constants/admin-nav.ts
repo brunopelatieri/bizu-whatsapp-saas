@@ -3,6 +3,7 @@ import {
   CreditCard,
   LayoutDashboard,
   MessageCircle,
+  MessagesSquare,
   Receipt,
   ScrollText,
   Settings,
@@ -15,6 +16,8 @@ import type { AppNavItem } from "@/lib/constants/app-nav";
 /** Navegação da área da plataforma (`/admin/**`). Só `platform_owner` e `platform_support`. */
 export const adminMainNav: AppNavItem[] = [
   { href: "/admin", label: "Visão geral", icon: LayoutDashboard, end: true },
+  // Atendimento da plataforma (caixa de entrada, C6): o ponto de não lidas vem de `/api/admin/inbox/unread`.
+  { href: "/admin/atendimento", label: "Atendimento", icon: MessagesSquare, badge: "inbox" },
   { href: "/admin/tenants", label: "Organizações", icon: Building2 },
   { href: "/admin/usuarios", label: "Usuários", icon: Users },
   { href: "/admin/planos", label: "Planos", icon: CreditCard },
@@ -31,6 +34,7 @@ export const adminBottomNav: AppNavItem[] = [
 
 const adminTitles: Record<string, string> = {
   "/admin": "Visão geral",
+  "/admin/atendimento": "Atendimento",
   "/admin/tenants": "Organizações",
   "/admin/usuarios": "Usuários",
   "/admin/planos": "Planos",
@@ -48,6 +52,7 @@ export function adminTitleFromPath(pathname: string): string {
   if (adminTitles[pathname]) return adminTitles[pathname];
   if (pathname.startsWith("/admin/tenants/")) return "Organização";
   if (pathname.startsWith("/admin/planos/")) return "Plano";
+  if (pathname.startsWith("/admin/atendimento/")) return "Atendimento";
 
   return "Administração";
 }

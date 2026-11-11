@@ -27,7 +27,8 @@ function NavItem({
   onNavigate?: () => void;
 }) {
   const Icon = item.icon;
-  const unread = useInboxUnread(item.badge === "inbox");
+  // O item de `/admin` lê a contagem da plataforma; o de `/app`, a do tenant.
+  const unread = useInboxUnread(item.badge === "inbox", item.href.startsWith("/admin") ? "platform" : "tenant");
   // Ponto: há conversa com mensagem nova na fila ou nas minhas (por polling até a C4).
   const hasUnread = item.badge === "inbox" && (unread.data?.queue ?? 0) + (unread.data?.mine ?? 0) > 0;
 

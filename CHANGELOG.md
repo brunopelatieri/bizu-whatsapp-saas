@@ -10,6 +10,16 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C6 (atendimento da plataforma)**: `/admin/atendimento` e `/api/admin/inbox/*` dão à plataforma a
+  mesma caixa do tenant, **sem fila nem dono** (só a lista) e **sem acesso a clientes dos owners**: a plataforma fala com
+  `user` (vínculo pelo telefone, e manual pela busca de usuários), `customerId` é recusado (400) e nenhuma consulta alcança
+  `customer` de tenant (o cliente é do owner, controlador). Leitura para qualquer papel de plataforma; enviar (texto, anexo,
+  modelo, citação), mudar a situação, iniciar conversa (por usuário ou telefone), vincular e renomear o contato para
+  `platform_owner` **e `platform_support`** (única escrita do suporte em `/admin`; canal, etiqueta e campo seguem só do
+  proprietário; a sessão personificada não passa). SSE próprio em `GET /api/admin/inbox/events`, ponto de não lidas no menu
+  "Atendimento", painel com o usuário e as organizações dele (etiquetas e campos da plataforma, só leitura) e "Conversar" na
+  lista de usuários. `GET /api/admin/users` ganha `phoneKind`. **Migração:** nenhuma migration nem variável nova.
+
 - **Caixa de entrada, fase C5 (mídia de saída, modelos e resposta citada)**: o atendente anexa imagem, vídeo,
   áudio, PDF ou documento do Office (até 16 MB, tipo conferido pelo **conteúdo**, legenda, prévia), envia um
   **modelo de mensagem aprovado** do WABA do canal com as variáveis conferidas (a única forma de falar com a

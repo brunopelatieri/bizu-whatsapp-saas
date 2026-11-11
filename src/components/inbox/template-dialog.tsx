@@ -1,12 +1,12 @@
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
-import { useCan } from "@/components/auth/can";
 import {
   type ConversationTemplate,
   errorText,
   useConversationTemplates,
 } from "@/components/inbox/inbox-api";
+import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -61,7 +61,8 @@ function analysisOf(template: ConversationTemplate) {
 }
 
 export function TemplateDialog({ open, onClose, conversationId, onSubmit }: TemplateDialogProps) {
-  const can = useCan();
+  const can = useInboxCan();
+  const { channelsRoute } = useInboxScope();
   const query = useConversationTemplates(conversationId, open);
   const templates = query.data ?? [];
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -142,7 +143,7 @@ export function TemplateDialog({ open, onClose, conversationId, onSubmit }: Temp
             {can("channel", "read") ? (
               <>
                 Sincronize os modelos em{" "}
-                <Link to="/app/configuracoes/canais" className="font-medium text-primary underline">
+                <Link to={channelsRoute} className="font-medium text-primary underline">
                   Números
                 </Link>
                 .

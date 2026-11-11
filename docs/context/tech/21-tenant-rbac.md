@@ -54,6 +54,10 @@ Ordem: `sameOrigin` → `jsonBodyLimit` → rate limit → `requireAuth` → `re
 vem o recurso `ac`, que o plugin exige para gerir papéis: só o owner tem, e ele não aparece
 em `/api/me`.
 
+**Plataforma (C6):** o atendimento de `/admin` não usa `inbox:*` do tenant: `platform_owner` e `platform_support` leem e respondem
+(`platformCapabilities`, `src/lib/inbox/platform.ts`; `assign` e `supervise` não existem lá). É a única escrita do `platform_support`
+em `/admin` (`tech/22-admin.md`); o papel de plataforma é conferido no servidor por `requirePlatform`.
+
 `requireTenant` carrega o papel e as permissões a cada requisição (`loadRoleCatalog`), com
 os papéis personalizados do tenant. Quem foi removido ou teve o papel trocado perde o acesso
 na hora. `requirePermission` e `/api/me` usam a mesma lista, comparada com `hasPermission`

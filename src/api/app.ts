@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { adminRoutes } from "@/api/admin";
 import { adminChannelEventRoutes } from "@/api/admin-channel-events";
 import { adminChannelRoutes } from "@/api/admin-channels";
+import { adminInboxRoutes } from "@/api/admin-inbox";
 import { authRoutes } from "@/api/auth-ext";
 import { billingRoutes } from "@/api/billing";
 import { auditRoutes } from "@/api/audit-log";
@@ -100,6 +101,7 @@ api.route("/", auditRoutes);
 api.route("/", impersonationRoutes);
 api.route("/", adminChannelEventRoutes);
 api.route("/", adminChannelRoutes);
+api.route("/", adminInboxRoutes);
 api.route("/", adminRoutes);
 
 api.post(
