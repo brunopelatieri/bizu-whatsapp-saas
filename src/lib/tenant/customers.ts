@@ -1,4 +1,5 @@
 import { and, count, desc, eq, ilike, ne, or, type SQL, sql } from "drizzle-orm";
+import { logError } from "@/api/log";
 import { type Tx, withTenant } from "@/db/rls";
 import { customer } from "@/db/schema";
 import { isUniqueViolation, violatedConstraint } from "@/db/errors";
@@ -26,7 +27,9 @@ import {
 } from "@/lib/crm/custom-fields";
 import { replaceCustomerTags, tagsOfCustomers, type CustomerTagView } from "@/lib/crm/tags";
 import { type CustomFieldValues, mergeCustomFields } from "@/lib/crm/values";
+import { purgeCustomerContacts } from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
+import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -320,12 +323,25 @@ export async function updateCustomer(
   }
 }
 
+/**
+ * Apaga o cliente. As conversas de WhatsApp com ele saem junto (contatos vinculados, mensagens e
+ * mídia; SPEC da caixa de entrada, LGPD): o RLS do tenant limita tudo a este tenant, e os objetos
+ * do armazenamento saem depois do commit.
+ */
 export async function deleteCustomer(
   tenantId: string,
   customerId: string,
   actor: CustomerActor,
 ) {
-  const portalUserId = await withTenant(tenantId, async (tx) => {
+  const { portalUserId, storageKeys } = await withTenant(tenantId, async (tx) => {
+    const [found] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(byId(tenantId, customerId))
+      .for("update");
+    if (!found) throw notFound(NOT_FOUND);
+
+    const inbox = await purgeCustomerContacts(tx, [found.id]);
     const [removed] = await tx
       .delete(customer)
       .where(byId(tenantId, customerId))
@@ -343,8 +359,14 @@ export async function deleteCustomer(
       ip: actor.ip,
     });
 
-    return removed.portalUserId;
+    return { portalUserId: removed.portalUserId, storageKeys: inbox.storageKeys };
   });
+
+  for (const key of storageKeys) {
+    await getStorage()
+      .delete(key)
+      .catch((error) => logError("Falha ao apagar a mídia do cliente excluído", error));
+  }
 
   if (portalUserId) await dropOrphanPortalUser(portalUserId);
 }

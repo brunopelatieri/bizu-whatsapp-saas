@@ -145,6 +145,11 @@ export const envSchema = z
     // Canais de mensagem (`docs/context/tech/29-canais-whatsapp.md`): módulos ativos, como
     // PAYMENT_PROVIDERS. A Cloud API não tem variável: as credenciais são de cada canal.
     CHANNEL_PROVIDERS: csvList,
+    // Dias que `channel_event` já tratado fica guardado (`maintenance.prune`, `docs/context/lgpd.md`).
+    CHANNEL_EVENT_RETENTION_DAYS: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(365).default(30),
+    ),
     EVOLUTION_API_URL: z.preprocess(emptyToUndefined, z.url({ protocol: /^https?$/ }).optional()),
     EVOLUTION_GLOBAL_API_KEY: optionalString,
     // Endereço do bizu que o servidor Evolution alcança (padrão: APP_URL).

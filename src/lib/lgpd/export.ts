@@ -18,6 +18,7 @@ import { audit } from "@/lib/audit";
 import { appLink } from "@/lib/auth/links";
 import { isOwner } from "@/lib/auth/permissions";
 import { sendEmail } from "@/lib/email/send";
+import { conversationsForExport } from "@/lib/inbox/privacy";
 import { dataExportReadyTemplate } from "@/lib/email/templates/data-export-ready";
 import { createZip, type ZipEntry } from "@/lib/lgpd/zip";
 import { EXPORT_LINK_TTL_MS, signExportLink } from "@/lib/lgpd/link";
@@ -252,6 +253,8 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
       memberships,
       consents: await consentsOf(tx, subject),
       audit: await auditOf(tx, userId),
+      // Conversas de WhatsApp em que a pessoa é o contato (com a plataforma ou com uma organização).
+      whatsapp: await conversationsForExport(tx, { userId }),
     };
   });
 
@@ -260,6 +263,7 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
     { name: "organizacoes-e-papeis.json", data: json(base.memberships) },
     { name: "consentimentos.json", data: json(base.consents) },
     { name: "auditoria.json", data: json(base.audit) },
+    { name: "conversas-whatsapp.json", data: json(base.whatsapp) },
   ];
 
   // Quem é owner é também controlador dos dados dos clientes da organização.
@@ -314,6 +318,8 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
       records,
       consents: await consentsOf(tx, subject),
       audit: await auditOf(tx, portalUserId),
+      // As mensagens trocadas com cada organização pelos cadastros de cliente desta pessoa.
+      whatsapp: await conversationsForExport(tx, { customerIds: records.map(({ id }) => id) }),
     };
   });
 
@@ -322,6 +328,7 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
     { name: "cadastros-nas-organizacoes.json", data: json(base.records) },
     { name: "consentimentos.json", data: json(base.consents) },
     { name: "auditoria.json", data: json(base.audit) },
+    { name: "conversas-whatsapp.json", data: json(base.whatsapp) },
   ];
 }
 
@@ -345,6 +352,10 @@ export async function buildExportFiles(
     "- consentimentos.json: aceites e recusas dos textos legais, com a versão.",
     "- auditoria.json: ações registradas em seu nome.",
     "- clientes-<organizacao>.json: clientes das organizações de que você é proprietário.",
+    "- conversas-whatsapp.json: conversas de WhatsApp em que você é o contato, com as mensagens",
+    "  trocadas (anexos por nome, tipo e tamanho). `organizacao` nulo é a plataforma. Com",
+    "  `truncated` verdadeiro, só as 20.000 mensagens mais recentes vieram: peça o restante ao",
+    "  encarregado.",
   ].join("\n");
 
   return [...files, { name: "LEIA-ME.txt", data: Buffer.from(readme, "utf8") }];

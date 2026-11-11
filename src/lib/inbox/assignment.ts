@@ -1,8 +1,8 @@
 import { and, asc, eq, gt, isNull, sql } from "drizzle-orm";
-import { scopeTenantId, type Tx, withScope } from "@/db/rls";
+import { scopeTenantId, type Tx, withScope, withTenant } from "@/db/rls";
 import { conversation, member, user } from "@/db/schema";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
-import { permissionsOf } from "@/lib/auth/permissions";
+import { permissionsOf, type RoleCatalog } from "@/lib/auth/permissions";
 import type { ConversationStatus } from "@/lib/inbox/constants";
 import {
   CONVERSATION_NOT_FOUND,
@@ -305,4 +305,28 @@ export async function releaseAssignments(tx: Tx, userId: string, tenantId?: stri
     await notifyInbox(tx, { s: row.tenantId, c: row.id, k: "conversation", a: null, p: userId });
   }
   return released.length;
+}
+
+/**
+ * Depois de editar as permissões de um papel personalizado: quem ficou sem `inbox:reply` devolve
+ * as conversas à fila, como na troca de papel do membro (`changeMemberRole`). `catalog` é o
+ * catálogo já com a edição. Roda depois da gravação do papel (que é do Better Auth, fora desta
+ * transação): uma falha aqui deixa as conversas com o dono até a próxima edição ou remoção.
+ */
+export async function releaseAssignmentsWithoutReply(tenantId: string, catalog: RoleCatalog) {
+  return withTenant(tenantId, async (tx) => {
+    const owners = await tx
+      .selectDistinct({ userId: member.userId, role: member.role })
+      .from(member)
+      .innerJoin(conversation, eq(conversation.assignedUserId, member.userId))
+      .where(and(eq(member.organizationId, tenantId), eq(conversation.tenantId, tenantId)));
+
+    let released = 0;
+    for (const owner of owners) {
+      if (!inboxCapabilities(permissionsOf(catalog, owner.role)).reply) {
+        released += await releaseAssignments(tx, owner.userId, tenantId);
+      }
+    }
+    return released;
+  });
 }

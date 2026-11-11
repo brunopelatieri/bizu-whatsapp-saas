@@ -20,12 +20,14 @@ import { audit } from "@/lib/audit";
 import { toStatements } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
 import { assertWithinLimit } from "@/lib/billing/limits";
+import { releaseAssignmentsWithoutReply } from "@/lib/inbox/assignment";
 import { roleSchema, updateRoleSchema } from "@/lib/schemas/roles";
 import { ROLE_IN_USE } from "@/lib/tenant/errors";
 import {
   countRoleUsage,
   findCustomRole,
   listCustomRoles,
+  loadRoleCatalog,
 } from "@/lib/tenant/roles";
 
 /**
@@ -114,6 +116,10 @@ rolesRoutes.patch(
         },
       },
     });
+    // Papel que perdeu `inbox:reply`: as conversas de quem o tem voltam à fila (caixa de entrada).
+    if (permissions) {
+      await releaseAssignmentsWithoutReply(organizationId, await loadRoleCatalog(organizationId));
+    }
     await audit("role.updated", {
       actor: { id: actor.userId },
       tenantId: organizationId,
