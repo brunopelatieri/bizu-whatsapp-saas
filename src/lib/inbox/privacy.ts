@@ -31,7 +31,19 @@ async function purgeContacts(
   where: SQL,
   options: { notify: boolean },
 ): Promise<InboxPurge> {
+  // Trava contatos e conversas antes de procurar a mídia: a ingestão (upsert do contato e da
+  // conversa) e o envio (conversa `FOR UPDATE`) que chegarem agora esperam o commit, e uma
+  // mensagem nova não escapa da busca de `file` para depois cair na cascata com o arquivo órfão.
+  const locked = await tx.select({ id: chatContact.id }).from(chatContact).where(where).for("update");
+  if (locked.length === 0) return NONE;
+
   const contactIds = tx.select({ id: chatContact.id }).from(chatContact).where(where);
+  await tx
+    .select({ id: conversation.id })
+    .from(conversation)
+    .where(inArray(conversation.contactId, contactIds))
+    .for("update");
+
   const conversationIds = tx
     .select({ id: conversation.id })
     .from(conversation)
@@ -67,7 +79,6 @@ async function purgeContacts(
     : [];
 
   const removed = await tx.delete(chatContact).where(where).returning({ id: chatContact.id });
-  if (removed.length === 0 && files.length === 0) return NONE;
 
   for (const row of conversations) {
     // Com `a`, o aviso não relê a conversa (que já não existe).
@@ -97,8 +108,8 @@ export function purgeTenantInbox(tx: Tx, tenantId: string): Promise<InboxPurge> 
 }
 
 /**
- * Anonimização de `user`. Como atendente: as mensagens que enviou ficam sem autor e as conversas
- * que encerrou, sem `closed_by` (as que atendia já voltaram à fila por `releaseAssignments`).
+ * Anonimização de `user`. Como atendente: as mensagens que enviou ficam sem autor (e os anexos,
+ * sem `created_by`) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila por `releaseAssignments`).
  * Como contato: no tenant, o contato perde o vínculo (a conversa é do owner, controlador); na
  * plataforma, que é a controladora da conversa com o próprio usuário, o contato vinculado a ele
  * sai com as conversas e a mídia, como o do cliente no tenant.
@@ -115,6 +126,10 @@ export async function detachUserFromInbox(tx: Tx, userId: string): Promise<Inbox
     .set({ userId: null, updatedAt: sql`now()` })
     .where(eq(chatContact.userId, userId));
   await tx.update(message).set({ senderUserId: null }).where(eq(message.senderUserId, userId));
+  await tx
+    .update(file)
+    .set({ createdBy: null })
+    .where(and(eq(file.createdBy, userId), eq(file.ownerType, "message")));
   await tx.update(conversation).set({ closedBy: null }).where(eq(conversation.closedBy, userId));
 
   return platform;
@@ -142,7 +157,8 @@ export type ExportedConversation = {
 };
 
 /**
- * As conversas em que o titular é o contato: pelos cadastros de cliente (exportação do portal) ou
+ * As conversas em que o titular é o contato: pelos cadastros de cliente (exportação do portal: os mesmos que a
+ * anonimização trata como dela, ligados pela conta ou pelo e-mail) ou
  * pelo vínculo com o usuário (exportação da equipe, em qualquer escopo). Sem dado de terceiros:
  * nem quem atendeu, nem o nome dado pela equipe, nem a carga do provedor ou o erro dele. Roda em
  * `withPlatformScope` (a exportação atravessa tenants, como `cadastros-nas-organizacoes.json`).

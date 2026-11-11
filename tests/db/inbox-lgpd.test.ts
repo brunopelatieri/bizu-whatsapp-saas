@@ -219,6 +219,8 @@ describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
     // Como contato: no tenant (vínculo de membro) e na plataforma.
     const asMember = await conversationWithMedia(tenantScope(tenantA), channelA, { userId: person.id });
     const withPlatform = await conversationWithMedia(platformScope, platformChannel, { userId: person.id });
+    // Anexo que ela enviou como atendente (o `file` guarda quem subiu).
+    await bypass((tx) => tx`update file set created_by = ${person.id} where id = ${asMember.fileId}`);
 
     expect(await runDeletion("user", person.id, person.id)).toBe("executed");
 
@@ -233,6 +235,7 @@ describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
     expect(await count("chat_contact where id = $1 and user_id is null", asMember.contactId)).toBe(1);
     expect(await count("conversation where id = $1", asMember.id)).toBe(1);
     expect(memory.objects.has(asMember.mediaKey)).toBe(true);
+    expect(await count("file where id = $1 and created_by is null", asMember.fileId)).toBe(1);
 
     expect(await count("chat_contact where id = $1", withPlatform.contactId)).toBe(0);
     expect(await count("conversation where id = $1", withPlatform.id)).toBe(0);
@@ -332,6 +335,16 @@ describe("exportação (lgpd.export)", () => {
     expect(raw).not.toContain(ownerA.id);
     expect(raw).not.toContain(ownerA.email);
     expect(raw).not.toContain("Clínica LGPD B");
+  });
+
+  it("o cadastro ligado só pelo e-mail entra na exportação, como entra na anonimização", async () => {
+    const personId = await portalPerson();
+    const record = await createCustomer(ownerB, { name: "Cadastro pelo e-mail", email: `portal-${personId}@${DOMAIN}` });
+    await conversationWithMedia(tenantScope(tenantB), channelB, { customerId: record.id });
+
+    const result = await conversationsOf({ type: "portal_user", id: personId });
+
+    expect(result.conversations.map(({ organizacao }) => organizacao)).toEqual(["Clínica LGPD B"]);
   });
 
   it("a pessoa da equipe recebe as conversas em que é o contato (plataforma e organização)", async () => {

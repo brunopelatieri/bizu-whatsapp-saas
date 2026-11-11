@@ -318,8 +318,20 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
       records,
       consents: await consentsOf(tx, subject),
       audit: await auditOf(tx, portalUserId),
-      // As mensagens trocadas com cada organização pelos cadastros de cliente desta pessoa.
-      whatsapp: await conversationsForExport(tx, { customerIds: records.map(({ id }) => id) }),
+      // As mensagens trocadas com cada organização pelos cadastros desta pessoa: pela conta ou pelo
+      // e-mail, o mesmo critério da anonimização (`anonymizePortalUser`), que as apagaria.
+      whatsapp: await conversationsForExport(tx, {
+        customerIds: profile
+          ? (
+              await tx
+                .select({ id: customer.id })
+                .from(customer)
+                .where(
+                  sql`${customer.portalUserId} = ${portalUserId} or ${customer.email} = ${profile.email}`,
+                )
+            ).map(({ id }) => id)
+          : [],
+      }),
     };
   });
 

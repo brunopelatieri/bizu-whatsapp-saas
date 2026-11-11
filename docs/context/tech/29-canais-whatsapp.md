@@ -85,7 +85,7 @@ não muda o estado; devolve à fila avisos `pending` há mais de 10 min. `mainte
 `channel_event` tratado há mais de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365).
 
 **Exclusão da organização (LGPD, C7):** `anonymizeTenant` chama `purgeTenantChannelEvents` (`events.ts`), que apaga
-todos os avisos do tenant e devolve as chaves `inbound/` citadas no `raw` (apagadas depois do commit). Os **canais
+todos os avisos do tenant e devolve as chaves `inbound/` citadas no `raw` (só as chaves saem do banco, por `jsonb_path_query`; só o prefixo `inbound/` é aceito; apagadas depois do commit). Os **canais
 ficam**: credenciais cifradas, `message_template` e a instância Evolution ou o número na Meta não são tocados (falar com
 o provedor não cabe na transação da exclusão). Os avisos que ainda chegarem são `ignored` (organização em exclusão) e
 saem pela retenção. Para não deixar nada no provedor, o owner apaga os números antes de excluir a organização (limite

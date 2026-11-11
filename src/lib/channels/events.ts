@@ -13,7 +13,7 @@ import { type ChannelInboundJob, QUEUE } from "@/jobs/queues";
 import { type AfterCommit, applyConnectionState } from "@/lib/channels/connection";
 import { ChannelNotConfiguredError, PermanentEventError } from "@/lib/channels/errors";
 import { logChannelError, sanitizeChannelError } from "@/lib/channels/log";
-import { collectStorageKeys, deleteInboundMedia, storeInboundMedia } from "@/lib/channels/media";
+import { deleteInboundMedia, INBOUND_PREFIX, storeInboundMedia } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
 import { inboxHandlers as defaultInboxHandlers } from "@/lib/inbox/ingest";
 import type {
@@ -490,17 +490,14 @@ export async function requeueStuckChannelEvents(now: Date, ageMinutes = 10) {
  * sem avisos: o provedor não é chamado aqui (limite em `tech/29-canais-whatsapp.md`).
  */
 export async function purgeTenantChannelEvents(tx: Tx, tenantId: string) {
-  const withMedia = await tx
-    .select({ raw: channelEvent.raw })
-    .from(channelEvent)
-    .where(
-      and(
-        eq(channelEvent.tenantId, tenantId),
-        sql`${channelEvent.raw}::text like '%"storageKey"%'`,
-      ),
-    );
+  // Só as chaves saem do banco (`StoredMedia.storageKey`, em qualquer profundidade), não o `raw`.
+  const rows = await tx.execute<{ key: string }>(sql`
+    select distinct jsonb_path_query(${channelEvent.raw}, 'strict $.**.storageKey') #>> '{}' as key
+    from ${channelEvent}
+    where ${channelEvent.tenantId} = ${tenantId}
+  `);
 
   await tx.delete(channelEvent).where(eq(channelEvent.tenantId, tenantId));
 
-  return [...new Set(withMedia.flatMap(({ raw }) => collectStorageKeys(raw)))];
+  return rows.flatMap(({ key }) => (typeof key === "string" && key.startsWith(`${INBOUND_PREFIX}/`) ? [key] : []));
 }

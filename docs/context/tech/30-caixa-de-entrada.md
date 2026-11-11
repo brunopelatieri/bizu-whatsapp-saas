@@ -188,7 +188,8 @@ decide se o nome do cliente vinculado, as etiquetas e o cadastro aparecem na lis
   sem `inbox:reply` e `anonymizeUser` (LGPD, todos os tenants) devolvem as conversas à fila. Editar as
   permissões de um papel personalizado (`PATCH /api/roles/:id`) chama `releaseAssignmentsWithoutReply(tenantId,
   catálogo)` (C7): quem ficou sem `inbox:reply` devolve as conversas. Roda depois da gravação do papel (que é do
-  Better Auth, fora desta transação): se falhar, as conversas ficam com o dono até a próxima edição ou remoção.
+  Better Auth, fora desta transação) e depois da auditoria: se falhar, vai ao `logError` (a edição já valeu, sem 500) e
+  as conversas ficam com o dono até a próxima edição ou remoção.
 - Auditoria: `inbox.conversation_claimed` (`via: reply | start` quando não é o botão), `_assigned`
   (`from`, `to`), `_released` (`from`), `_closed`, `_reopened` (`to`, `via`), `inbox.contact_linked`
   (`customerId`, `userId`), `inbox.contact_saved_as_customer` (`customerId`). Só ids.
@@ -473,18 +474,20 @@ Só `privacy.ts` apaga e exporta conversas fora das rotas (T13). Quem chama pass
 do armazenamento **depois do commit**, com as chaves devolvidas (falha ao apagar = objeto órfão no log, nunca a pessoa
 nos dados). Apagar o `chat_contact` leva por cascata a identidade, as conversas e as mensagens; a linha de `file` (a
 mensagem só aponta para ela, `set null`) sai na mesma transação, pelo `owner_type = message` **e** pelo `message.file_id`
-(mídia recebida, anexo de saída e eco do aparelho).
+(mídia recebida, anexo de saída e eco do aparelho). Antes de procurar a mídia, os contatos e as conversas são
+travados (`FOR UPDATE`): a ingestão e o envio que chegam no meio esperam o commit, e nenhuma mensagem nova cai na
+cascata com o arquivo órfão.
 
 | Gatilho | O que acontece | Função |
 |---|---|---|
 | Excluir o cliente (`DELETE /api/customers/:id`, `deleteCustomer`) | Os contatos vinculados a ele saem com conversas, mensagens, `file` e objeto; o RLS do tenant limita tudo ao tenant da sessão (cliente de outro tenant é 404 e nada muda). Aviso `conversation` às telas abertas | `purgeCustomerContacts` |
 | Anonimizar a pessoa do portal (`lgpd.delete`) | Os cadastros dela (pela conta ou pelo e-mail, em todas as organizações) viram "Cliente removido" e os contatos vinculados a eles saem como acima | `purgeCustomerContacts` |
-| Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo) e as que encerrou sem `closed_by`; o contato de **tenant** vinculado a ele perde o vínculo (a conversa é do owner, controlador) e o contato da **plataforma** vinculado a ele sai com as conversas e a mídia (a plataforma é a controladora dessa conversa; decisão da C7, ver "Desvios da SPEC (C7)") | `detachUserFromInbox` |
+| Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo; o anexo, sem `file.created_by`) e as que encerrou sem `closed_by`; o contato de **tenant** vinculado a ele perde o vínculo (a conversa é do owner, controlador) e o contato da **plataforma** vinculado a ele sai com as conversas e a mídia (a plataforma é a controladora dessa conversa; decisão da C7, ver "Desvios da SPEC (C7)") | `detachUserFromInbox` |
 | Excluir a organização (`lgpd.delete`, `anonymizeTenant`) | Todos os contatos do tenant (com ou sem vínculo), conversas e mensagens; os `channel_event` do tenant (o `raw` tem telefone e texto) e a mídia `inbound/` que eles citam (o aviso pendente não deixa objeto órfão); todo `file` do tenant (já existia). Os canais ficam (sem avisos), com as credenciais cifradas e a instância no provedor: ver "Limites conhecidos" | `purgeTenantInbox`, `purgeTenantChannelEvents` |
 
 - **Exportação** (`conversationsForExport`, arquivo `conversas-whatsapp.json` no zip de `lgpd.export`): as conversas em que o
-  titular é o **contato**. Portal: pelos cadastros de cliente ligados à conta (`customer.portal_user_id`, como
-  `cadastros-nas-organizacoes.json`). Equipe: pelo vínculo do contato com o `user`, na plataforma (`organizacao: null`) e
+  titular é o **contato**. Portal: pelos cadastros de cliente da pessoa, ligados pela conta **ou pelo e-mail** (o mesmo critério da
+  anonimização, que os apagaria). Equipe: pelo vínculo do contato com o `user`, na plataforma (`organizacao: null`) e
   nas organizações. Cada conversa traz organização, telefone, nome no WhatsApp, situação e as mensagens (`recebida` ou
   `enviada`, tipo, texto, nome do modelo, situação de entrega, anexo por **nome, tipo e tamanho**, nunca o conteúdo).
   Fica de fora o que é de terceiros ou interno: quem atendeu, o nome dado pela equipe, `payload` e erro do provedor.
@@ -559,7 +562,7 @@ Reunidos aqui; o detalhe de cada um está na seção da fase.
 | C4 | Sessão revogada, papel trocado ou membro removido seguem recebendo **ids** no SSE por até 15 min (a releitura já barra); teto de 3 fluxos é por processo; evento perdido na queda só volta pela releitura; aviso sem `a` custa um `SELECT` |
 | C5 | Imagem de 5 a 16 MB passa no nosso limite e a Meta recusa (`failed` com o motivo); o token de `media-out` não é de uso único (5 min) e fica na URL/log da Evolution; B0 simulada (nada contra Meta ou Evolution reais) |
 | C6 | Não há papel de plataforma só de leitura (a distinção `read`/`reply` está pronta em `platformCapabilities`) |
-| C7 | Editar papel devolve à fila **depois** da gravação do Better Auth (fora da transação): falha aqui deixa o dono até a próxima mudança |
+| C7 | Editar papel devolve à fila **depois** da gravação do Better Auth (fora da transação): falha aqui vai ao log e deixa o dono até a próxima mudança |
 | C7 | Excluir a organização não remove os **canais** (credenciais cifradas e a instância Evolution ou o número na Meta continuam; os avisos novos são `ignored` e saem pela retenção). Desconectar no provedor é ação do owner antes de excluir |
 | C7 | Depois de excluído o cliente, o `channel_event` que trouxe as mensagens dele ainda guarda o `raw` (telefone e texto) até o fim da retenção (padrão 30 dias). O `/admin` só reprocessa aviso `failed` ou `ignored`, então o que já foi gravado não volta; um aviso falho do mesmo número reprocessado depois recria o contato, como uma mensagem nova |
 | C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
