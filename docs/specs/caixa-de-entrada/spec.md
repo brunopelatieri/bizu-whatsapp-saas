@@ -1,6 +1,7 @@
 # SPEC: Caixa de entrada (chat e fila de atendimento)
 
-- **Status:** aprovada
+- **Status:** aprovada; **implementada** (C1 a C7, 2026-11-11). Contrato real, desvios e limites conhecidos de cada fase em
+  `docs/context/tech/30-caixa-de-entrada.md`
 - **PRD:** `docs/specs/caixa-de-entrada/prd.md`
 - **Programa:** `docs/specs/whatsapp-crm/plano.md` (decisões T1 a T6, T10, T11 e T13)
 - **Depende de:** `docs/specs/crm-cadastro/spec.md` (telefone, etiquetas, campos) e
@@ -359,28 +360,37 @@ Componentes em `src/components/inbox/`:
 
 ## Verificação
 
-- [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`, `npm run build`
-- [ ] Testes de cada etapa acima
-- [ ] Smoke com dois navegadores (owner e member do `acme`): mensagem chega nos dois em até 3 s;
-  um assume e o outro vê sair da fila; o member não abre a conversa do owner por link
-- [ ] Smoke com `JOBS_MODE=worker` e com o SSE bloqueado (modo polling)
-- [ ] Cada critério de aceite do PRD marcado
-- [ ] `/code-review` e `/security-review`
+- [x] `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`, `npm run build` (C7, banco `bizu_c7` no Postgres do Docker)
+- [x] Testes de cada etapa acima (`tech/30`, seção "Testes")
+- [x] Smoke (C7, 2026-11-11, dev com `JOBS_MODE=worker` e a ingestão real rodando em **outro processo**, no papel do worker):
+  owner do `acme` no navegador embutido e member do `acme` numa **segunda sessão por script** (login real do seed, SSE
+  `/api/inbox/events` e as rotas da API), não num segundo navegador. Mensagem de número novo: SSE do member em 1 ms e a
+  lista do owner na tela em 309 ms depois do commit. O member assumiu e a conversa saiu da fila do owner na tela em 347 ms; o
+  owner assumiu pela tela e o member recebeu o aviso (`a` = owner) e ficou com a fila vazia. O member, já **no navegador**,
+  abriu o link da conversa do owner: "Conversa não encontrada" (API: 404 no detalhe e nas mensagens; 409
+  `ALREADY_ASSIGNED` no assumir), sem a aba "Todas"
+- [x] Smoke com o SSE bloqueado (`REALTIME_DATABASE_URL` numa porta fechada): `/api/inbox/events` 503, aviso "Atualização
+  em tempo real indisponível" na tela e a mensagem nova apareceu pelo polling (2,8 s; teto de 20 s). **Não verificado:**
+  Meta e Evolution reais (B0 simulada) e o processo `--worker` de verdade consumindo `channel.inbound` (o smoke usou a
+  ingestão em outro processo, como o teste de `inbox-realtime.test.ts`)
+- [x] Cada critério de aceite do PRD marcado, com a evidência (`prd.md`)
+- [x] `/code-review` e `/security-review` (C7: corrigidos a corrida do purge, a ordem da auditoria no papel editado,
+  `file.created_by`, o critério da exportação do portal e o vínculo com `user` como critério de exportação e exclusão)
 
 ## Atualização de contexto
 
-- [ ] `docs/context/tech/30-caixa-de-entrada.md` (novo) e linha no `INDEX.md`
-- [ ] `tech/21-tenant-rbac.md`: recurso `inbox` e o gancho na remoção de membro
-- [ ] `tech/27-lgpd-arquivos.md` e `lgpd.md`: `file.tenant_id` anulável, mídia de mensagem,
+- [x] `docs/context/tech/30-caixa-de-entrada.md` (novo) e linha no `INDEX.md`
+- [x] `tech/21-tenant-rbac.md`: recurso `inbox` e o gancho na remoção de membro
+- [x] `tech/27-lgpd-arquivos.md` e `lgpd.md`: `file.tenant_id` anulável, mídia de mensagem,
   exclusão e exportação cobrindo conversas
-- [ ] `tech/20-jobs.md`: `inbox.media` e `inbox.sweep`
-- [ ] `tech/26-seguranca.md`: SSE e regra de personificação no atendimento
-- [ ] `tech/22-admin.md` e `tech/21-tenant-rbac.md`: `platform_support` passa a responder no
+- [x] `tech/20-jobs.md`: `inbox.media` e `inbox.sweep`
+- [x] `tech/26-seguranca.md`: SSE e regra de personificação no atendimento
+- [x] `tech/22-admin.md` e `tech/21-tenant-rbac.md`: `platform_support` passa a responder no
   atendimento (única escrita dele em `/admin`)
-- [ ] `tech/11-dashboard.md`, `tech/22-admin.md`, `tech/06-hono-api.md`, `tech/14-deploy.md`
+- [x] `tech/11-dashboard.md`, `tech/22-admin.md`, `tech/06-hono-api.md`, `tech/14-deploy.md`
   (`REALTIME_DATABASE_URL`; SSE atrás do Caddy sem buffer)
-- [ ] `.env.example`, `status.md`, `README.md`
-- [ ] Rules novas `inbox.md` com `paths: src/lib/inbox/**, src/components/inbox/**`, em
+- [x] `.env.example`, `status.md`, `README.md`
+- [x] Rules novas `inbox.md` com `paths: src/lib/inbox/**, src/components/inbox/**`, em
   `.claude/rules/` e `.cursor/rules/`; skill `ctx-inbox`
 
 ## Decisões

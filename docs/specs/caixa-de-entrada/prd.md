@@ -150,8 +150,9 @@ cadastrado, quais etiquetas ele tem, quais dados do cadastro importam.
 Requisito não funcional de privacidade (LGPD das conversas, C7): `inbox-lgpd.test.ts` (exclusão e anonimização do
 cliente, da pessoa e da organização, exportação, isolamento entre tenants).
 
-**Sem evidência automatizada (só smoke):** os 3 s na tela aberta, as etiquetas na lista e o bloqueio do campo na tela
-fora da janela de 24 h. O resultado do smoke da C7 está na seção "Verificação" da SPEC.
+**Sem evidência automatizada (só smoke):** os 3 s na tela aberta (**smoke da C7: 309 ms** do commit até a tela do owner;
+SPEC, "Verificação"), as etiquetas na lista (**sem evidência**: não conferido em teste nem no smoke da C7) e o bloqueio do
+campo na tela fora da janela de 24 h (smoke da C5). "Fila de qualquer número" segue parcial (sem teste com dois números).
 
 ## Riscos e dependências
 

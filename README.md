@@ -58,6 +58,10 @@ autenticação, tenants, planos, e-mail, LGPD e deploy toda vez.
   o dono pode ter), vencimento e inadimplência com cobrança manual no `/admin` como padrão, e
   webhooks verificados com o módulo Stripe pronto (veja [Pagamentos](#7-pagamentos)).
 - E-mail transacional com provedor substituível e fila de jobs no próprio Postgres (pg-boss).
+- WhatsApp (módulos `whatsapp_cloud` e `whatsapp_qr`) com **caixa de entrada**: `/app/atendimento` com fila, assumir,
+  transferir, janela de 24 h, anexos, modelos e tempo real por SSE, e `/admin/atendimento` para a plataforma falar com
+  owners e equipes; as conversas entram na exportação e na exclusão LGPD
+  ([`tech/30-caixa-de-entrada.md`](docs/context/tech/30-caixa-de-entrada.md)).
 - Auditoria, personificação com consentimento, LGPD (consentimento, exportação, exclusão com
   carência, retenção), módulo de arquivos, logs JSON e Sentry opcional.
 - Docker de desenvolvimento, **stack de produção com Caddy e TLS**, backup cifrado, CI e este tutorial.
