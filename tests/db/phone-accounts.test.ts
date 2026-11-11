@@ -40,7 +40,7 @@ function signUp(body: Record<string, unknown>) {
     body: {
       name: "Pessoa Nova",
       email: newEmail(),
-      password: "senha-forte-123",
+      password: "Senha-forte-123",
       acceptTerms: true,
       termsVersion: LEGAL_VERSIONS.terms,
       ...body,
@@ -108,7 +108,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
   it("sem o contexto do cadastro, falha fechada e não cria conta", async () => {
     const email = newEmail();
     const result = await getAuth()
-      .api.signUpEmail({ body: { name: "Direto", email, password: "senha-forte-123" } })
+      .api.signUpEmail({ body: { name: "Direto", email, password: "Senha-forte-123" } })
       .catch((error: unknown) => error);
 
     expect(result).toBeInstanceOf(Error);
@@ -125,7 +125,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
             body: {
               name: "Direto",
               email,
-              password: "senha-forte-123",
+              password: "Senha-forte-123",
               // `input: false`: o corpo não decide.
               ...({ phone: "(21) 91111-2222", phoneNormalized: "5521911112222" } as object),
             },
@@ -145,7 +145,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
       { subjectType: "user", termsVersion: LEGAL_VERSIONS.terms, phone: "(10) 98765-4321" },
       () =>
         getAuth()
-          .api.signUpEmail({ body: { name: "Direto", email, password: "senha-forte-123" } })
+          .api.signUpEmail({ body: { name: "Direto", email, password: "Senha-forte-123" } })
           .catch((error: unknown) => error),
     );
 
@@ -169,7 +169,7 @@ describe("autocadastro do portal", () => {
         name: "Cliente Auto",
         email,
         phone: "(11) 91234-5678",
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         org: tenant.slug,
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -213,7 +213,7 @@ describe("autocadastro do portal", () => {
       body: {
         name: "Sem Fone",
         email,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         org: tenant.slug,
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,

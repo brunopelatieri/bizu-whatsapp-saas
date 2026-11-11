@@ -5,7 +5,7 @@ import { api } from "@/api/app";
 
 /** Cenários de tenant pela API, com Postgres real. Cada chamada usa um IP próprio. */
 
-const PASSWORD = "senha-forte-123";
+const PASSWORD = "Senha-forte-123";
 export const DOMAIN = "tenant-test.bizu.local";
 export const APP_ORIGIN = "http://localhost:5173";
 

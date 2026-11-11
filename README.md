@@ -129,7 +129,7 @@ Sem `openssl` (Windows, por exemplo), o mesmo com o Node:
 node -e "const c=require('crypto');console.log('BETTER_AUTH_SECRET='+c.randomBytes(32).toString('base64'));console.log('CREDENTIALS_ENCRYPTION_KEY='+c.randomBytes(32).toString('base64'));console.log('AUDIT_SALT='+c.randomBytes(16).toString('hex'))"
 ```
 
-Defina também `SEED_PASSWORD` em `.env.local` (mínimo de 10 caracteres): é a senha de todas as
+Defina também `SEED_PASSWORD` em `.env.local` (10+ caracteres, com maiúscula, minúscula, número e especial): é a senha de todas as
 contas de exemplo e só vale para desenvolvimento.
 
 ---

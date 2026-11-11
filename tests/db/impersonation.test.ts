@@ -636,7 +636,7 @@ describe("personificação", () => {
           cookie,
           body: {
             currentPassword: PASSWORD,
-            newPassword: "senha-trocada-456",
+            newPassword: "Senha-trocada-456",
           },
         });
 
@@ -647,7 +647,7 @@ describe("personificação", () => {
     it("a senha continua a mesma depois da tentativa", async () => {
       await call("POST", "/api/auth/change-password", {
         cookie,
-        body: { currentPassword: PASSWORD, newPassword: "senha-trocada-456" },
+        body: { currentPassword: PASSWORD, newPassword: "Senha-trocada-456" },
       });
 
       const signIn = await call("POST", "/api/auth/sign-in/email", {

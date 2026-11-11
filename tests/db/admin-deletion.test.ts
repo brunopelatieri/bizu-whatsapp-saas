@@ -527,11 +527,11 @@ describe("usuários de equipe e suporte", () => {
       ?.text.match(/redefinir-senha\?token=([^\s&"]+)/)?.[1];
     expect(token).toBeDefined();
     const reset = await call("POST", "/api/auth/reset-password", {
-      body: { newPassword: "senha-nova-do-admin-1", token: decodeURIComponent(token ?? "") },
+      body: { newPassword: "Senha-nova-do-admin-1", token: decodeURIComponent(token ?? "") },
     });
     expect(reset.status).toBe(200);
     expect((await userRow(person.id))?.email_verified).toBe(true);
-    expect(await signInStatus(newAddress, "senha-nova-do-admin-1")).toBe(200);
+    expect(await signInStatus(newAddress, "Senha-nova-do-admin-1")).toBe(200);
   });
 
   it("conta com e-mail trocado não vira cadastro pendente: cadastro anônimo não a apaga", async () => {
@@ -558,7 +558,7 @@ describe("usuários de equipe e suporte", () => {
     `;
     expect(credential?.total).toBe(0);
     const stale = await call("POST", "/api/auth/reset-password", {
-      body: { newPassword: "senha-do-antigo-1", token: decodeURIComponent(oldToken ?? "") },
+      body: { newPassword: "Senha-do-antigo-1", token: decodeURIComponent(oldToken ?? "") },
     });
     expect(stale.status).toBe(400);
     expect((await userRow(person.id))?.email_verified).toBe(false);
@@ -569,7 +569,7 @@ describe("usuários de equipe e suporte", () => {
       body: {
         name: "Intruso",
         email: newAddress,
-        password: "senha-do-intruso-1",
+        password: "Senha-do-intruso-1",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
@@ -762,7 +762,7 @@ describe("pessoas do portal", () => {
 
     const password = await call("POST", "/api/portal/auth-ext/set-password", {
       cookie: person.cookie,
-      body: { newPassword: "senha-do-portal-123" },
+      body: { newPassword: "Senha-do-portal-123" },
     });
     expect(password.status).toBe(200);
 

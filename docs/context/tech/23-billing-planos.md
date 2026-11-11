@@ -113,7 +113,7 @@ filtro, usados pelos testes. Destinatários: proprietários do tenant (`listTena
 ## Seed
 
 `npm run db:seed` (`src/db/seed.ts`): idempotente, recusa `NODE_ENV=production` sem
-`SEED_ALLOW_PRODUCTION=1`, exige `SEED_PASSWORD` (mín. 10). Cria planos `free` (1 organização),
+`SEED_ALLOW_PRODUCTION=1`, exige `SEED_PASSWORD` na política de senha (`tech/08-auth.md`). Cria planos `free` (1 organização),
 `basic` (2) e `pro` (5), com preços `manual` e `stripe` (`provider_price_ref` nulo), as três
 configurações (`trial_plan_id` = `pro`, 14 e 7 dias), `owner@bizu.local` (`platform_owner`),
 `suporte@bizu.local` (`platform_support`), o tenant `acme` (`acme.owner`, `acme.admin`,

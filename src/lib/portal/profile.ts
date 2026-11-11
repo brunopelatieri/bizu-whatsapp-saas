@@ -5,6 +5,13 @@ import { withTenant } from "@/db/rls";
 import { customer, portalAccount, portalSession, portalUser } from "@/db/schema";
 import { audit, auditInTransaction } from "@/lib/audit";
 import { runInBackground } from "@/lib/auth/background";
+import {
+  evaluatePassword,
+  isPasswordValid,
+  normalizePassword,
+  PASSWORD_POLICY_CODE,
+  PASSWORD_POLICY_MESSAGE,
+} from "@/lib/auth/password-policy";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
 import type { PortalCustomer } from "@/lib/portal/access";
@@ -87,11 +94,24 @@ type PasswordActor = {
  * Define ou troca a senha pela sessão. Quem tem senha confirma a atual, salvo com sessão
  * recém-aberta: é assim que se recupera a senha, entrando por um magic link. As outras
  * sessões caem, porque trocar a senha costuma ser reação a um acesso indevido.
+ *
+ * Grava o hash direto, sem o endpoint do Better Auth (e sem o hook dele): a política e a
+ * normalização são repetidas aqui, para não depender de quem chama ter passado pelo Zod.
  */
 export async function setPortalPassword(
   { user, session, ip }: PasswordActor,
-  { newPassword, currentPassword }: SetPasswordInput,
+  input: SetPasswordInput,
 ) {
+  const newPassword = normalizePassword(input.newPassword);
+  const currentPassword =
+    input.currentPassword === undefined
+      ? undefined
+      : normalizePassword(input.currentPassword);
+
+  if (!isPasswordValid(evaluatePassword(newPassword))) {
+    throw new TenantRuleError(400, PASSWORD_POLICY_CODE, PASSWORD_POLICY_MESSAGE);
+  }
+
   const { internalAdapter, password } = await getPortalAuth().$context;
   const accounts = await internalAdapter.findAccounts(user.id);
   const stored = accounts.find(({ providerId }) => providerId === CREDENTIAL);

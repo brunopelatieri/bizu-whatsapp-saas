@@ -80,7 +80,7 @@ describe("autenticação sobre o servidor Node", () => {
 
   it("cadastro, confirmação, /api/me e login", async () => {
     const email = `${randomUUID()}@${DOMAIN}`;
-    const password = "senha-forte-123";
+    const password = "Senha-forte-123";
 
     const signup = await signUp(email, password);
     expect(signup.status).toBe(200);
@@ -106,9 +106,9 @@ describe("autenticação sobre o servidor Node", () => {
   });
 
   it("cadastro + login não revelam se o e-mail já existia", async () => {
-    const password = "senha-de-quem-sonda";
+    const password = "Senha-de-quem-sonda-1";
     const taken = `${randomUUID()}@${DOMAIN}`;
-    await signUp(taken, "senha-do-dono-da-conta", "10.21.1.1");
+    await signUp(taken, "Senha-do-dono-da-conta-1", "10.21.1.1");
     await waitForBackgroundTasks();
     await owner`update "user" set email_verified = true where email = ${taken}`;
 

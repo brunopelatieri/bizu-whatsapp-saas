@@ -82,7 +82,8 @@ grava no hook `session.create.after`; escolher o tenant grava em `enterPortalTen
 Opcional. `POST /api/portal/auth-ext/set-password` define ou troca. Quem já tem senha confirma
 a atual, salvo com sessão aberta há menos de 10 min: é assim que se recupera a senha, entrando
 por um magic link. Por isso o portal não tem reset próprio. A troca derruba as outras sessões
-e avisa por e-mail.
+e avisa por e-mail. A senha segue a política de `tech/08-auth.md` ("Política de senha"):
+o Zod da rota e, de novo, `setPortalPassword`, que grava o hash sem passar pelo Better Auth.
 
 ## Autocadastro
 

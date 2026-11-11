@@ -531,7 +531,7 @@ describe("exclusão da conta do portal", () => {
 
     const set = await call("POST", "/api/portal/auth-ext/set-password", {
       cookie,
-      body: { newPassword: "senha-do-portal-123" },
+      body: { newPassword: "Senha-do-portal-123" },
     });
     expect(set.status).toBe(200);
 
@@ -540,7 +540,7 @@ describe("exclusão da conta do portal", () => {
     expect((await del("/api/portal/me", cookie, {})).status).toBe(403);
     expect(await requestOf(portalId)).toBeUndefined();
 
-    const ok = await del("/api/portal/me", cookie, { password: "senha-do-portal-123" });
+    const ok = await del("/api/portal/me", cookie, { password: "Senha-do-portal-123" });
     expect(ok.status).toBe(200);
     expect((await requestOf(portalId))?.status).toBe("pending");
 

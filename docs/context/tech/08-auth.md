@@ -105,6 +105,39 @@ endereço antigo recebe `change-email-done`. As duas etapas usam a mesma tabela,
 `kind = "change"`, e a mesma página. O e-mail antigo vem das claims do token, porque
 quando `afterEmailVerification` roda o usuário já tem o novo.
 
+## Política de senha
+
+Uma regra só, em `src/lib/auth/password-policy.ts` (módulo puro, com teste): 10 a 128
+caracteres, com maiúscula, minúscula, número e um especial de `!@#$%^&*()_+-=[]{}:;,.?/~`, sem
+caractere de controle (U+0000 a U+001F e U+007F). Espaço no meio vale. A senha é gravada e
+conferida **normalizada** (`normalizePassword`: `trim` + NFC). O máximo é em caracteres porque
+o hasher é o scrypt padrão do Better Auth (`@better-auth/utils/password`), sem o corte de 72
+bytes do bcrypt; trocar o hasher por bcrypt obriga a rever esse limite.
+
+Onde a regra é cobrada:
+
+| Ponto | Cobre |
+|---|---|
+| `newPassword` de `src/lib/schemas/auth.ts` (Zod) | Formulários e rotas próprias: cadastro, convite, redefinição (`resetPasswordSchema`), autocadastro e `set-password` do portal |
+| `passwordPolicyHook` (`src/lib/auth/password-hook.ts`), `hooks.before` de `auth` e `portalAuth` | Toda chamada ao Better Auth, por HTTP ou `auth.api.*`: `/sign-up/email`, `/reset-password`, `/change-password` e, se um dia abertas, `/admin/set-user-password` e `/admin/create-user`. É o que barra a rota chamada direto (`/reset-password` e `/change-password` não têm Zod próprio) |
+| `setPortalPassword` (`src/lib/portal/profile.ts`) | O `set-password` do portal grava o hash direto, fora do Better Auth: normaliza e valida de novo |
+| `assertSeedAllowed` (`src/db/seed.ts`) | `SEED_PASSWORD` |
+
+Senha fora da regra responde 400 com `code: "PASSWORD_POLICY"` e só o texto da regra
+(`PASSWORD_POLICY_MESSAGE`, traduzido também em `src/lib/auth/client.ts`).
+
+O hook normaliza `password`, `newPassword` e `currentPassword` em **toda** rota do Better Auth,
+inclusive `/sign-in/email` e as confirmações de 2FA; `confirmIdentity` faz o mesmo. Sem isso,
+quem cadastrou a senha com espaço no fim deixaria de entrar. **O login não cobra complexidade**:
+senha gravada antes da regra continua entrando e só é cobrada na próxima troca. A exceção é a
+senha antiga gravada com espaço nas pontas: passa a ser conferida sem ele e só volta pelo
+reset (só existem contas de desenvolvimento anteriores à regra).
+
+Rota nova que grave senha entra em `NEW_PASSWORD_FIELD` (se for do Better Auth) ou chama
+`normalizePassword` + `isPasswordValid(evaluatePassword())` antes do hash. Isso inclui
+`auth.api.setPassword`: é só de servidor, sem `path`, e o hook normaliza mas não a reconhece
+para cobrar a política (ninguém a chama hoje).
+
 ## Recuperação de senha
 
 `/esqueci-senha` chama `/api/auth-ext/forgot-password`, que envia

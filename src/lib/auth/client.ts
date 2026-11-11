@@ -1,5 +1,9 @@
 import { adminClient, twoFactorClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
+import {
+  PASSWORD_POLICY_CODE,
+  PASSWORD_POLICY_MESSAGE,
+} from "@/lib/auth/password-policy";
 
 /** Cliente do Better Auth no navegador. Mesma origem da API; nada aqui é segredo. */
 export const authClient = createAuthClient({
@@ -15,6 +19,8 @@ const AUTH_ERROR_MESSAGES: Record<string, string> = {
   INVALID_PASSWORD: "E-mail ou senha incorretos.",
   PASSWORD_TOO_SHORT: "A senha é curta demais.",
   PASSWORD_TOO_LONG: "A senha é longa demais.",
+  // Só a regra: a resposta não diz nada sobre a conta.
+  [PASSWORD_POLICY_CODE]: PASSWORD_POLICY_MESSAGE,
   INVALID_TOKEN: "Link inválido ou expirado.",
   BANNED_USER: "Esta conta está suspensa. Fale com o suporte.",
   INVALID_CODE: "Código incorreto. Tente de novo.",

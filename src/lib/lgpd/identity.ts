@@ -3,6 +3,7 @@ import { symmetricDecrypt } from "better-auth/crypto";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { twoFactor } from "@/db/schema";
+import { normalizePassword } from "@/lib/auth/password-policy";
 import { getAuth } from "@/lib/auth/server";
 import { TenantRuleError } from "@/lib/tenant/errors";
 
@@ -44,7 +45,11 @@ export async function confirmIdentity(
 
   const passwordOk =
     Boolean(stored?.password) &&
-    (await context.password.verify({ hash: stored?.password ?? "", password }));
+    (await context.password.verify({
+      hash: stored?.password ?? "",
+      // A mesma forma em que a senha foi gravada e em que o login a confere.
+      password: normalizePassword(password),
+    }));
 
   // Sempre confere o código quando há 2FA, mesmo com a senha errada: o tempo de resposta
   // não diz qual falhou.

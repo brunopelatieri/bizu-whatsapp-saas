@@ -29,6 +29,8 @@ import {
   tenantAccessControl,
   tenantRoles,
 } from "@/lib/auth/permissions";
+import { passwordPolicyHook } from "@/lib/auth/password-hook";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
 
@@ -87,7 +89,8 @@ function createAuth() {
       // O cadastro nunca abre sessão: a resposta é a mesma para e-mail novo e existente, e
       // `onExistingUserSignUp` avisa o dono. Sem verificação, o cliente entra em seguida.
       autoSignIn: false,
-      minPasswordLength: 10,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: ({ user, token }) =>
         sendResetPasswordLink(user, token),
@@ -197,6 +200,9 @@ function createAuth() {
         },
       },
     },
+
+    // Política de senha e normalização, também para quem chama a rota direto.
+    hooks: { before: passwordPolicyHook },
 
     // Só o reset usa `verification`: o token não fica legível no banco.
     verification: { storeIdentifier: "hashed" },

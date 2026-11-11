@@ -559,9 +559,9 @@ describe("seed", () => {
       return row;
     };
 
-    await runSeed("senha-do-seed-123");
+    await runSeed("Senha-do-seed-123");
     const first = await counts();
-    await runSeed("senha-do-seed-123");
+    await runSeed("Senha-do-seed-123");
 
     expect(await counts()).toEqual(first);
     expect(first).toEqual({
@@ -600,7 +600,7 @@ describe("seed", () => {
     const { email } = SEED_USERS.platformOwner;
     await owner`update "user" set email_verified = false, role = 'user' where email = ${email}`;
 
-    await expect(runSeed("senha-do-seed-123")).rejects.toThrow("sem e-mail confirmado");
+    await expect(runSeed("Senha-do-seed-123")).rejects.toThrow("sem e-mail confirmado");
 
     const [row] = await owner<{ role: string; email_verified: boolean }[]>`
       select role, email_verified from "user" where email = ${email}
@@ -612,10 +612,10 @@ describe("seed", () => {
 
   it("não liga cliente ativo à identidade sem e-mail confirmado", async () => {
     const { email } = SEED_CUSTOMERS.julia;
-    await runSeed("senha-do-seed-123");
+    await runSeed("Senha-do-seed-123");
     await owner`update portal_user set email_verified = false where email = ${email}`;
 
-    await expect(runSeed("senha-do-seed-123")).rejects.toThrow("sem e-mail confirmado");
+    await expect(runSeed("Senha-do-seed-123")).rejects.toThrow("sem e-mail confirmado");
 
     await owner`update portal_user set email_verified = true where email = ${email}`;
   });
@@ -624,15 +624,15 @@ describe("seed", () => {
     const { assertSeedAllowed } = await import("@/db/seed");
 
     expect(() =>
-      assertSeedAllowed({ NODE_ENV: "production", SEED_PASSWORD: "senha-longa-123" }),
+      assertSeedAllowed({ NODE_ENV: "production", SEED_PASSWORD: "Senha-longa-123" }),
     ).toThrow("produção");
     expect(
       assertSeedAllowed({
         NODE_ENV: "production",
         SEED_ALLOW_PRODUCTION: "1",
-        SEED_PASSWORD: "senha-longa-123",
+        SEED_PASSWORD: "Senha-longa-123",
       }),
-    ).toBe("senha-longa-123");
+    ).toBe("Senha-longa-123");
     expect(() => assertSeedAllowed({ NODE_ENV: "development" })).toThrow("SEED_PASSWORD");
     expect(() =>
       assertSeedAllowed({

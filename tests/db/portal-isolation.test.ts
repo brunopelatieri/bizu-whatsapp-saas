@@ -155,7 +155,7 @@ describe("portal: isolamento", () => {
         body: {
           name: "Pessoa",
           email,
-          password: "senha-forte-123",
+          password: "Senha-forte-123",
           phone: "11987654321",
           acceptTerms: true,
           termsVersion: "2026-11",
@@ -265,11 +265,11 @@ describe("portal: isolamento", () => {
 
       await call("POST", "/api/portal/auth-ext/set-password", {
         cookie: await inviteAndEnter(ownerB, mail, second.id, email),
-        body: { newPassword: "senha-do-portal-1" },
+        body: { newPassword: "Senha-do-portal-1" },
       });
 
       const signedIn = await call("POST", "/api/portal/auth/sign-in/email", {
-        body: { email, password: "senha-do-portal-1" },
+        body: { email, password: "Senha-do-portal-1" },
       });
       const fresh = sessionCookies(signedIn);
 

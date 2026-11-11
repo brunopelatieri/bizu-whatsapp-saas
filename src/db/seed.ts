@@ -2,6 +2,12 @@ import { eq } from "drizzle-orm";
 import { config } from "dotenv";
 import { pathToFileURL } from "node:url";
 import { logError } from "@/api/log";
+import {
+  evaluatePassword,
+  isPasswordValid,
+  normalizePassword,
+  PASSWORD_POLICY_MESSAGE,
+} from "@/lib/auth/password-policy";
 import { phoneValues } from "@/lib/phone/columns";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 
@@ -120,10 +126,11 @@ export function assertSeedAllowed(env: Record<string, string | undefined>) {
     );
   }
 
-  const password = env.SEED_PASSWORD;
-  if (!password || password.length < 10) {
+  // Normalizada como no cadastro: é esta a forma gravada, e o login a confere igual.
+  const password = normalizePassword(env.SEED_PASSWORD ?? "");
+  if (!isPasswordValid(evaluatePassword(password))) {
     throw new Error(
-      "Defina SEED_PASSWORD (mínimo de 10 caracteres) em .env.local.",
+      `Defina SEED_PASSWORD em .env.local. ${PASSWORD_POLICY_MESSAGE}`,
     );
   }
 
