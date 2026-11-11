@@ -13,7 +13,7 @@ import { type ChannelInboundJob, QUEUE } from "@/jobs/queues";
 import { type AfterCommit, applyConnectionState } from "@/lib/channels/connection";
 import { ChannelNotConfiguredError, PermanentEventError } from "@/lib/channels/errors";
 import { logChannelError, sanitizeChannelError } from "@/lib/channels/log";
-import { deleteInboundMedia, storeInboundMedia } from "@/lib/channels/media";
+import { deleteInboundMedia, INBOUND_PREFIX, storeInboundMedia } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
 import { inboxHandlers as defaultInboxHandlers } from "@/lib/inbox/ingest";
 import type {
@@ -480,4 +480,24 @@ export async function requeueStuckChannelEvents(now: Date, ageMinutes = 10) {
 
   for (const { id } of stuck) await enqueueChannelEvent(id);
   return stuck.length;
+}
+
+/**
+ * Exclusão da organização (LGPD, `anonymizeTenant`): o `raw` dos avisos tem telefone, nome e texto
+ * de mensagem, e a linha da organização fica (anonimizada), então o `cascade` não roda. Apaga os
+ * avisos do tenant e devolve as chaves de mídia `inbound/` que eles citam, para quem chama apagar
+ * os objetos depois do commit (o aviso ainda pendente não deixa objeto órfão). Os canais ficam,
+ * sem avisos: o provedor não é chamado aqui (limite em `tech/29-canais-whatsapp.md`).
+ */
+export async function purgeTenantChannelEvents(tx: Tx, tenantId: string) {
+  // Só as chaves saem do banco (`StoredMedia.storageKey`, em qualquer profundidade), não o `raw`.
+  const rows = await tx.execute<{ key: string }>(sql`
+    select distinct jsonb_path_query(${channelEvent.raw}, 'strict $.**.storageKey') #>> '{}' as key
+    from ${channelEvent}
+    where ${channelEvent.tenantId} = ${tenantId}
+  `);
+
+  await tx.delete(channelEvent).where(eq(channelEvent.tenantId, tenantId));
+
+  return rows.flatMap(({ key }) => (typeof key === "string" && key.startsWith(`${INBOUND_PREFIX}/`) ? [key] : []));
 }

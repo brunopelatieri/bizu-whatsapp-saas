@@ -58,6 +58,10 @@ autenticação, tenants, planos, e-mail, LGPD e deploy toda vez.
   o dono pode ter), vencimento e inadimplência com cobrança manual no `/admin` como padrão, e
   webhooks verificados com o módulo Stripe pronto (veja [Pagamentos](#7-pagamentos)).
 - E-mail transacional com provedor substituível e fila de jobs no próprio Postgres (pg-boss).
+- WhatsApp (módulos `whatsapp_cloud` e `whatsapp_qr`) com **caixa de entrada**: `/app/atendimento` com fila, assumir,
+  transferir, janela de 24 h, anexos, modelos e tempo real por SSE, e `/admin/atendimento` para a plataforma falar com
+  owners e equipes; as conversas entram na exportação e na exclusão LGPD
+  ([`tech/30-caixa-de-entrada.md`](docs/context/tech/30-caixa-de-entrada.md)).
 - Auditoria, personificação com consentimento, LGPD (consentimento, exportação, exclusão com
   carência, retenção), módulo de arquivos, logs JSON e Sentry opcional.
 - Docker de desenvolvimento, **stack de produção com Caddy e TLS**, backup cifrado, CI e este tutorial.
@@ -438,6 +442,7 @@ Variáveis, topologia e riscos: [`docs/context/infra-deploy.md`](docs/context/in
 | `APP_URL` | URL pública do app; base dos links de e-mail e dos cookies |
 | `DATABASE_URL` / `DIRECT_URL` | Runtime (`bizu_app`) / migrations e fila (`bizu_owner`) |
 | `REALTIME_DATABASE_URL` | Opcional: conexão `LISTEN` do tempo real do atendimento (padrão `DATABASE_URL`); direta ou pooler em modo sessão |
+| `CHANNEL_EVENT_RETENTION_DAYS` | Opcional: dias que o aviso de canal de WhatsApp já tratado fica guardado (padrão 30) |
 | `BETTER_AUTH_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`, `AUDIT_SALT` | Segredos obrigatórios; os de exemplo são recusados em produção |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `SMTP_*`, `RESEND_*` | Envio de e-mail |
 | `JOBS_MODE` | `inline` (fila no servidor), `worker` (`node build/server/index.js --worker`) ou `off` |
@@ -499,7 +504,7 @@ PRD -> SPEC -> implementação -> lint + tipos + testes + build -> /code-review 
 ```
 
 No Claude Code: `/prd <feature>`, `/spec <feature>`, `/ctx-banco-drizzle`, `/ctx-auth`, `/ctx-api-hono`,
-`/ctx-dashboard`, `/ctx-infra-deploy`, `/context-budget`.
+`/ctx-dashboard`, `/ctx-infra-deploy`, `/ctx-canais`, `/ctx-inbox`, `/context-budget`.
 
 | Arquivo | Conteúdo |
 |---|---|

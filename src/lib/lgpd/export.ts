@@ -18,6 +18,7 @@ import { audit } from "@/lib/audit";
 import { appLink } from "@/lib/auth/links";
 import { isOwner } from "@/lib/auth/permissions";
 import { sendEmail } from "@/lib/email/send";
+import { conversationsForExport } from "@/lib/inbox/privacy";
 import { dataExportReadyTemplate } from "@/lib/email/templates/data-export-ready";
 import { createZip, type ZipEntry } from "@/lib/lgpd/zip";
 import { EXPORT_LINK_TTL_MS, signExportLink } from "@/lib/lgpd/link";
@@ -314,6 +315,21 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
       records,
       consents: await consentsOf(tx, subject),
       audit: await auditOf(tx, portalUserId),
+      // As mensagens trocadas com cada organização pelos cadastros desta pessoa: pela conta ou pelo
+      // e-mail, o mesmo critério da anonimização (`anonymizePortalUser`), que as apagaria.
+      whatsapp: await conversationsForExport(
+        tx,
+        profile
+          ? (
+              await tx
+                .select({ id: customer.id })
+                .from(customer)
+                .where(
+                  sql`${customer.portalUserId} = ${portalUserId} or ${customer.email} = ${profile.email}`,
+                )
+            ).map(({ id }) => id)
+          : [],
+      ),
     };
   });
 
@@ -322,6 +338,7 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
     { name: "cadastros-nas-organizacoes.json", data: json(base.records) },
     { name: "consentimentos.json", data: json(base.consents) },
     { name: "auditoria.json", data: json(base.audit) },
+    { name: "conversas-whatsapp.json", data: json(base.whatsapp) },
   ];
 }
 
@@ -345,6 +362,10 @@ export async function buildExportFiles(
     "- consentimentos.json: aceites e recusas dos textos legais, com a versão.",
     "- auditoria.json: ações registradas em seu nome.",
     "- clientes-<organizacao>.json: clientes das organizações de que você é proprietário.",
+    "- conversas-whatsapp.json (portal): conversas de WhatsApp das organizações com os seus",
+    "  cadastros, com as mensagens trocadas (anexos por nome, tipo e tamanho). Com",
+    "  `truncated` verdadeiro, só as 20.000 mensagens mais recentes vieram: peça o restante ao",
+    "  encarregado.",
   ].join("\n");
 
   return [...files, { name: "LEIA-ME.txt", data: Buffer.from(readme, "utf8") }];

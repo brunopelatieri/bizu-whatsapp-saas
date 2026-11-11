@@ -59,8 +59,13 @@
   gancho de remoção de membro. **`caixa-de-entrada` C3 (tela do tenant) implementada:** `/app/atendimento` com lista (Fila, Minhas, Todas, filtros, busca, cursor), conversa, composer de texto, painel do contato (salvar como cliente, vincular, etiquetas e campos), nova conversa, "Conversar" no cliente e na equipe e ponto de não lidas no menu, por polling de 20 s. **`caixa-de-entrada` C4 (tempo real) implementada:** `pg_notify` no `COMMIT`, uma conexão `LISTEN` por processo web (`REALTIME_DATABASE_URL`), SSE `/api/inbox/events` filtrado por pessoa no servidor (batimento, 15 min, 3 por pessoa, 503 sem escuta) e a tela atualizada pelos eventos, com polling de 20 s e aviso quando o SSE cai. **`caixa-de-entrada` C5 (mídia, modelos e citação) implementada:** anexo de saída (`multipart`, 16 MB, tipo pelo conteúdo, `file` gravado antes; Cloud sobe e envia pelo id, Evolution baixa a URL assinada de 5 min em `GET /api/inbox/media-out/:token`), envio de modelo aprovado do WABA com variáveis conferidas (vale com a janela fechada), resposta citada no texto e no anexo, reenvio de anexo e modelo, `phone` corrigível em "salvar como cliente". **`caixa-de-entrada` C6 (atendimento da plataforma) implementada:** `/admin/atendimento` e `/api/admin/inbox/*` (`Scope = platform`, só a lista,
   sem fila nem dono, sem clientes dos owners: `customerId` é 400 e nenhuma consulta a `customer` de tenant), SSE da plataforma, painel com o
   usuário vinculado e as organizações (etiquetas e campos só leitura), "Conversar" em `/admin/usuarios`, ponto de não lidas no menu; o
-  `platform_support` passa a responder (única escrita dele em `/admin`). **Pendente:** C7 (a LGPD das conversas: exportação e exclusão
-  ainda não cobrem as tabelas novas) e o smoke com Meta e Evolution reais.
+  `platform_support` passa a responder (única escrita dele em `/admin`). **`caixa-de-entrada` C7 (LGPD e fechamento) implementada:**
+  excluir o cliente ou anonimizar a pessoa do portal apaga os contatos vinculados com conversas, mensagens e mídia; excluir a
+  organização apaga toda a caixa do tenant e os `channel_event` (com a mídia `inbound/`); anonimizar a pessoa da equipe tira a
+  autoria e o vínculo (sem apagar conversa: o vínculo com `user` é telefone declarado); a exportação do portal ganha `conversas-whatsapp.json`; `CHANNEL_EVENT_RETENTION_DAYS`
+  (padrão 30); editar papel tirando `inbox:reply` devolve as conversas à fila (`src/lib/inbox/privacy.ts`, `tech/30`, "LGPD (C7)").
+  **Todas as fases C1 a C7 implementadas.** **Pendente:** smoke com Meta e Evolution reais (B0 simulada), o prazo de retenção de
+  conversas encerradas e a atualização de `/legal/privacidade` (decisões do proprietário, `lgpd.md`).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

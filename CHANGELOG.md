@@ -10,6 +10,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Caixa de entrada, fase C7 (LGPD e fechamento)**: excluir um cliente (`DELETE /api/customers/:id`) ou anonimizar a
+  pessoa do portal apaga os contatos de WhatsApp vinculados a ele, com conversas, mensagens, arquivos e objetos do
+  armazenamento; excluir a organização apaga toda a caixa de entrada do tenant e os avisos de canal (`channel_event`, com a
+  mídia `inbound/` que citam); anonimizar a pessoa da equipe deixa as mensagens e anexos que ela enviou sem autor e desfaz os
+  vínculos de contato dela (sem apagar conversa). A exportação de dados do portal ganha `conversas-whatsapp.json` (as
+  conversas com os cadastros da pessoa; anexos por nome, tipo e tamanho; sem quem atendeu; até 20.000 mensagens); a da
+  equipe não traz conversas (o vínculo com `user` vem de telefone declarado, sem verificação). Editar um papel personalizado tirando `inbox:reply` passa a devolver à fila as conversas de quem o
+  tem. Skill `ctx-inbox`. **Migração:** nenhuma migration. Variável nova opcional `CHANNEL_EVENT_RETENTION_DAYS` (padrão
+  30, o prazo que já valia). Projeto derivado com dados reais: excluir cliente agora apaga as conversas dele (avise a
+  equipe); os canais de uma organização excluída continuam no banco e no provedor (apague os números antes).
+
 - **Caixa de entrada, fase C6 (atendimento da plataforma)**: `/admin/atendimento` e `/api/admin/inbox/*` dão à plataforma a
   mesma caixa do tenant, **sem fila nem dono** (só a lista) e **sem acesso a clientes dos owners**: a plataforma fala com
   `user` (vínculo pelo telefone, e manual pela busca de usuários), `customerId` é recusado (400) e nenhuma consulta alcança

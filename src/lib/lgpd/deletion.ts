@@ -44,7 +44,13 @@ import { hashEmail, normalizeEmail } from "@/lib/email/address";
 import { sendEmail } from "@/lib/email/send";
 import { deletionConfirmTemplate } from "@/lib/email/templates/deletion-confirm";
 import { deletionScheduledTemplate } from "@/lib/email/templates/deletion-scheduled";
+import { purgeTenantChannelEvents } from "@/lib/channels/events";
 import { releaseAssignments } from "@/lib/inbox/assignment";
+import {
+  detachUserFromInbox,
+  purgeCustomerContacts,
+  purgeTenantInbox,
+} from "@/lib/inbox/privacy";
 import { getStorage } from "@/lib/storage";
 import { TenantRuleError, notFound } from "@/lib/tenant/errors";
 import { soleOwnerTenants } from "@/lib/tenant/ownership";
@@ -763,6 +769,8 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await tx.delete(member).where(eq(member.userId, id));
   // As conversas que a pessoa atendia voltam à fila, em todos os tenants.
   await releaseAssignments(tx, id);
+  // Caixa de entrada: mensagens e anexos sem autor; contatos ligados a ela só perdem o vínculo.
+  await detachUserFromInbox(tx, id);
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
 
@@ -792,10 +800,16 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
   if (!person) return { storageKeys: [] };
 
   // O cadastro do cliente em cada organização, ligado pela conta ou só pelo e-mail.
-  await tx
+  const customers = await tx
     .update(customer)
     .set(anonymizedCustomer)
-    .where(sql`${customer.portalUserId} = ${id} or ${customer.email} = ${person.email}`);
+    .where(sql`${customer.portalUserId} = ${id} or ${customer.email} = ${person.email}`)
+    .returning({ id: customer.id });
+  // As conversas de WhatsApp com esses cadastros saem junto (SPEC da caixa de entrada, LGPD).
+  const inbox = await purgeCustomerContacts(
+    tx,
+    customers.map((row) => row.id),
+  );
 
   await tx
     .update(portalUser)
@@ -817,7 +831,9 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
   await tx.delete(portalSession).where(eq(portalSession.userId, id));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
 
-  return { storageKeys: await exportKeysOf(tx, "portal_user", id) };
+  return {
+    storageKeys: [...inbox.storageKeys, ...(await exportKeysOf(tx, "portal_user", id))],
+  };
 }
 
 /**
@@ -849,6 +865,10 @@ async function anonymizeTenant(tx: Tx, id: string, now: Date): Promise<Anonymize
   await tx.delete(organizationTag).where(eq(organizationTag.organizationId, id));
   await tx.delete(organizationProfile).where(eq(organizationProfile.organizationId, id));
   await tx.update(customer).set(anonymizedCustomer).where(eq(customer.tenantId, id));
+  // Caixa de entrada: todos os contatos (com ou sem cliente), conversas e mensagens; e os avisos
+  // de canal, cujo `raw` tem telefone e texto. A mídia das mensagens é `file` do tenant (abaixo).
+  const inbox = await purgeTenantInbox(tx, id);
+  const inboundKeys = await purgeTenantChannelEvents(tx, id);
 
   await tx
     .update(billingProfile)
@@ -864,7 +884,11 @@ async function anonymizeTenant(tx: Tx, id: string, now: Date): Promise<Anonymize
     .where(eq(file.tenantId, id))
     .returning({ key: file.key });
 
-  return { storageKeys: files.map(({ key }) => key) };
+  return {
+    storageKeys: [
+      ...new Set([...files.map(({ key }) => key), ...inbox.storageKeys, ...inboundKeys]),
+    ],
+  };
 }
 
 export type DeletionOutcome = "executed" | "skipped" | "failed";

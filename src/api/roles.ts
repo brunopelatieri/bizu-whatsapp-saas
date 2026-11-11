@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { requireAuth } from "@/api/auth";
+import { logError } from "@/api/log";
 import {
   authRateLimit,
   jsonBodyLimit,
@@ -20,12 +21,14 @@ import { audit } from "@/lib/audit";
 import { toStatements } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
 import { assertWithinLimit } from "@/lib/billing/limits";
+import { releaseAssignmentsWithoutReply } from "@/lib/inbox/assignment";
 import { roleSchema, updateRoleSchema } from "@/lib/schemas/roles";
 import { ROLE_IN_USE } from "@/lib/tenant/errors";
 import {
   countRoleUsage,
   findCustomRole,
   listCustomRoles,
+  loadRoleCatalog,
 } from "@/lib/tenant/roles";
 
 /**
@@ -120,6 +123,13 @@ rolesRoutes.patch(
       target: { type: "role", id: role.id },
       ip: actor.ip,
     });
+    // Papel que perdeu `inbox:reply`: as conversas de quem o tem voltam à fila (caixa de entrada).
+    // O papel já foi gravado: uma falha aqui vai ao log e não vira 500 de uma edição que valeu.
+    if (permissions) {
+      await releaseAssignmentsWithoutReply(organizationId, await loadRoleCatalog(organizationId)).catch(
+        (error) => logError("Falha ao devolver à fila as conversas do papel editado", error),
+      );
+    }
 
     return c.json({
       role: {
