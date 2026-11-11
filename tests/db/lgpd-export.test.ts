@@ -184,6 +184,7 @@ describe("exportação de dados da equipe", () => {
       [
         "LEIA-ME.txt",
         "auditoria.json",
+        "conversas-whatsapp.json",
         "consentimentos.json",
         `clientes-${tenant.slug}.json`,
         "organizacoes-e-papeis.json",
@@ -321,6 +322,7 @@ describe("exportação de dados do portal", () => {
       [
         "LEIA-ME.txt",
         "auditoria.json",
+        "conversas-whatsapp.json",
         "cadastros-nas-organizacoes.json",
         "consentimentos.json",
         "perfil.json",

@@ -24,6 +24,7 @@ import type {
   ProbeResult,
 } from "@/lib/channels/types";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
+import { resetEnvForTests } from "@/lib/env";
 import { setEmailProviderForTests } from "@/lib/email/send";
 import {
   cleanUpChannels,
@@ -503,6 +504,35 @@ describe("avisos de canal", () => {
       expect(await eventRow(keepPending)).toBeDefined();
       expect(await eventRow(keepRecent)).toBeDefined();
       expect(DAY).toBeGreaterThan(0);
+    });
+
+    it("o prazo vem de CHANNEL_EVENT_RETENTION_DAYS", async () => {
+      const seeded = await seedCloudChannel(tenantScope(tenantA));
+      const make = async (days: number) => {
+        const { id } = await receive(seeded, {});
+        await owner.begin(async (tx) => {
+          await tx`select set_config('app.bypass_tenant', 'on', true)`;
+          await tx`update channel_event set status = 'processed', received_at = now() - ${`${days} days`}::interval where id = ${id}`;
+        });
+        return id;
+      };
+
+      const previous = process.env.CHANNEL_EVENT_RETENTION_DAYS;
+      process.env.CHANNEL_EVENT_RETENTION_DAYS = "7";
+      resetEnvForTests();
+      try {
+        const eightDays = await make(8);
+        const sixDays = await make(6);
+
+        await pruneOldData();
+
+        expect(await eventRow(eightDays)).toBeUndefined();
+        expect(await eventRow(sixDays)).toBeDefined();
+      } finally {
+        if (previous === undefined) delete process.env.CHANNEL_EVENT_RETENTION_DAYS;
+        else process.env.CHANNEL_EVENT_RETENTION_DAYS = previous;
+        resetEnvForTests();
+      }
     });
   });
 
