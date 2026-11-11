@@ -23,6 +23,16 @@
 
 ## Programas em planejamento
 
+- **Pré-produção** (`docs/specs/pre-producao/spec.md`, aprovada em 2026-11-11, nada implementado):
+  telefone verificado por link no WhatsApp (Cloud, QR Code ou liberação manual) e único dentro
+  de cada grupo (owners no SaaS; equipe e clientes por organização), equipe que também é
+  cliente (`customer.user_id`), acesso bloqueado com telefone pendente, perfil do
+  owner e da equipe (foto, nome, e-mail, telefone, senha), retenção de mensagens, texto legal
+  com WhatsApp, avisos de exclusão, senha forte, bloqueio de login por tentativas, importação de
+  clientes, complementos do atendimento (continuar por outro canal, emoji, filtro na URL) e de
+  planos (uso, exceção por tenant). Decisões de produto fechadas; próxima fase: S1 (senha
+  forte no schema e no servidor). Os blocos S, B, T, F, E, L e R seguram o deploy.
+
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
   Evolution Go) e `caixa-de-entrada` (chat e fila); decisões do proprietário no fim do plano.
