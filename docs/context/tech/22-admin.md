@@ -123,6 +123,9 @@ SPEC: `docs/specs/admin-crud/spec.md` (seções 1 a 3). Lógica em `src/lib/admi
 (exclusões) e `src/lib/admin/people.ts` (detalhe, edição, sessões); o núcleo LGPD é o de
 `src/lib/lgpd/deletion.ts` (`tech/27-lgpd-arquivos.md`). Toda escrita é `ownerOnly` +
 `blockWhileImpersonating`; sessão personificada já cai no `requirePlatform` (papel do alvo).
+A execução (agendada ou `mode: now`) leva junto as conversas da caixa de entrada: da organização inteira, dos
+cadastros de cliente da pessoa do portal e, na conta de equipe, o contato **da plataforma** ligado a ela (no tenant
+só perde o vínculo; mensagens que ela enviou ficam sem autor). Ver `tech/30-caixa-de-entrada.md`, "LGPD (C7)".
 
 | Rota | Quem | Observação |
 |---|---|---|

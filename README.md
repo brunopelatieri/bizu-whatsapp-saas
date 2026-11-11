@@ -438,6 +438,7 @@ Variáveis, topologia e riscos: [`docs/context/infra-deploy.md`](docs/context/in
 | `APP_URL` | URL pública do app; base dos links de e-mail e dos cookies |
 | `DATABASE_URL` / `DIRECT_URL` | Runtime (`bizu_app`) / migrations e fila (`bizu_owner`) |
 | `REALTIME_DATABASE_URL` | Opcional: conexão `LISTEN` do tempo real do atendimento (padrão `DATABASE_URL`); direta ou pooler em modo sessão |
+| `CHANNEL_EVENT_RETENTION_DAYS` | Opcional: dias que o aviso de canal de WhatsApp já tratado fica guardado (padrão 30) |
 | `BETTER_AUTH_SECRET`, `CREDENTIALS_ENCRYPTION_KEY`, `AUDIT_SALT` | Segredos obrigatórios; os de exemplo são recusados em produção |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `SMTP_*`, `RESEND_*` | Envio de e-mail |
 | `JOBS_MODE` | `inline` (fila no servidor), `worker` (`node build/server/index.js --worker`) ou `off` |
@@ -499,7 +500,7 @@ PRD -> SPEC -> implementação -> lint + tipos + testes + build -> /code-review 
 ```
 
 No Claude Code: `/prd <feature>`, `/spec <feature>`, `/ctx-banco-drizzle`, `/ctx-auth`, `/ctx-api-hono`,
-`/ctx-dashboard`, `/ctx-infra-deploy`, `/context-budget`.
+`/ctx-dashboard`, `/ctx-infra-deploy`, `/ctx-canais`, `/ctx-inbox`, `/context-budget`.
 
 | Arquivo | Conteúdo |
 |---|---|

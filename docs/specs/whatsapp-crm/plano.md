@@ -8,7 +8,8 @@
 
 > Este arquivo é o índice do programa. Guarda só o que vale para as três features: escopos,
 > decisões transversais, ordem das fases e modelo recomendado. O detalhe fica no PRD e na SPEC
-> de cada feature. Implementado até agora: **F0** (2026-11-09).
+> de cada feature. Implementado até agora: **F0** (2026-11-09) e a caixa de entrada inteira, **C1 a C7**
+> (2026-11-11; estado das demais fases em `docs/context/status.md`).
 
 ## Features
 
@@ -76,12 +77,12 @@ Cada fase cabe em um PR revisável e termina com `npm run lint`, `typecheck`, `t
 | B3 | Módulo Evolution Go | canais | B1, B0 | Instância, QR Code e código de pareamento, ciclo de vida, webhook | Sonnet com as fixtures; revisão Opus |
 | B4 | Canais da plataforma | canais | B2, B3 | As mesmas telas em `/admin/configuracoes/canais` | Sonnet |
 | C1 | Dados e ingestão (**implementada**) | inbox | A1, B1 | `chat_contact`, `conversation`, `message`, ingestão de mensagens, status, eco e mídia | Opus |
-| C2 | API do atendimento | inbox | C1 | Leitura paginada, envio de texto, fila, assumir, transferir, encerrar, janela de 24 h, visibilidade | Opus + `/security-review` |
-| C3 | Tela do atendimento (tenant) | inbox | C2, A2, A3 | `/app/atendimento`: lista, conversa, composer, painel do contato | Sonnet |
-| C4 | Tempo real | inbox | C2 | SSE, `NOTIFY`, ressincronização e contador de não lidas no menu | Opus |
+| C2 | API do atendimento (**implementada**) | inbox | C1 | Leitura paginada, envio de texto, fila, assumir, transferir, encerrar, janela de 24 h, visibilidade | Opus + `/security-review` |
+| C3 | Tela do atendimento (tenant) (**implementada**) | inbox | C2, A2, A3 | `/app/atendimento`: lista, conversa, composer, painel do contato | Sonnet |
+| C4 | Tempo real (**implementada**) | inbox | C2 | SSE, `NOTIFY`, ressincronização e contador de não lidas no menu | Opus |
 | C5 | Mídia, modelos e resposta citada (**implementada**) | inbox | C3, B2 | Anexos de saída, envio de modelo, citar mensagem | Sonnet |
 | C6 | Atendimento da plataforma (**implementada**) | inbox | C3, B4, A4 | `/admin/atendimento`, sem fila | Sonnet + `/security-review` |
-| C7 | LGPD, contexto e fechamento | todas | todas | Exportação e exclusão cobrindo conversas, retenção de `channel_event`, `docs/context/`, rules, skills, README | Opus |
+| C7 | LGPD, contexto e fechamento (**implementada**) | todas | todas | Exportação e exclusão cobrindo conversas, retenção de `channel_event`, `docs/context/`, rules, skills, README | Opus |
 
 **Trilhas paralelas:** depois de F0, a trilha A (cadastro) e a trilha B (canais) não tocam os
 mesmos arquivos e podem andar ao mesmo tempo. A trilha C começa quando A1 e B1 estiverem

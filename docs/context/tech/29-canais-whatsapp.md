@@ -82,7 +82,14 @@ Canal `disabled` e organização que não está `active` respondem 200 no webhoo
 `status_detail`, `last_seen_at`; e-mail `channel-disconnected` aos owners **só** na passagem de
 `connected` para `error`/`disconnected` (uma vez por queda); falha transitória (5xx, 429, timeout)
 não muda o estado; devolve à fila avisos `pending` há mais de 10 min. `maintenance.prune` apaga
-`channel_event` tratado há mais de 30 dias.
+`channel_event` tratado há mais de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365).
+
+**Exclusão da organização (LGPD, C7):** `anonymizeTenant` chama `purgeTenantChannelEvents` (`events.ts`), que apaga
+todos os avisos do tenant e devolve as chaves `inbound/` citadas no `raw` (apagadas depois do commit). Os **canais
+ficam**: credenciais cifradas, `message_template` e a instância Evolution ou o número na Meta não são tocados (falar com
+o provedor não cabe na transação da exclusão). Os avisos que ainda chegarem são `ignored` (organização em exclusão) e
+saem pela retenção. Para não deixar nada no provedor, o owner apaga os números antes de excluir a organização (limite
+conhecido, `tech/30-caixa-de-entrada.md`).
 
 ## Webhook (`src/api/webhooks-channels.ts`)
 

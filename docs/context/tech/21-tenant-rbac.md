@@ -74,8 +74,10 @@ efeito (`inboxCapabilities`, `src/lib/inbox/visibility.ts`). A visibilidade por 
 RBAC: `requirePermission` só abre a rota, e `visibleConversation` decide qual conversa a pessoa vê.
 
 **Gancho da caixa de entrada:** `removeMember` e `changeMemberRole` (para papel sem `inbox:reply`)
-chamam `releaseAssignments` na mesma transação: as conversas da pessoa voltam à fila. Editar um papel
-personalizado tirando `inbox:*` não devolve as conversas de quem o tem (limite conhecido).
+chamam `releaseAssignments` na mesma transação: as conversas da pessoa voltam à fila. Editar as permissões de um
+papel personalizado (`PATCH /api/roles/:id`) chama `releaseAssignmentsWithoutReply` depois da gravação (C7): quem ficou
+sem `inbox:reply` devolve as conversas (fora da transação do Better Auth; ver `tech/30`, "Limites conhecidos").
+Anonimizar uma pessoa (`lgpd.delete`) também devolve as conversas dela e tira a autoria das mensagens (`tech/30`, "LGPD (C7)").
 
 Regras além da matriz, em `src/lib/tenant/team.ts`:
 

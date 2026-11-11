@@ -8,7 +8,7 @@
 - **Paths do código:** `src/db/schema/inbox.ts`, `src/lib/inbox/` (`constants.ts`, `contacts.ts`,
   `ingest.ts`, `media.ts`, `notify.ts`, `channel-usage.ts`; da C5: `media-out.ts`, `send-media.ts`, `send-template.ts`, `templates.ts`; da C2: `visibility.ts`, `cursor.ts`,
   `views.ts`, `conversations.ts`, `assignment.ts`, `media-access.ts`, `send.ts`, `window.ts`,
-  `contact-actions.ts`; da C4: `realtime.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4), `src/api/inbox-media-out.ts` (C5),
+  `contact-actions.ts`; da C4: `realtime.ts`; da C7: `privacy.ts`), `src/api/inbox.ts`, `src/api/inbox-events.ts` (C4), `src/api/inbox-media-out.ts` (C5),
   `src/lib/schemas/inbox.ts`, `src/jobs/inbox.ts`,
   da C6: `src/api/admin-inbox.ts`, `src/api/inbox-shared.ts`, `src/lib/inbox/platform.ts`, `src/lib/inbox/platform-link.ts`,
   `src/components/inbox/inbox-scope.tsx`, `src/components/inbox/platform-contact-section.tsx`, `src/routes/admin/inbox.tsx`,
@@ -23,7 +23,10 @@
   `tests/db/inbox-helpers.ts`, `tests/db/rls.test.ts` (bloco da caixa de entrada),
   `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
   `tests/db/inbox-media-send.test.ts` (C5),
-  `src/lib/channels/providers/*/inbox.db.test.ts`
+  `src/lib/channels/providers/*/inbox.db.test.ts`,
+  da C7: `tests/db/inbox-lgpd.test.ts` e os ganchos em `src/lib/lgpd/deletion.ts`, `src/lib/lgpd/export.ts`,
+  `src/lib/tenant/customers.ts` (`deleteCustomer`), `src/lib/channels/events.ts` (`purgeTenantChannelEvents`) e
+  `src/api/roles.ts`
 
 ## Estado
 
@@ -35,7 +38,7 @@
 | C4 | Tempo real (SSE + `LISTEN/NOTIFY`) | **Feita** |
 | C5 | Mídia de saída, modelos, citação no envio | **Feita** |
 | C6 | Atendimento da plataforma em `/admin` | **Feita** |
-| C7 | LGPD (exportação e exclusão cobrindo conversas) e fechamento | Pendente |
+| C7 | LGPD (exportação e exclusão cobrindo conversas), retenção de `channel_event` e fechamento | **Feita** |
 
 ## Modelo
 
@@ -56,11 +59,13 @@ normal e o parcial `WHERE tenant_id IS NULL`.
 - `message.created_at` da mensagem recebida é a hora do provedor (limitada a agora), para a conversa
   ficar em ordem quando a Evolution entrega o histórico depois de reconectar. A enviada usa `now()`.
 - Canal com conversa não é apagado: o serviço de canais desativa (`channelHasConversations`, que
-  consulta `src/lib/inbox/channel-usage.ts`). Apagar a organização leva tudo por cascade.
+  consulta `src/lib/inbox/channel-usage.ts`). Apagar a **linha** da organização leva tudo por cascade, mas a
+  exclusão LGPD a anonimiza (não apaga): quem apaga as conversas é `purgeTenantInbox` (seção "LGPD (C7)").
 - Só `src/lib/inbox/` consulta estas tabelas (regra de visibilidade, T13). Toda leitura e escrita de
-  rota passa por `visibleConversation` (`visibility.ts`, abaixo). Os ganchos de fora (remoção de
-  membro em `src/lib/tenant/team.ts`, anonimização em `src/lib/lgpd/deletion.ts`) chamam
-  `releaseAssignments` em vez de consultar a tabela.
+  rota passa por `visibleConversation` (`visibility.ts`, abaixo). Os ganchos de fora chamam o serviço em vez de consultar a tabela:
+  remoção e troca de papel de membro (`src/lib/tenant/team.ts`) e edição de papel (`src/api/roles.ts`) usam
+  `releaseAssignments`/`releaseAssignmentsWithoutReply`; a LGPD (`src/lib/lgpd/`) e a exclusão de cliente
+  (`src/lib/tenant/customers.ts`) usam `privacy.ts`.
 
 ## Ingestão (`src/lib/inbox/ingest.ts`)
 
@@ -180,8 +185,10 @@ decide se o nome do cliente vinculado, as etiquetas e o cadastro aparecem na lis
 - **Situação:** só `status`, `closed_at`, `closed_by`; o dono não muda.
 - **Lida:** zera `unread_count` só se maior que zero; sem nada a zerar confere a visibilidade (404).
 - **Gancho** `releaseAssignments(tx, userId, tenantId?)`: `removeMember`, `changeMemberRole` para papel
-  sem `inbox:reply` e `anonymizeUser` (LGPD, todos os tenants) devolvem as conversas à fila. Editar um
-  papel personalizado tirando `inbox:*` **não** devolve (limite conhecido).
+  sem `inbox:reply` e `anonymizeUser` (LGPD, todos os tenants) devolvem as conversas à fila. Editar as
+  permissões de um papel personalizado (`PATCH /api/roles/:id`) chama `releaseAssignmentsWithoutReply(tenantId,
+  catálogo)` (C7): quem ficou sem `inbox:reply` devolve as conversas. Roda depois da gravação do papel (que é do
+  Better Auth, fora desta transação): se falhar, as conversas ficam com o dono até a próxima edição ou remoção.
 - Auditoria: `inbox.conversation_claimed` (`via: reply | start` quando não é o botão), `_assigned`
   (`from`, `to`), `_released` (`from`), `_closed`, `_reopened` (`to`, `via`), `inbox.contact_linked`
   (`customerId`, `userId`), `inbox.contact_saved_as_customer` (`customerId`). Só ids.
@@ -458,10 +465,35 @@ Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min
   escreve (regra geral de `requireTenant`, inclusive "marcar como lida").
 - Erro de envio vai a log só por `logChannelError` (tipo, status e código); a mensagem do provedor fica
   em `message.error_message`, para o atendente.
-- **LGPD pendente (C7):** exportação e anonimização de `customer`, `user` e organização ainda não
-  cobrem `chat_contact`, `conversation`, `message` e a mídia (`lgpd.md`). A exclusão de organização
-  **anonimiza** a linha de `organization` (não a apaga), então o cascade não roda: a C7 precisa apagar
-  as conversas e os objetos explicitamente.
+- **LGPD:** seção "LGPD (C7)" abaixo; a política (prazo e base legal) está em `docs/context/lgpd.md`.
+
+## LGPD (C7, `src/lib/inbox/privacy.ts`)
+
+Só `privacy.ts` apaga e exporta conversas fora das rotas (T13). Quem chama passa a própria transação e apaga os objetos
+do armazenamento **depois do commit**, com as chaves devolvidas (falha ao apagar = objeto órfão no log, nunca a pessoa
+nos dados). Apagar o `chat_contact` leva por cascata a identidade, as conversas e as mensagens; a linha de `file` (a
+mensagem só aponta para ela, `set null`) sai na mesma transação, pelo `owner_type = message` **e** pelo `message.file_id`
+(mídia recebida, anexo de saída e eco do aparelho).
+
+| Gatilho | O que acontece | Função |
+|---|---|---|
+| Excluir o cliente (`DELETE /api/customers/:id`, `deleteCustomer`) | Os contatos vinculados a ele saem com conversas, mensagens, `file` e objeto; o RLS do tenant limita tudo ao tenant da sessão (cliente de outro tenant é 404 e nada muda). Aviso `conversation` às telas abertas | `purgeCustomerContacts` |
+| Anonimizar a pessoa do portal (`lgpd.delete`) | Os cadastros dela (pela conta ou pelo e-mail, em todas as organizações) viram "Cliente removido" e os contatos vinculados a eles saem como acima | `purgeCustomerContacts` |
+| Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo) e as que encerrou sem `closed_by`; o contato de **tenant** vinculado a ele perde o vínculo (a conversa é do owner, controlador) e o contato da **plataforma** vinculado a ele sai com as conversas e a mídia (a plataforma é a controladora dessa conversa; decisão da C7, ver "Desvios da SPEC (C7)") | `detachUserFromInbox` |
+| Excluir a organização (`lgpd.delete`, `anonymizeTenant`) | Todos os contatos do tenant (com ou sem vínculo), conversas e mensagens; os `channel_event` do tenant (o `raw` tem telefone e texto) e a mídia `inbound/` que eles citam (o aviso pendente não deixa objeto órfão); todo `file` do tenant (já existia). Os canais ficam (sem avisos), com as credenciais cifradas e a instância no provedor: ver "Limites conhecidos" | `purgeTenantInbox`, `purgeTenantChannelEvents` |
+
+- **Exportação** (`conversationsForExport`, arquivo `conversas-whatsapp.json` no zip de `lgpd.export`): as conversas em que o
+  titular é o **contato**. Portal: pelos cadastros de cliente ligados à conta (`customer.portal_user_id`, como
+  `cadastros-nas-organizacoes.json`). Equipe: pelo vínculo do contato com o `user`, na plataforma (`organizacao: null`) e
+  nas organizações. Cada conversa traz organização, telefone, nome no WhatsApp, situação e as mensagens (`recebida` ou
+  `enviada`, tipo, texto, nome do modelo, situação de entrega, anexo por **nome, tipo e tamanho**, nunca o conteúdo).
+  Fica de fora o que é de terceiros ou interno: quem atendeu, o nome dado pela equipe, `payload` e erro do provedor.
+  Teto de **20.000 mensagens** (as mais recentes; `truncated: true` e o `LEIA-ME.txt` orientam a pedir o resto ao
+  encarregado). As mensagens que um atendente enviou **não** entram na exportação dele (são conversas com terceiros).
+- **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
+  `maintenance.prune`. Conversas e mensagens não têm prazo automático (o PRD deixa a retenção automática fora do
+  escopo): ficam enquanto o owner as mantiver, e saem com o cliente, a pessoa ou a organização. **Decisão pendente do
+  proprietário** se quiser um prazo (`lgpd.md`).
 
 ## Testes
 
@@ -504,6 +536,48 @@ Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min
   reautenticação (fluxo encerrado e reconexão com sessão revogada → 401); queda do `LISTEN` → fluxo
   encerrado, 503 e volta. Unitários: `src/lib/inbox/realtime.test.ts` (carga, `parseInboxNotice`,
   `noticeVisibleTo`) e `src/components/inbox/use-inbox-events.test.ts` (modo, backoff, releitura, toast).
+- C7: `tests/db/inbox-lgpd.test.ts` (Postgres real, armazenamento em memória): excluir o cliente pela API apaga contato,
+  conversa, mensagens, `file` e objeto, e o contato sem vínculo e o mesmo número em outro tenant ficam; um tenant não
+  exclui cliente de outro (404, nada muda); anonimizar a pessoa do portal; anonimizar `user` (mensagem sem autor,
+  `closed_by` nulo, vínculo do tenant desfeito, contato da plataforma apagado com a mídia); excluir a organização (contatos,
+  conversas, mensagens, `file`, anexo de saída, `channel_event` e a mídia `inbound/` de aviso pendente; outro tenant
+  intacto); exportação do portal (só as conversas dos cadastros dele, anexo por nome, sem id nem e-mail de quem atendeu,
+  nada do outro tenant com o mesmo número) e da equipe (plataforma e organização); editar papel tirando `inbox:reply`
+  devolve à fila. `channels-events.test.ts`: prazo de `CHANNEL_EVENT_RETENTION_DAYS`. `lgpd-export.test.ts`: o zip
+  ganhou `conversas-whatsapp.json`.
+
+## Limites conhecidos (todas as fases)
+
+Reunidos aqui; o detalhe de cada um está na seção da fase.
+
+| Fase | Limite |
+|---|---|
+| C1 | Se enfileirar `inbox.media` falhar depois do commit, a mensagem fica `pending` até "Tentar de novo" (sem varredura de mídia `pending`) |
+| C2 | Provedor que responde depois de 2 min, com o atendente já tendo usado "Reenviar" na `UNKNOWN_RESULT`: o contato recebe duas vezes |
+| C2 | Status de entrega que chega antes de gravarmos o `provider_message_id` fica `ignored` (a mensagem para em `sent`) |
+| C3 | A releitura de lista e mensagens (`useInfiniteQuery`) relê todas as páginas já carregadas |
+| C4 | Sessão revogada, papel trocado ou membro removido seguem recebendo **ids** no SSE por até 15 min (a releitura já barra); teto de 3 fluxos é por processo; evento perdido na queda só volta pela releitura; aviso sem `a` custa um `SELECT` |
+| C5 | Imagem de 5 a 16 MB passa no nosso limite e a Meta recusa (`failed` com o motivo); o token de `media-out` não é de uso único (5 min) e fica na URL/log da Evolution; B0 simulada (nada contra Meta ou Evolution reais) |
+| C6 | Não há papel de plataforma só de leitura (a distinção `read`/`reply` está pronta em `platformCapabilities`) |
+| C7 | Editar papel devolve à fila **depois** da gravação do Better Auth (fora da transação): falha aqui deixa o dono até a próxima mudança |
+| C7 | Excluir a organização não remove os **canais** (credenciais cifradas e a instância Evolution ou o número na Meta continuam; os avisos novos são `ignored` e saem pela retenção). Desconectar no provedor é ação do owner antes de excluir |
+| C7 | Depois de excluído o cliente, o `channel_event` que trouxe as mensagens dele ainda guarda o `raw` (telefone e texto) até o fim da retenção (padrão 30 dias). O `/admin` só reprocessa aviso `failed` ou `ignored`, então o que já foi gravado não volta; um aviso falho do mesmo número reprocessado depois recria o contato, como uma mensagem nova |
+| C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
+| C7 | Backup anterior à exclusão ainda contém as conversas: restaurar exige reaplicar as exclusões (`tech/14-deploy.md`) |
+
+## Desvios da SPEC (C7)
+
+- A SPEC diz que a exclusão de `user` "desfaz o vínculo (`set null`)". No **tenant** é isso; na **plataforma**, o contato
+  vinculado ao usuário excluído é **apagado** com as conversas e a mídia, como o do cliente no tenant: a plataforma é a
+  controladora da conversa com o próprio usuário e não há base para mantê-la depois do pedido de eliminação. Decisão a
+  confirmar pelo proprietário (trocar por `set null` é mudar `detachUserFromInbox`).
+- A exportação entra também no zip da **equipe** (conversas em que a pessoa é o contato), não só no do cliente.
+- A exclusão da organização apaga também os `channel_event` do tenant e a mídia `inbound/` deles (a SPEC só falava das
+  conversas e dos objetos). Os canais ficam (limite acima).
+- A retenção de `channel_event` (30 dias) já existia desde os canais; a C7 só a tornou configurável
+  (`CHANNEL_EVENT_RETENTION_DAYS`). Conversas encerradas não têm prazo: a SPEC e o PRD não definem (decisão pendente do
+  proprietário).
+- `deleteCustomer` passou a travar o cliente (`FOR UPDATE`) antes de apagar as conversas, na mesma transação.
 
 ## Desvios da SPEC (C6)
 

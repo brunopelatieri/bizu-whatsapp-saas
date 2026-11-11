@@ -173,6 +173,11 @@ personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota
   sessão personificada não passa de `requirePlatform`. A auditoria sai com `actor_type = platform`, sem `tenant_id` e sem texto
   nem telefone. `GET /api/admin/inbox/events` tem os mesmos limites do SSE do tenant (batimento, 15 min, 3 por pessoa, 503 sem
   `LISTEN`).
+- **LGPD (C7):** excluir o cliente, anonimizar a pessoa do portal ou da equipe e excluir a organização apagam as conversas
+  dela (contato, mensagens, `file` e objeto) por `src/lib/inbox/privacy.ts`, na transação de quem pede; o RLS do tenant limita a
+  exclusão de cliente ao tenant da sessão. A exportação (`conversas-whatsapp.json`) traz só as conversas em que o titular é o
+  contato, sem quem atendeu, `payload` nem erro do provedor. Detalhes e limites em `tech/30-caixa-de-entrada.md`, "LGPD (C7)";
+  teste em `tests/db/inbox-lgpd.test.ts`.
 - `ALREADY_ASSIGNED` (409) diz o nome do dono também a quem já não vê a conversa: só quem conhece o id
   (por tê-la visto na fila) chega a isso, e é o aviso que o PRD pede.
 - Iniciar conversa com um membro (`userId`) mostra o telefone dele a quem tem `inbox:reply`: decisão
