@@ -253,8 +253,6 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
       memberships,
       consents: await consentsOf(tx, subject),
       audit: await auditOf(tx, userId),
-      // Conversas de WhatsApp em que a pessoa é o contato (com a plataforma ou com uma organização).
-      whatsapp: await conversationsForExport(tx, { userId }),
     };
   });
 
@@ -263,7 +261,6 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
     { name: "organizacoes-e-papeis.json", data: json(base.memberships) },
     { name: "consentimentos.json", data: json(base.consents) },
     { name: "auditoria.json", data: json(base.audit) },
-    { name: "conversas-whatsapp.json", data: json(base.whatsapp) },
   ];
 
   // Quem é owner é também controlador dos dados dos clientes da organização.
@@ -320,8 +317,9 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
       audit: await auditOf(tx, portalUserId),
       // As mensagens trocadas com cada organização pelos cadastros desta pessoa: pela conta ou pelo
       // e-mail, o mesmo critério da anonimização (`anonymizePortalUser`), que as apagaria.
-      whatsapp: await conversationsForExport(tx, {
-        customerIds: profile
+      whatsapp: await conversationsForExport(
+        tx,
+        profile
           ? (
               await tx
                 .select({ id: customer.id })
@@ -331,7 +329,7 @@ async function portalFiles(portalUserId: string): Promise<ZipEntry[]> {
                 )
             ).map(({ id }) => id)
           : [],
-      }),
+      ),
     };
   });
 
@@ -364,8 +362,8 @@ export async function buildExportFiles(
     "- consentimentos.json: aceites e recusas dos textos legais, com a versão.",
     "- auditoria.json: ações registradas em seu nome.",
     "- clientes-<organizacao>.json: clientes das organizações de que você é proprietário.",
-    "- conversas-whatsapp.json: conversas de WhatsApp em que você é o contato, com as mensagens",
-    "  trocadas (anexos por nome, tipo e tamanho). `organizacao` nulo é a plataforma. Com",
+    "- conversas-whatsapp.json (portal): conversas de WhatsApp das organizações com os seus",
+    "  cadastros, com as mensagens trocadas (anexos por nome, tipo e tamanho). Com",
     "  `truncated` verdadeiro, só as 20.000 mensagens mais recentes vieram: peça o restante ao",
     "  encarregado.",
   ].join("\n");

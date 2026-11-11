@@ -124,8 +124,8 @@ SPEC: `docs/specs/admin-crud/spec.md` (seções 1 a 3). Lógica em `src/lib/admi
 `src/lib/lgpd/deletion.ts` (`tech/27-lgpd-arquivos.md`). Toda escrita é `ownerOnly` +
 `blockWhileImpersonating`; sessão personificada já cai no `requirePlatform` (papel do alvo).
 A execução (agendada ou `mode: now`) leva junto as conversas da caixa de entrada: da organização inteira, dos
-cadastros de cliente da pessoa do portal e, na conta de equipe, o contato **da plataforma** ligado a ela (no tenant
-só perde o vínculo; mensagens que ela enviou ficam sem autor). Ver `tech/30-caixa-de-entrada.md`, "LGPD (C7)".
+cadastros de cliente da pessoa do portal; na conta de equipe, os contatos ligados a ela só perdem o vínculo e as
+mensagens que ela enviou ficam sem autor. Ver `tech/30-caixa-de-entrada.md`, "LGPD (C7)".
 
 | Rota | Quem | Observação |
 |---|---|---|

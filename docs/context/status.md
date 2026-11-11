@@ -62,7 +62,7 @@
   `platform_support` passa a responder (única escrita dele em `/admin`). **`caixa-de-entrada` C7 (LGPD e fechamento) implementada:**
   excluir o cliente ou anonimizar a pessoa do portal apaga os contatos vinculados com conversas, mensagens e mídia; excluir a
   organização apaga toda a caixa do tenant e os `channel_event` (com a mídia `inbound/`); anonimizar a pessoa da equipe tira a
-  autoria e o vínculo e apaga o contato da plataforma; a exportação ganha `conversas-whatsapp.json`; `CHANNEL_EVENT_RETENTION_DAYS`
+  autoria e o vínculo (sem apagar conversa: o vínculo com `user` é telefone declarado); a exportação do portal ganha `conversas-whatsapp.json`; `CHANNEL_EVENT_RETENTION_DAYS`
   (padrão 30); editar papel tirando `inbox:reply` devolve as conversas à fila (`src/lib/inbox/privacy.ts`, `tech/30`, "LGPD (C7)").
   **Todas as fases C1 a C7 implementadas.** **Pendente:** smoke com Meta e Evolution reais (B0 simulada), o prazo de retenção de
   conversas encerradas e a atualização de `/legal/privacidade` (decisões do proprietário, `lgpd.md`).

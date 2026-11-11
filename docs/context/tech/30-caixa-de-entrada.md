@@ -482,17 +482,26 @@ cascata com o arquivo órfão.
 |---|---|---|
 | Excluir o cliente (`DELETE /api/customers/:id`, `deleteCustomer`) | Os contatos vinculados a ele saem com conversas, mensagens, `file` e objeto; o RLS do tenant limita tudo ao tenant da sessão (cliente de outro tenant é 404 e nada muda). Aviso `conversation` às telas abertas | `purgeCustomerContacts` |
 | Anonimizar a pessoa do portal (`lgpd.delete`) | Os cadastros dela (pela conta ou pelo e-mail, em todas as organizações) viram "Cliente removido" e os contatos vinculados a eles saem como acima | `purgeCustomerContacts` |
-| Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo; o anexo, sem `file.created_by`) e as que encerrou sem `closed_by`; o contato de **tenant** vinculado a ele perde o vínculo (a conversa é do owner, controlador) e o contato da **plataforma** vinculado a ele sai com as conversas e a mídia (a plataforma é a controladora dessa conversa; decisão da C7, ver "Desvios da SPEC (C7)") | `detachUserFromInbox` |
+| Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo; o anexo, sem `file.created_by`) e as que encerrou sem `closed_by`; os contatos vinculados a ele, no tenant **e na plataforma**, só perdem o vínculo (SPEC): nenhuma conversa é apagada por esse vínculo, porque ele nasce do telefone que a pessoa declarou no cadastro, sem verificação (ver "Por que o vínculo com `user` não decide nada") | `detachUserFromInbox` |
 | Excluir a organização (`lgpd.delete`, `anonymizeTenant`) | Todos os contatos do tenant (com ou sem vínculo), conversas e mensagens; os `channel_event` do tenant (o `raw` tem telefone e texto) e a mídia `inbound/` que eles citam (o aviso pendente não deixa objeto órfão); todo `file` do tenant (já existia). Os canais ficam (sem avisos), com as credenciais cifradas e a instância no provedor: ver "Limites conhecidos" | `purgeTenantInbox`, `purgeTenantChannelEvents` |
 
-- **Exportação** (`conversationsForExport`, arquivo `conversas-whatsapp.json` no zip de `lgpd.export`): as conversas em que o
-  titular é o **contato**. Portal: pelos cadastros de cliente da pessoa, ligados pela conta **ou pelo e-mail** (o mesmo critério da
-  anonimização, que os apagaria). Equipe: pelo vínculo do contato com o `user`, na plataforma (`organizacao: null`) e
-  nas organizações. Cada conversa traz organização, telefone, nome no WhatsApp, situação e as mensagens (`recebida` ou
+- **Exportação** (`conversationsForExport`, arquivo `conversas-whatsapp.json` no zip de `lgpd.export` **do portal**): as
+  conversas com os cadastros de cliente da pessoa, ligados pela conta **ou pelo e-mail** (o mesmo critério da anonimização,
+  que os apagaria). O zip da **equipe** não traz conversas. Cada conversa traz organização, telefone, nome no WhatsApp, situação e as mensagens (`recebida` ou
   `enviada`, tipo, texto, nome do modelo, situação de entrega, anexo por **nome, tipo e tamanho**, nunca o conteúdo).
   Fica de fora o que é de terceiros ou interno: quem atendeu, o nome dado pela equipe, `payload` e erro do provedor.
   Teto de **20.000 mensagens** (as mais recentes; `truncated: true` e o `LEIA-ME.txt` orientam a pedir o resto ao
   encarregado). As mensagens que um atendente enviou **não** entram na exportação dele (são conversas com terceiros).
+- **Por que o vínculo com `user` não decide nada** (`/security-review` da C7): o `autoLinkContact` liga um contato novo ao
+  usuário de `phone_key` única, e o telefone do usuário é só declarado no cadastro aberto (sem verificação nem unicidade).
+  Quem se cadastra com o número de outra pessoa é vinculado sozinho à conversa dela com a plataforma (ou, se for membro, à
+  conversa do tenant). Por isso a exportação da equipe não traz conversas e a anonimização de `user` só desfaz o vínculo:
+  usar o vínculo entregaria a conversa de terceiros ao atacante, ou a apagaria a pedido dele. Para o **cliente**, a SPEC
+  exige exportar e apagar pelo vínculo, e o mesmo risco existe em escala menor: a pessoa do portal pode trocar o próprio
+  telefone (`/portal/conta` grava também `customer.phone`) para o de alguém que ainda não escreveu ao tenant; a primeira
+  mensagem dessa pessoa vira contato vinculado ao cadastro do atacante (a equipe vê o nome dele na conversa). Limite
+  conhecido; a correção é verificar o telefone ou registrar a origem do vínculo (`auto` × confirmado pela equipe) e só
+  exportar o confirmado (decisão do proprietário).
 - **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
   `maintenance.prune`. Conversas e mensagens não têm prazo automático (o PRD deixa a retenção automática fora do
   escopo): ficam enquanto o owner as mantiver, e saem com o cliente, a pessoa ou a organização. **Decisão pendente do
@@ -542,10 +551,11 @@ cascata com o arquivo órfão.
 - C7: `tests/db/inbox-lgpd.test.ts` (Postgres real, armazenamento em memória): excluir o cliente pela API apaga contato,
   conversa, mensagens, `file` e objeto, e o contato sem vínculo e o mesmo número em outro tenant ficam; um tenant não
   exclui cliente de outro (404, nada muda); anonimizar a pessoa do portal; anonimizar `user` (mensagem sem autor,
-  `closed_by` nulo, vínculo do tenant desfeito, contato da plataforma apagado com a mídia); excluir a organização (contatos,
+  `closed_by` e `file.created_by` nulos, vínculo desfeito no tenant e na plataforma, nenhuma conversa apagada); excluir a organização (contatos,
   conversas, mensagens, `file`, anexo de saída, `channel_event` e a mídia `inbound/` de aviso pendente; outro tenant
   intacto); exportação do portal (só as conversas dos cadastros dele, anexo por nome, sem id nem e-mail de quem atendeu,
-  nada do outro tenant com o mesmo número) e da equipe (plataforma e organização); editar papel tirando `inbox:reply`
+  nada do outro tenant com o mesmo número; cadastro ligado só pelo e-mail entra) e a da equipe sem conversas (o telefone
+  declarado de outra pessoa não exporta a conversa dela); editar papel tirando `inbox:reply`
   devolve à fila. `channels-events.test.ts`: prazo de `CHANNEL_EVENT_RETENTION_DAYS`. `lgpd-export.test.ts`: o zip
   ganhou `conversas-whatsapp.json`.
 
@@ -566,15 +576,17 @@ Reunidos aqui; o detalhe de cada um está na seção da fase.
 | C7 | Excluir a organização não remove os **canais** (credenciais cifradas e a instância Evolution ou o número na Meta continuam; os avisos novos são `ignored` e saem pela retenção). Desconectar no provedor é ação do owner antes de excluir |
 | C7 | Depois de excluído o cliente, o `channel_event` que trouxe as mensagens dele ainda guarda o `raw` (telefone e texto) até o fim da retenção (padrão 30 dias). O `/admin` só reprocessa aviso `failed` ou `ignored`, então o que já foi gravado não volta; um aviso falho do mesmo número reprocessado depois recria o contato, como uma mensagem nova |
 | C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
+| C7 | O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
 | C7 | Backup anterior à exclusão ainda contém as conversas: restaurar exige reaplicar as exclusões (`tech/14-deploy.md`) |
 
 ## Desvios da SPEC (C7)
 
-- A SPEC diz que a exclusão de `user` "desfaz o vínculo (`set null`)". No **tenant** é isso; na **plataforma**, o contato
-  vinculado ao usuário excluído é **apagado** com as conversas e a mídia, como o do cliente no tenant: a plataforma é a
-  controladora da conversa com o próprio usuário e não há base para mantê-la depois do pedido de eliminação. Decisão a
-  confirmar pelo proprietário (trocar por `set null` é mudar `detachUserFromInbox`).
-- A exportação entra também no zip da **equipe** (conversas em que a pessoa é o contato), não só no do cliente.
+- A exclusão de `user` desfaz o vínculo em **todos** os escopos (como a SPEC), e o zip da equipe não traz conversas. A primeira
+  versão da C7 apagava o contato da plataforma e exportava as conversas pelo vínculo com `user`; o `/security-review` mostrou que
+  esse vínculo vem de telefone declarado, sem verificação (seção "Por que o vínculo com `user` não decide nada"). Consequência:
+  a conversa da plataforma com um usuário excluído fica, sem vínculo (o telefone e as mensagens continuam, como dado da
+  plataforma). **Decisão pendente do proprietário:** prazo de retenção ou exclusão manual dessas conversas.
+- `file.created_by` dos anexos enviados pela pessoa excluída também é zerado (a SPEC só falava das mensagens).
 - A exclusão da organização apaga também os `channel_event` do tenant e a mídia `inbound/` deles (a SPEC só falava das
   conversas e dos objetos). Os canais ficam (limite acima).
 - A retenção de `channel_event` (30 dias) já existia desde os canais; a C7 só a tornou configurável

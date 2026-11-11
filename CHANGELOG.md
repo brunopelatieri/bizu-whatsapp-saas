@@ -13,10 +13,10 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 - **Caixa de entrada, fase C7 (LGPD e fechamento)**: excluir um cliente (`DELETE /api/customers/:id`) ou anonimizar a
   pessoa do portal apaga os contatos de WhatsApp vinculados a ele, com conversas, mensagens, arquivos e objetos do
   armazenamento; excluir a organização apaga toda a caixa de entrada do tenant e os avisos de canal (`channel_event`, com a
-  mídia `inbound/` que citam); anonimizar a pessoa da equipe deixa as mensagens que ela enviou sem autor, desfaz o vínculo
-  do contato no tenant e apaga o contato da plataforma ligado a ela. A exportação de dados (equipe e portal) ganha
-  `conversas-whatsapp.json` (as conversas em que a pessoa é o contato; anexos por nome, tipo e tamanho; sem quem atendeu;
-  até 20.000 mensagens). Editar um papel personalizado tirando `inbox:reply` passa a devolver à fila as conversas de quem o
+  mídia `inbound/` que citam); anonimizar a pessoa da equipe deixa as mensagens e anexos que ela enviou sem autor e desfaz os
+  vínculos de contato dela (sem apagar conversa). A exportação de dados do portal ganha `conversas-whatsapp.json` (as
+  conversas com os cadastros da pessoa; anexos por nome, tipo e tamanho; sem quem atendeu; até 20.000 mensagens); a da
+  equipe não traz conversas (o vínculo com `user` vem de telefone declarado, sem verificação). Editar um papel personalizado tirando `inbox:reply` passa a devolver à fila as conversas de quem o
   tem. Skill `ctx-inbox`. **Migração:** nenhuma migration. Variável nova opcional `CHANNEL_EVENT_RETENTION_DAYS` (padrão
   30, o prazo que já valia). Projeto derivado com dados reais: excluir cliente agora apaga as conversas dele (avise a
   equipe); os canais de uma organização excluída continuam no banco e no provedor (apague os números antes).

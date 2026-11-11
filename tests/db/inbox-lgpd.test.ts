@@ -24,7 +24,7 @@ import {
 /**
  * C7: a LGPD da caixa de entrada. Excluir ou anonimizar o cliente apaga os contatos dele com
  * conversas, mensagens, `file` e objeto; anonimizar a pessoa da equipe tira o autor e o vínculo
- * (e apaga o contato da plataforma); excluir a organização apaga tudo, inclusive os avisos de canal
+ * (sem apagar conversa: o vínculo com `user` é só um telefone declarado); excluir a organização apaga tudo, inclusive os avisos de canal
  * e a mídia `inbound/` deles; a exportação traz as mensagens do titular, sem dado de terceiros; um
  * tenant não apaga nem exporta o que é de outro.
  */
@@ -202,7 +202,7 @@ describe("anonimizar a pessoa do portal (lgpd.delete)", () => {
 });
 
 describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
-  it("tira o autor e o vínculo no tenant e apaga o contato dela na plataforma", async () => {
+  it("tira o autor e o vínculo (no tenant e na plataforma) sem apagar as conversas", async () => {
     const person = await createUser(owner);
     userIds.push(person.id);
     await addMember(owner, tenantA, person, "member");
@@ -237,10 +237,11 @@ describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
     expect(memory.objects.has(asMember.mediaKey)).toBe(true);
     expect(await count("file where id = $1 and created_by is null", asMember.fileId)).toBe(1);
 
-    expect(await count("chat_contact where id = $1", withPlatform.contactId)).toBe(0);
-    expect(await count("conversation where id = $1", withPlatform.id)).toBe(0);
-    expect(await count("file where id = $1", withPlatform.fileId)).toBe(0);
-    expect(memory.objects.has(withPlatform.mediaKey)).toBe(false);
+    // Na plataforma também só o vínculo: o telefone do usuário não é verificado, e apagar por ele
+    // deixaria quem declarou o número de outro apagar a conversa desse outro.
+    expect(await count("chat_contact where id = $1 and user_id is null", withPlatform.contactId)).toBe(1);
+    expect(await count("conversation where id = $1", withPlatform.id)).toBe(1);
+    expect(memory.objects.has(withPlatform.mediaKey)).toBe(true);
   });
 });
 
@@ -347,17 +348,17 @@ describe("exportação (lgpd.export)", () => {
     expect(result.conversations.map(({ organizacao }) => organizacao)).toEqual(["Clínica LGPD B"]);
   });
 
-  it("a pessoa da equipe recebe as conversas em que é o contato (plataforma e organização)", async () => {
+  it("a exportação da equipe não traz conversas: o vínculo com user é só um telefone declarado", async () => {
+    // Quem se cadastra com o telefone de outra pessoa é vinculado sozinho à conversa dela.
     const person = await createUser(owner);
     await addMember(owner, tenantA, person, "member");
-    await conversationWithMedia(platformScope, platformChannel, { userId: person.id });
+    const victim = await conversationWithMedia(platformScope, platformChannel, { userId: person.id });
     await conversationWithMedia(tenantScope(tenantA), channelA, { userId: person.id });
 
-    const result = await conversationsOf({ type: "user", id: person.id });
+    const files = await buildExportFiles({ type: "user", id: person.id });
 
-    expect(result.conversations.map(({ organizacao }) => organizacao).sort()).toEqual(
-      ["Clínica LGPD A", null].sort(),
-    );
+    expect(files.map(({ name }) => name)).not.toContain("conversas-whatsapp.json");
+    expect(Buffer.concat(files.map(({ data }) => data)).toString()).not.toContain(victim.phone);
   });
 });
 

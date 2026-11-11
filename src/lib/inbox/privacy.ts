@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or, type SQL, sql } from "drizzle-orm";
 import type { Tx } from "@/db/rls";
 import { chatContact, conversation, file, message, organization } from "@/db/schema";
 import { notifyInbox } from "@/lib/inbox/notify";
@@ -109,18 +109,12 @@ export function purgeTenantInbox(tx: Tx, tenantId: string): Promise<InboxPurge> 
 
 /**
  * Anonimização de `user`. Como atendente: as mensagens que enviou ficam sem autor (e os anexos,
- * sem `created_by`) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila por `releaseAssignments`).
- * Como contato: no tenant, o contato perde o vínculo (a conversa é do owner, controlador); na
- * plataforma, que é a controladora da conversa com o próprio usuário, o contato vinculado a ele
- * sai com as conversas e a mídia, como o do cliente no tenant.
+ * sem `created_by`) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila
+ * por `releaseAssignments`). Como contato: só perde o vínculo, no tenant e na plataforma (SPEC). O
+ * vínculo com `user` nasce do telefone que a pessoa declarou, sem verificação: apagar ou exportar
+ * conversas por ele entregaria a quem declarou o número de outro as mensagens desse outro.
  */
-export async function detachUserFromInbox(tx: Tx, userId: string): Promise<InboxPurge> {
-  const platform = await purgeContacts(
-    tx,
-    and(isNull(chatContact.tenantId), eq(chatContact.userId, userId)) as SQL,
-    { notify: true },
-  );
-
+export async function detachUserFromInbox(tx: Tx, userId: string): Promise<void> {
   await tx
     .update(chatContact)
     .set({ userId: null, updatedAt: sql`now()` })
@@ -131,8 +125,6 @@ export async function detachUserFromInbox(tx: Tx, userId: string): Promise<Inbox
     .set({ createdBy: null })
     .where(and(eq(file.createdBy, userId), eq(file.ownerType, "message")));
   await tx.update(conversation).set({ closedBy: null }).where(eq(conversation.closedBy, userId));
-
-  return platform;
 }
 
 export type ExportedMessage = {
@@ -157,24 +149,19 @@ export type ExportedConversation = {
 };
 
 /**
- * As conversas em que o titular é o contato: pelos cadastros de cliente (exportação do portal: os mesmos que a
- * anonimização trata como dela, ligados pela conta ou pelo e-mail) ou
- * pelo vínculo com o usuário (exportação da equipe, em qualquer escopo). Sem dado de terceiros:
- * nem quem atendeu, nem o nome dado pela equipe, nem a carga do provedor ou o erro dele. Roda em
+ * As conversas com os cadastros de cliente do titular (exportação do portal: os mesmos cadastros que a
+ * anonimização trata como dele, ligados pela conta ou pelo e-mail). Sem dado de terceiros: nem quem
+ * atendeu, nem o nome dado pela equipe, nem a carga do provedor ou o erro dele. Roda em
  * `withPlatformScope` (a exportação atravessa tenants, como `cadastros-nas-organizacoes.json`).
+ * A exportação da equipe não chama aqui: o vínculo com `user` é só um telefone declarado.
  */
 export async function conversationsForExport(
   tx: Tx,
-  subject: { customerIds: string[] } | { userId: string },
+  customerIds: string[],
   limit = EXPORT_MESSAGE_LIMIT,
 ): Promise<{ conversations: ExportedConversation[]; truncated: boolean }> {
-  const contactWhere =
-    "userId" in subject
-      ? eq(chatContact.userId, subject.userId)
-      : subject.customerIds.length > 0
-        ? inArray(chatContact.customerId, subject.customerIds)
-        : undefined;
-  if (!contactWhere) return { conversations: [], truncated: false };
+  if (customerIds.length === 0) return { conversations: [], truncated: false };
+  const contactWhere = inArray(chatContact.customerId, customerIds);
 
   const heads = await tx
     .select({

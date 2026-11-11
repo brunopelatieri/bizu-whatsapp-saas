@@ -769,12 +769,12 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await tx.delete(member).where(eq(member.userId, id));
   // As conversas que a pessoa atendia voltam à fila, em todos os tenants.
   await releaseAssignments(tx, id);
-  // Caixa de entrada: mensagens sem autor; contato da plataforma ligado a ela sai com as conversas.
-  const inbox = await detachUserFromInbox(tx, id);
+  // Caixa de entrada: mensagens e anexos sem autor; contatos ligados a ela só perdem o vínculo.
+  await detachUserFromInbox(tx, id);
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
 
-  return { storageKeys: [...inbox.storageKeys, ...(await exportKeysOf(tx, "user", id))] };
+  return { storageKeys: await exportKeysOf(tx, "user", id) };
 }
 
 const anonymizedCustomer = {
