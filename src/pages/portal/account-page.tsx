@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
+import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { AccountDeletionCard } from "@/components/privacy/account-deletion-card";
 import { ExportCard } from "@/components/privacy/export-card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { ApiError, apiFetch } from "@/lib/api/client";
+import { passwordChecklist } from "@/lib/auth/password-checklist";
 import { portalClient } from "@/lib/auth/portal-client";
 import {
   type PortalProfileInput,
@@ -197,8 +199,10 @@ function PasswordCard() {
                       {...field}
                       type="password"
                       autoComplete="new-password"
+                      placeholder="Crie uma senha forte"
                     />
                   </FormControl>
+                  <PasswordStrengthMeter password={field.value} />
                   <FormMessage />
                 </FormItem>
               )}
@@ -206,7 +210,11 @@ function PasswordCard() {
             <Button
               type="submit"
               className="w-fit"
-              disabled={form.formState.isSubmitting || !form.formState.isValid}
+              disabled={
+                form.formState.isSubmitting ||
+                !form.formState.isValid ||
+                !passwordChecklist(form.watch("newPassword")).valid
+              }
             >
               Salvar senha
             </Button>

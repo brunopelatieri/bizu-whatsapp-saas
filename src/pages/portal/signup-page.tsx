@@ -11,6 +11,7 @@ import {
   authLinkClassName,
   authSubmitClassName,
 } from "@/components/auth/auth-shell";
+import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -23,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { PhoneField } from "@/components/ui/phone-field";
 import { apiFetch } from "@/lib/api/client";
+import { passwordChecklist } from "@/lib/auth/password-checklist";
 import { TERMS_VERSION } from "@/lib/legal/versions";
 import { type PortalSignupInput, portalSignupSchema } from "@/lib/schemas/portal";
 
@@ -157,9 +159,11 @@ export function PortalSignupPage() {
                       {...field}
                       type="password"
                       autoComplete="new-password"
+                      placeholder="Crie uma senha forte"
                       className={authInputClassName}
                     />
                   </FormControl>
+                  <PasswordStrengthMeter password={field.value} />
                   <FormMessage />
                 </FormItem>
               )}
@@ -230,7 +234,11 @@ export function PortalSignupPage() {
               type="submit"
               size="lg"
               className={authSubmitClassName}
-              disabled={form.formState.isSubmitting || !form.formState.isValid}
+              disabled={
+                form.formState.isSubmitting ||
+                !form.formState.isValid ||
+                !passwordChecklist(form.watch("password")).valid
+              }
             >
               {form.formState.isSubmitting ? (
                 <Loader2 className="animate-spin" />

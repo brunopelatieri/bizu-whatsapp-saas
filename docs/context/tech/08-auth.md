@@ -126,6 +126,15 @@ Onde a regra é cobrada:
 Senha fora da regra responde 400 com `code: "PASSWORD_POLICY"` e só o texto da regra
 (`PASSWORD_POLICY_MESSAGE`, traduzido também em `src/lib/auth/client.ts`).
 
+**Medidor (S2):** `PasswordStrengthMeter` (`src/components/auth/password-strength-meter.tsx`) mostra
+a barra (`role="progressbar"`, regras cumpridas sobre cinco) e a checklist ao vivo logo abaixo do
+campo de senha nova, e some com o campo vazio; `maxLength` e `noControl` só entram na lista quando
+violadas. Quais linhas aparecem sai de `passwordChecklist` (`src/lib/auth/password-checklist.ts`,
+puro, com teste). Está em `SignupForm` (cadastro e convite), `/redefinir-senha`,
+`/portal/cadastro` e `PasswordCard` de `/portal/conta`; o botão de enviar fica desabilitado até a
+senha cumprir a regra (e, na redefinição, até coincidir com a confirmação). O `LoginForm` não tem
+medidor. O medidor só orienta: quem recusa senha fraca é o Zod e o servidor.
+
 O hook normaliza `password`, `newPassword` e `currentPassword` em **toda** rota do Better Auth,
 inclusive `/sign-in/email` e as confirmações de 2FA; `confirmIdentity` faz o mesmo. Sem isso,
 quem cadastrou a senha com espaço no fim deixaria de entrar. **O login não cobra complexidade**:

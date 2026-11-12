@@ -27,6 +27,10 @@ Componente de formulário próprio: `phone-field.tsx` (`PhoneField`), campo de t
 de país e máscara (`react-phone-number-input/min`), usado em todo formulário de pessoa; o valor que
 sobe é o E.164 com `+` e quem valida é `phoneSchema` (`tech/28-crm-cadastro.md`).
 
+Outro componente próprio: `components/auth/password-strength-meter.tsx` (`PasswordStrengthMeter`),
+barra e checklist da política de senha, com tokens do tema (`bg-muted`, `text-chart-2` para regra
+cumprida, `text-destructive`, `text-muted-foreground`); onde é usado está em `tech/08-auth.md`.
+
 Componentes UI presentes:
 
 - `avatar`

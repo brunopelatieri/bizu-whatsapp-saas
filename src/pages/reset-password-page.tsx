@@ -10,6 +10,7 @@ import {
   authLinkClassName,
   authSubmitClassName,
 } from "@/components/auth/auth-shell";
+import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -21,11 +22,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { authClient, toAuthActionError } from "@/lib/auth/client";
-import {
-  MIN_PASSWORD_LENGTH,
-  type ResetPasswordInput,
-  resetPasswordSchema,
-} from "@/lib/schemas/auth";
+import { passwordChecklist } from "@/lib/auth/password-checklist";
+import { type ResetPasswordInput, resetPasswordSchema } from "@/lib/schemas/auth";
 
 /** Só renderiza no GET: o token é consumido pelo envio do formulário. */
 export function ResetPasswordPage() {
@@ -85,10 +83,11 @@ export function ResetPasswordPage() {
                     {...field}
                     type="password"
                     autoComplete="new-password"
-                    placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+                    placeholder="Crie uma senha forte"
                     className={authInputClassName}
                   />
                 </FormControl>
+                <PasswordStrengthMeter password={field.value} />
                 <FormMessage />
               </FormItem>
             )}
@@ -117,7 +116,12 @@ export function ResetPasswordPage() {
             type="submit"
             size="lg"
             className={authSubmitClassName}
-            disabled={form.formState.isSubmitting || !form.formState.isValid}
+            disabled={
+              form.formState.isSubmitting ||
+              !form.formState.isValid ||
+              !passwordChecklist(form.watch("password")).valid ||
+              form.watch("password") !== form.watch("confirmPassword")
+            }
           >
             {form.formState.isSubmitting ? (
               <Loader2 className="animate-spin" />
