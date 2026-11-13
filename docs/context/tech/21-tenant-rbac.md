@@ -68,7 +68,12 @@ personalizado) valem para os números de WhatsApp (`docs/specs/whatsapp-canais/s
 `/api/channels/*` entram com a etapa B1 e a matriz `tests/db/rbac.test.ts` as cobre então.
 
 `phone:confirm` (liberar à mão o telefone de membros e clientes, `tech/28`) é **reservada**: só o
-owner tem, e não entra em papel personalizado. Ainda sem rota (pré-produção, T2).
+owner tem, e não entra em papel personalizado. Protege `GET /api/phone-verifications` e
+`POST /api/phone-verifications/:id/confirm`. O que o owner libera vale **só na organização**
+(`phone_tenant_vouch`), e ele não libera o próprio telefone nem o de quem é owner de alguma
+organização. Sair da equipe ou virar owner mexe nos pedidos e nas liberações: `removeMember`
+chama `phoneAfterMemberLeft`, e a troca de papel e a criação de organização chamam
+`routeVerificationToPlatform`.
 
 `inbox:read`, `inbox:reply`, `inbox:assign` e `inbox:supervise` são da caixa de entrada
 (`docs/specs/caixa-de-entrada/spec.md`, `tech/30-caixa-de-entrada.md`): owner e admin têm as quatro,

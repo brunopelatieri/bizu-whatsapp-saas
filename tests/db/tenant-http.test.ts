@@ -287,6 +287,12 @@ describe("rotas de equipe sobre o servidor Node", () => {
 
     afterAll(() => setProvidersForTests(undefined));
 
+    it("POST /api/phone-verifications/:id/confirm sem corpo chega à regra de negócio", async () => {
+      const response = await request("POST", `/api/phone-verifications/${anyId}/confirm`);
+
+      expect(response.status).toBe(404);
+    });
+
     it.each(["reactivate", "pause", "portal"])(
       "POST /api/billing/%s sem corpo chega à regra de negócio",
       async (route) => {
@@ -303,6 +309,7 @@ describe("rotas de equipe sobre o servidor Node", () => {
       `/api/admin/channels/${anyId}/default`,
       `/api/admin/subscriptions/${anyId}/cancel`,
       `/api/admin/subscriptions/${anyId}/sync`,
+      `/api/admin/phone-verifications/${anyId}/confirm`,
     ])("POST %s sem corpo chega à regra de negócio", async (path) => {
       const response = await request("POST", path, {
         headers: { Cookie: platformCookie },

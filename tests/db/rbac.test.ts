@@ -121,6 +121,9 @@ const endpoints = [
   ["POST", `/api/inbox/contacts/${anyId}/link`, "inbox:reply"],
   // Também `customer:create`, que todo papel estático com `inbox:reply` tem.
   ["POST", `/api/inbox/contacts/${anyId}/customer`, "inbox:reply"],
+  // Fila de verificação de telefone: liberar à mão é reservado ao owner.
+  ["GET", "/api/phone-verifications", "phone:confirm"],
+  ["POST", `/api/phone-verifications/${anyId}/confirm`, "phone:confirm"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };

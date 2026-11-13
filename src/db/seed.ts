@@ -122,6 +122,9 @@ const EXAMPLE_PASSWORD = "Bizu-seed-2026!";
 
 /** O telefone do seed nasce confirmado: sem isso, ninguém do seed entra nem é vinculado. */
 const seedPhone = (phone: string) => ({ ...phoneValues(phone), ...verifiedPhone("manual") });
+// Na ficha de cliente, `manual` é o número que o cliente declarou e o owner liberou: não atrai
+// conversa. O do seed vale como informado pela equipe.
+const seedCustomerPhone = (phone: string) => ({ ...phoneValues(phone), ...verifiedPhone("team") });
 
 export function assertSeedAllowed(env: Record<string, string | undefined>) {
   if (env.NODE_ENV === "production" && env.SEED_ALLOW_PRODUCTION !== "1") {
@@ -473,13 +476,13 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   for (const tenantId of [acme.id, beta.id]) {
     await seedCustomer(tenantId, {
       ...julia,
-      ...seedPhone(julia.phone),
+      ...seedCustomerPhone(julia.phone),
       tenantId,
       portalUserId: juliaUser.id,
       status: "active",
     });
   }
-  await seedCustomer(acme.id, { ...lead, ...seedPhone(lead.phone), tenantId: acme.id });
+  await seedCustomer(acme.id, { ...lead, ...seedCustomerPhone(lead.phone), tenantId: acme.id });
 
   // Campos adicionais de exemplo do tenant acme (SPEC crm-cadastro, A3): um de lista, um de
   // data e um de lista múltipla. Idempotente pelo índice único `(tenant_id, entity, key)`.

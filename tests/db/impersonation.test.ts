@@ -580,6 +580,9 @@ describe("personificação", () => {
       ["PATCH", `/api/inbox/contacts/${anyId}`],
       ["POST", `/api/inbox/contacts/${anyId}/link`],
       ["POST", `/api/inbox/contacts/${anyId}/customer`],
+      // Verificação de telefone: a sessão de suporte não confirma nem libera o número de ninguém.
+      ["POST", "/api/me/phone-verification/confirm"],
+      ["POST", `/api/phone-verifications/${anyId}/confirm`],
     ])("%s %s responde IMPERSONATION_BLOCKED e audita", async (method, path) => {
       const response = await call(method, path, {
         cookie,

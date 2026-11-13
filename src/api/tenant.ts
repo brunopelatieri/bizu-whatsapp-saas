@@ -27,6 +27,7 @@ import { getAuth } from "@/lib/auth/server";
 import { createOrganizationWithinLimit } from "@/lib/billing/organizations";
 import { startTrial } from "@/lib/billing/subscription";
 import { logError } from "@/api/log";
+import { routeVerificationToPlatform } from "@/lib/phone/requests";
 import {
   activeTenantSchema,
   createTenantSchema,
@@ -71,6 +72,11 @@ tenantRoutes.post(
     );
 
     await activateTenant(c.get("session").id, user.id, tenant.id);
+    // Owner responde à plataforma pelo telefone: o pedido que estivesse na fila de outra
+    // organização sai de lá (`src/lib/phone/requests.ts`).
+    await routeVerificationToPlatform(user.id).catch((error: unknown) =>
+      logError("Falha ao encaminhar o pedido de verificação à plataforma", error),
+    );
     // O tenant já existe: sem plano utilizável ou com falha aqui, ele segue sem limites
     // em vez de perder o onboarding. O proprietário corrige em /admin/tenants/:id.
     await startTrial(tenant.id).catch((error: unknown) =>

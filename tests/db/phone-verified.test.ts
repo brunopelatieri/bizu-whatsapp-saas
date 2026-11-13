@@ -9,9 +9,9 @@ import {
   accountPhoneConflicts,
   assertOwnerPhoneFree,
   assertPhoneFreeInTenant,
-  ownerPhoneHolder,
-  platformStaffPhoneHolder,
-  teamPhoneHolder,
+  ownerPhoneHolders,
+  platformStaffPhoneHolders,
+  teamPhoneHolders,
 } from "@/lib/phone/uniqueness";
 import { linkMemberCustomer } from "@/lib/tenant/team-customer";
 import { asPlatform, makePlatformUser } from "./billing-helpers";
@@ -105,8 +105,8 @@ describe("unicidade do telefone entre contas", () => {
     const key = await setUserPhone(first, uniquePhone());
 
     const result = await withPlatformScope("teste: unicidade", async (tx) => ({
-      holder: await ownerPhoneHolder(tx, key, second.id),
-      self: await ownerPhoneHolder(tx, key, first.id),
+      holder: await ownerPhoneHolders(tx, key, second.id),
+      self: await ownerPhoneHolders(tx, key, first.id),
       refused: await assertOwnerPhoneFree(tx, key, second.id).then(
         () => null,
         (error: { code?: string; status?: number }) => ({
@@ -116,8 +116,8 @@ describe("unicidade do telefone entre contas", () => {
       ),
     }));
 
-    expect(result.holder).toBe(first.id);
-    expect(result.self).toBeNull();
+    expect(result.holder).toEqual([first.id]);
+    expect(result.self).toEqual([]);
     expect(result.refused).toEqual({ code: "PHONE_IN_USE", status: 409 });
   });
 
@@ -148,16 +148,16 @@ describe("unicidade do telefone entre contas", () => {
     const key = await setUserPhone(colleague, uniquePhone());
 
     const result = await withPlatformScope("teste: unicidade", async (tx) => ({
-      same: await teamPhoneHolder(tx, tenant.id, key, newcomer.id),
-      elsewhere: await teamPhoneHolder(tx, other.id, key, outsider.id),
+      same: await teamPhoneHolders(tx, tenant.id, key, newcomer.id),
+      elsewhere: await teamPhoneHolders(tx, other.id, key, outsider.id),
       // O colega não é owner de nada: para o grupo dos owners, o número está livre.
-      owners: await ownerPhoneHolder(tx, key, outsider.id),
+      owners: await ownerPhoneHolders(tx, key, outsider.id),
       conflicts: await accountPhoneConflicts(tx, newcomer.id, key),
     }));
 
-    expect(result.same).toBe(colleague.id);
-    expect(result.elsewhere).toBeNull();
-    expect(result.owners).toBeNull();
+    expect(result.same).toEqual([colleague.id]);
+    expect(result.elsewhere).toEqual([]);
+    expect(result.owners).toEqual([]);
     expect(result.conflicts).toEqual([colleague.id]);
   });
 
@@ -190,11 +190,11 @@ describe("unicidade do telefone entre contas", () => {
     const key = await setUserPhone(platformOwner, uniquePhone());
 
     const result = await withPlatformScope("teste: unicidade", async (tx) => ({
-      holder: await platformStaffPhoneHolder(tx, key, support.id),
+      holder: await platformStaffPhoneHolders(tx, key, support.id),
       conflicts: await accountPhoneConflicts(tx, support.id, key),
     }));
 
-    expect(result.holder).toBe(platformOwner.id);
+    expect(result.holder).toEqual([platformOwner.id]);
     expect(result.conflicts).toEqual([platformOwner.id]);
   });
 
@@ -248,12 +248,14 @@ describe("estado de verificação nos cadastros", () => {
     const customer = await createCustomer(boss);
     const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
 
-    // A conta do portal nasceu do número que a equipe cadastrou.
+    // A conta do portal é global: o que a equipe desta organização cadastrou vale na ficha
+    // (`team`), mas não confirma a conta.
     const before = await owner<Verification[]>`
       select phone_verified_at as at, phone_verified_via as via
       from portal_user where email = ${customer.email}
     `;
-    expect(before[0]?.via).toBe("team");
+    expect(before[0]).toEqual({ at: null, via: null });
+    expect(await customerRow(customer.id)).toMatchObject({ via: "team" });
 
     const stolen = uniquePhone();
     const response = await call("PATCH", "/api/portal/me", {
@@ -303,25 +305,32 @@ describe("estado de verificação nos cadastros", () => {
     });
   });
 
-  it("a conta do portal criada pelo convite herda o estado da ficha, nunca nasce confirmada sozinha", async () => {
+  it("a conta do portal criada pelo convite nasce sempre pendente, qualquer que seja o estado da ficha", async () => {
     const boss = await createUser(owner);
     await createTenant(boss);
-    const pending = await createCustomer(boss);
-    await asPlatform(
-      owner,
-      (tx) => tx`
-        update customer set phone_verified_at = null, phone_verified_via = null
-        where id = ${pending.id}
-      `,
-    );
+    const account = async (email: string) =>
+      (
+        await owner<Verification[]>`
+          select phone_verified_at as at, phone_verified_via as via
+          from portal_user where email = ${email}
+        `
+      )[0];
 
-    await inviteAndEnter(boss, mail, pending.id, pending.email);
+    // Pendente, confirmada pela equipe, liberada pelo owner ou provada na ficha: a conta é
+    // global e outra identidade, e só a prova feita na sessão DELA a confirma.
+    for (const via of [null, "team", "manual", "whatsapp"]) {
+      const record = await createCustomer(boss);
+      await asPlatform(
+        owner,
+        (tx) => tx`
+          update customer set phone_verified_at = ${via ? new Date() : null}, phone_verified_via = ${via}
+          where id = ${record.id}
+        `,
+      );
+      await inviteAndEnter(boss, mail, record.id, record.email);
 
-    const [account] = await owner<Verification[]>`
-      select phone_verified_at as at, phone_verified_via as via
-      from portal_user where email = ${pending.email}
-    `;
-    expect(account).toEqual({ at: null, via: null });
+      expect(await account(record.email), String(via)).toEqual({ at: null, via: null });
+    }
   });
 
   it("gravar o mesmo número de novo no portal não derruba a confirmação", async () => {

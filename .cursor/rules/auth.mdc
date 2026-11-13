@@ -30,5 +30,6 @@ alwaysApply: false
 - O `sign-in/email` só aceita JSON, validado por `signInRequestSchema`, e o Better Auth recebe o JSON validado, nunca o corpo cru: o endpoint dele também aceita formulário, que escaparia de tudo o que o proxy lê do corpo (o bloqueio e o `barredSignIn` do portal).
 - Telefone é obrigatório em toda conta: o hook `user.create.before` das duas instâncias grava `phone_normalized` e `phone_key` a partir do contexto do cadastro e recusa sem telefone válido (`tech/28-crm-cadastro.md`).
 - Token de confirmação da exclusão do portal é de uso único, só em hash, consumido por POST; nenhum link da LGPD consome token em GET.
+- Token de verificação de telefone: só em hash, uso único, consumido por POST **autenticado**, com o token no corpo e o cadastro tirado da sessão (`/api/me/phone-verification/confirm` e a do portal). Não criar rota pública de confirmação nem rota com o token no caminho. O que uma organização confirma (owner ou link do canal dela) vale só nela; só o pedido da plataforma confirma a conta para o sistema inteiro (`src/lib/phone/requests.ts`, `tech/28-crm-cadastro.md`).
 
 Para entender este domínio, leia: docs/context/tech/08-auth.md, docs/context/tech/25-portal-clientes.md e docs/context/tech/26-seguranca.md, docs/context/tech/27-lgpd-arquivos.md

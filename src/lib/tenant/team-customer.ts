@@ -1,7 +1,9 @@
-import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type Tx, withTenant } from "@/db/rls";
 import { customer, member, user } from "@/db/schema";
 import { auditInTransaction } from "@/lib/audit";
+import { userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
+import { AUTO_LINK_CUSTOMER_VIAS } from "@/lib/phone/verification";
 
 /**
  * A pessoa da equipe que também é cliente da própria organização
@@ -11,7 +13,10 @@ import { auditInTransaction } from "@/lib/audit";
  * e-mail. `customer.user_id` os liga por id; o papel mostrado na ficha é lido de `member` na
  * hora, não gravado.
  *
- * **A ligação automática é só pelo telefone, e só com o telefone da conta confirmado.** A ficha
+ * **A ligação automática é só pelo telefone, e só com o telefone da conta confirmado para o
+ * sistema inteiro** (`userPhoneConfirmedGlobally`: prova de posse, ou liberação do proprietário
+ * da plataforma). A liberação do owner de uma organização, mesmo desta, não basta: ela não prova
+ * que o número é da pessoa, e o que está em jogo é a ficha (e as conversas) de um cliente. A ficha
  * ligada será apagada, com as conversas dela, quando a pessoa sair da equipe (D-11). O e-mail da
  * ficha é texto livre de quem cadastra: se bastasse ele, um colaborador salvaria o contato de um
  * cliente com o próprio e-mail e passaria a ser "dono" da ficha e das conversas de outra pessoa.
@@ -35,7 +40,7 @@ export async function matchingTeamMember(tx: Tx, tenantId: string, phoneKey: str
     .select({ id: user.id })
     .from(user)
     .innerJoin(member, eq(member.userId, user.id))
-    .where(and(inTenant(tenantId), eq(user.phoneKey, phoneKey), isNotNull(user.phoneVerifiedAt)))
+    .where(and(inTenant(tenantId), eq(user.phoneKey, phoneKey), userPhoneConfirmedGlobally))
     .limit(2);
 
   const [only] = rows;
@@ -52,16 +57,16 @@ export async function matchingTeamMember(tx: Tx, tenantId: string, phoneKey: str
 
 /**
  * Quem acabou de entrar na equipe e já era cliente da organização: liga a ficha que tem o mesmo
- * telefone, confirmado dos dois lados. Roda em `withTenant`. Devolve o id da ficha ligada (a
+ * telefone, confirmado dos dois lados (na ficha, por uma forma de `AUTO_LINK_CUSTOMER_VIAS`). Roda em `withTenant`. Devolve o id da ficha ligada (a
  * que já estava ligada, se havia), ou `null`.
  */
 export async function linkExistingCustomer(tx: Tx, tenantId: string, userId: string) {
   const [person] = await tx
-    .select({ phoneKey: user.phoneKey, phoneVerifiedAt: user.phoneVerifiedAt })
+    .select({ phoneKey: user.phoneKey })
     .from(user)
     .innerJoin(member, eq(member.userId, user.id))
-    .where(and(inTenant(tenantId), eq(user.id, userId)));
-  if (!person?.phoneKey || !person.phoneVerifiedAt) return null;
+    .where(and(inTenant(tenantId), eq(user.id, userId), userPhoneConfirmedGlobally));
+  if (!person?.phoneKey) return null;
 
   const [already] = await tx
     .select({ id: customer.id })
@@ -78,7 +83,9 @@ export async function linkExistingCustomer(tx: Tx, tenantId: string, userId: str
       and(
         eq(customer.tenantId, tenantId),
         eq(customer.phoneKey, person.phoneKey),
-        isNotNull(customer.phoneVerifiedAt),
+        // Não a ficha liberada à mão: lá o número é o que o próprio cliente declarou, e a ficha
+        // ligada é apagada quando a pessoa sai da equipe (D-11).
+        inArray(customer.phoneVerifiedVia, [...AUTO_LINK_CUSTOMER_VIAS]),
         isNull(customer.userId),
       ),
     )

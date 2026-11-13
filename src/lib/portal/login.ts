@@ -16,6 +16,7 @@ import { type ConsentMeta, withSignupConsent } from "@/lib/lgpd/consent";
 import { checkLimit } from "@/lib/billing/limits";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { ensurePortalUser } from "@/lib/portal/access";
+import { ensureCustomerVerification } from "@/lib/phone/requests";
 import type { PortalSignupInput } from "@/lib/schemas/portal";
 
 /**
@@ -77,8 +78,6 @@ export async function requestPortalLogin(email: string, org: string) {
         id: customer.id,
         name: customer.name,
         phone: customer.phone,
-        phoneVerifiedAt: customer.phoneVerifiedAt,
-        phoneVerifiedVia: customer.phoneVerifiedVia,
         status: customer.status,
         portalUserId: customer.portalUserId,
       })
@@ -91,7 +90,7 @@ export async function requestPortalLogin(email: string, org: string) {
   // Ativado por `status`, sem convite: ainda não tem identidade no portal.
   if (!current.portalUserId) {
     if (!current.phone) return;
-    const portalUserId = await ensurePortalUser(email, current.name, current.phone, current);
+    const portalUserId = await ensurePortalUser(email, current.name, current.phone);
 
     await withTenant(tenant.id, (tx) =>
       tx
@@ -187,10 +186,13 @@ export async function confirmPortalSignup(email: string, org: string) {
         phone: person.phone,
         phoneNormalized: person.phoneNormalized,
         phoneKey: person.phoneKey,
-        // O número do autocadastro é só declarado até a pessoa confirmá-lo: a ficha herda o
-        // estado da conta, e o vínculo automático da conversa espera a confirmação.
-        phoneVerifiedAt: person.phoneVerifiedAt,
-        phoneVerifiedVia: person.phoneVerifiedVia,
+        // O número do autocadastro é só declarado até a pessoa confirmá-lo. A ficha só herda a
+        // confirmação da conta quando ela vale no sistema inteiro (prova de posse, ou liberação
+        // da plataforma): o que OUTRA organização atestou sobre esta pessoa não vale nesta.
+        ...(person.phoneVerifiedAt &&
+        (person.phoneVerifiedVia === "whatsapp" || person.phoneVerifiedVia === "manual")
+          ? { phoneVerifiedAt: person.phoneVerifiedAt, phoneVerifiedVia: person.phoneVerifiedVia }
+          : {}),
       })
       .onConflictDoUpdate({
         target: [customer.tenantId, customer.email],
@@ -200,6 +202,9 @@ export async function confirmPortalSignup(email: string, org: string) {
       .returning({ id: customer.id });
 
     if (!row) return;
+
+    // Telefone do autocadastro, só declarado: entra na fila de verificação da organização.
+    await ensureCustomerVerification(tx, tenant.id, row.id);
 
     await auditInTransaction(tx, "portal.signed_up", {
       actor: { type: "portal_user", id: person.id },

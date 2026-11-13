@@ -203,8 +203,11 @@ senha**, que é o que um cadastro nunca confirmado tem.
 
 A conta da equipe só aceita número que recebe WhatsApp (`whatsappPhoneSchema`), e o telefone do
 cadastro nasce **pendente** (`phone_verified_at` nulo): não conta na unicidade nem atrai o vínculo
-automático das conversas até ser confirmado. Detalhe em `tech/28-crm-cadastro.md`, "Telefone
-verificado e único".
+automático das conversas até ser confirmado. O hook de cadastro abre o pedido de verificação na
+plataforma, e o aceite do convite abre o da organização (`ensureUserVerification`). A confirmação
+pelo link é `POST /api/me/phone-verification/confirm`, só na sessão da própria conta, com o token
+no corpo (nunca em GET nem em rota pública) e bloqueada em personificação. Detalhe em
+`tech/28-crm-cadastro.md`, "Telefone verificado e único" e "Pedido de verificação e liberação".
 
 ## Bloqueio de login por tentativas
 

@@ -1,6 +1,10 @@
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { AUTO_LINK_CUSTOMER_VIAS } from "@/lib/phone/verification";
+import { userPhoneConfirmed } from "@/lib/phone/confirmed";
 import { type Scope, scopeTenantId, type Tx } from "@/db/rls";
 import { chatContact, chatContactIdentity, customer, member, user } from "@/db/schema";
+import { conversation } from "@/db/schema";
+import { notifyInbox } from "@/lib/inbox/notify";
 import type { ChatContactOrigin } from "@/lib/inbox/constants";
 import { normalizePhone } from "@/lib/phone/br";
 
@@ -140,10 +144,22 @@ export async function linkCandidates(
   limit = 20,
   { verifiedOnly = false }: { verifiedOnly?: boolean } = {},
 ) {
-  // No painel, a equipe vê quem tem o número só declarado e decide sabendo disso.
-  const userIsVerified = sql<boolean>`${user.phoneVerifiedAt} is not null`;
-  const userVerified = verifiedOnly ? isNotNull(user.phoneVerifiedAt) : undefined;
-  const customerVerified = verifiedOnly ? isNotNull(customer.phoneVerifiedAt) : undefined;
+  // Confirmado PARA ESTE ESCOPO: a liberação do owner de outra organização não vale aqui
+  // (`src/lib/phone/confirmed.ts`). No painel, a equipe vê quem tem o número só declarado e
+  // decide sabendo disso.
+  const confirmed = userPhoneConfirmed(scope);
+  const userIsVerified = sql<boolean>`coalesce(${confirmed}, false)`;
+  const userVerified = verifiedOnly ? confirmed : undefined;
+  // Na ficha, `manual` é o número que o próprio cliente declarou e o owner liberou sem prova:
+  // serve para a organização tratar a ficha como confirmada, mas não para entregar a ela,
+  // sozinha, a conversa de quem tiver esse número. O que a equipe informou (`team`), o contato
+  // que escreveu (`inbound`) e a prova de posse (`whatsapp`) atraem.
+  const customerVerified = verifiedOnly
+    ? and(
+        isNotNull(customer.phoneVerifiedAt),
+        inArray(customer.phoneVerifiedVia, [...AUTO_LINK_CUSTOMER_VIAS]),
+      )
+    : undefined;
 
   const users =
     scope.kind === "tenant"
@@ -214,4 +230,48 @@ export async function autoLinkContact(tx: Tx, scope: Scope, contactId: string, p
 
   await tx.update(chatContact).set(link).where(eq(chatContact.id, contactId));
   return link;
+}
+
+/**
+ * O cliente provou a posse do número (link de verificação): o contato do tenant que já escreveu
+ * por ele, ainda sem cadastro, passa a ser deste cliente. Só contato sem vínculo: o que a equipe
+ * ligou à mão não é desfeito. Avisa as conversas do contato, para o painel reler o vínculo.
+ */
+export async function linkUnlinkedContactToCustomer(
+  tx: Tx,
+  tenantId: string,
+  phoneKey: string,
+  customerId: string,
+) {
+  const linked = await tx
+    .update(chatContact)
+    .set({ customerId })
+    .where(
+      and(
+        eq(chatContact.tenantId, tenantId),
+        eq(chatContact.phoneKey, phoneKey),
+        isNull(chatContact.customerId),
+        isNull(chatContact.userId),
+      ),
+    )
+    .returning({ id: chatContact.id });
+
+  for (const contact of linked) {
+    const conversations = await tx
+      .select({ id: conversation.id, assignedUserId: conversation.assignedUserId })
+      .from(conversation)
+      .where(eq(conversation.contactId, contact.id));
+
+    for (const row of conversations) {
+      await notifyInbox(tx, {
+        s: tenantId,
+        c: row.id,
+        k: "conversation",
+        a: row.assignedUserId,
+        p: row.assignedUserId,
+      });
+    }
+  }
+
+  return linked.length;
 }

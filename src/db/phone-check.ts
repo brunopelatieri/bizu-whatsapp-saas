@@ -13,4 +13,12 @@ import { sql } from "drizzle-orm";
  */
 export const phoneVerifiedConsistent = sql`(phone_verified_at IS NULL AND phone_verified_via IS NULL) OR (phone_verified_at IS NOT NULL AND phone_key IS NOT NULL AND phone_verified_via IS NOT NULL AND phone_verified_via IN ('whatsapp', 'manual', 'team', 'inbound'))`;
 
+/**
+ * Só nas contas (`user` e `portal_user`), que são globais: as colunas só guardam a prova de
+ * posse (`whatsapp`) e a liberação da plataforma (`manual`). É disso que depende
+ * `userPhoneConfirmedGlobally` (`src/lib/phone/confirmed.ts`), que olha só `phone_verified_at`:
+ * `team` e `inbound` são formas da ficha de cliente.
+ */
+export const accountPhoneViaGlobal = sql`phone_verified_via IS NULL OR phone_verified_via IN ('whatsapp', 'manual')`;
+
 export const phoneRequired = sql`(phone_normalized IS NOT NULL AND phone_key IS NOT NULL) OR coalesce(email, '') LIKE 'deleted+%@invalid'`;

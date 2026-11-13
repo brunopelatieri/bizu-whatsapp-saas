@@ -12,7 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { phoneVerifiedVia } from "../../lib/phone/verification";
-import { phoneRequired, phoneVerifiedConsistent } from "../phone-check";
+import { accountPhoneViaGlobal, phoneRequired, phoneVerifiedConsistent } from "../phone-check";
 import { organization } from "./tenant";
 
 /**
@@ -65,6 +65,7 @@ export const user = pgTable("user", {
   index("user_phone_key_idx").on(table.phoneKey),
   check("user_phone_required", phoneRequired),
   check("user_phone_verified_consistent", phoneVerifiedConsistent),
+  check("user_phone_via_global", accountPhoneViaGlobal),
 ]);
 
 export const session = pgTable(

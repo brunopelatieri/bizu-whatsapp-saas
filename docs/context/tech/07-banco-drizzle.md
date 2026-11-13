@@ -31,6 +31,10 @@ impersonation_grant       consentimento do owner: expires_at, revoked_at, used_b
 tenant_payment_credential encrypted_secret bytea, key_version, sem tela (RLS)
 rate_limit_bucket         key em hash, window_start, count (RATE_LIMIT_STORE=postgres)
 login_throttle            falhas de login por e-mail (HMAC), janela e locked_until (LOGIN_*; sem RLS)
+phone_verification        pedido de confirmação de telefone: um aberto por (cadastro, responsável);
+                          tenant_id nulo = plataforma; token só em hash (scopedPolicy, RLS forçado)
+phone_tenant_vouch        liberação de uma organização para a conta de um membro, por
+                          (user_id, tenant_id), presa à phone_key (tenantPolicy, RLS forçado)
 session                   token unique, user_id, expires_at, impersonated_by,
                           impersonation_expires_at, active_organization_id
 account                   provider_id = credential guarda a senha
@@ -114,7 +118,7 @@ await withPlatformScope("motivo", (tx) => tx.select().from(auditLog));
 Para tabelas que servem o tenant (`/app`) e a plataforma (`/admin`) com o mesmo schema
 (WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Usam `scopedPolicy()`: `tag`,
 `custom_field`, `audit_log` (o evento da plataforma, sem `tenant_id`, grava em `withPlatformData`),
-as tabelas de canal, as da caixa de entrada e `file`;
+as tabelas de canal, as da caixa de entrada, `file` e `phone_verification`;
 usam `platformOnlyPolicy()`: `organization_tag` e `organization_profile` (A4, anotação da plataforma
 sobre a organização; o owner nunca as alcança).
 

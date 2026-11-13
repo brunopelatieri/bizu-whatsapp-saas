@@ -215,12 +215,12 @@ describe("ingestão da caixa de entrada", () => {
   async function createCustomer(
     tenantId: string,
     phone: string,
-    options: { verified?: boolean } = {},
+    options: { verified?: boolean; via?: "team" | "manual" | "whatsapp" | "inbound" } = {},
   ) {
     const id = randomUUID();
     const values = phoneValues(phone);
     const at = options.verified === false ? null : new Date();
-    const via = at ? "team" : null;
+    const via = at ? (options.via ?? "team") : null;
     await owner.begin(async (tx) => {
       await tx`select set_config('app.bypass_tenant', 'on', true)`;
       await tx`insert into customer (id, tenant_id, name, phone, phone_normalized, phone_key, phone_verified_at, phone_verified_via) values (${id}, ${tenantId}, 'Cliente', ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey}, ${at}, ${via})`;
@@ -412,6 +412,29 @@ describe("ingestão da caixa de entrada", () => {
       }));
       expect(candidates.customer.customers.map(({ id }) => id)).toEqual([customerId]);
       expect(candidates.member.users.map(({ id }) => id)).toEqual([userId]);
+    });
+
+    it("ficha liberada à mão pelo owner não atrai a conversa; a informada pela equipe, a provada e a de quem escreveu, sim", async () => {
+      const ch = await seedCloudChannel(tenantScope(tenantA));
+      // `manual` na ficha é o número que o próprio cliente declarou e o owner liberou sem prova.
+      const declared = uniquePhone();
+      await createCustomer(tenantA, declared, { via: "manual" });
+      await deliver(ch, [inbound({ fromPhone: phoneValues(declared).phoneNormalized })]);
+
+      const key = phoneValues(declared).phoneKey;
+      const unlinked = (await contactsOf(tenantScope(tenantA))).find((row) => row.phoneKey === key);
+      expect(unlinked).toMatchObject({ customerId: null, userId: null });
+
+      for (const via of ["team", "whatsapp", "inbound"] as const) {
+        const phone = uniquePhone();
+        const customerId = await createCustomer(tenantA, phone, { via });
+        await deliver(ch, [inbound({ fromPhone: phoneValues(phone).phoneNormalized })]);
+
+        const linked = (await contactsOf(tenantScope(tenantA))).find(
+          (row) => row.phoneKey === phoneValues(phone).phoneKey,
+        );
+        expect(linked?.customerId, via).toBe(customerId);
+      }
     });
 
     it("membro confirmado e cliente só declarado com o mesmo número: vale o membro", async () => {

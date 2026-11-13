@@ -29,6 +29,7 @@ import {
   accountPhoneInUse,
   lockPhoneKey,
 } from "@/lib/phone/uniqueness";
+import { closeVerificationsOf, dropTenantVouchesOf } from "@/lib/phone/requests";
 import { verifiedPhone } from "@/lib/phone/verification";
 import { sendEmail } from "@/lib/email/send";
 import { emailChangedTemplate } from "@/lib/email/templates/email-changed";
@@ -203,6 +204,10 @@ export async function updateUserByAdmin(
       await lockPhoneKey(tx, phone.phoneKey);
       const holders = await accountPhoneConflicts(tx, target.id, phone.phoneKey);
       if (holders.length > 0) throw accountPhoneInUse();
+      // O número informado aqui já vale como confirmado: o pedido aberto é encerrado, e o que
+      // as organizações atestaram sobre o número antigo sai.
+      await closeVerificationsOf(tx, { type: "user", id: target.id });
+      await dropTenantVouchesOf(tx, target.id);
     }
 
     const [row] = await tx

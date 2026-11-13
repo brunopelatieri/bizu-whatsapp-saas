@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/password-policy";
 import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { getPortalAuth } from "@/lib/auth/portal";
+import { closeVerificationsOf, ensureCustomerVerification } from "@/lib/phone/requests";
 import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
 import type { PortalCustomer } from "@/lib/portal/access";
@@ -67,15 +68,16 @@ export function updatePortalProfile(
     currentKey === phone.phoneKey ? base : { ...base, ...UNVERIFIED_PHONE };
 
   return withTenant(tenantId, async (tx) => {
-    const [account] = await tx
-      .select({ phoneKey: portalUser.phoneKey })
-      .from(portalUser)
-      .where(eq(portalUser.id, portalUserId))
-      .for("update");
+    // A ficha antes da conta: é a ordem de quem confirma o telefone (`requests.ts`).
     const [record] = await tx
       .select({ phoneKey: customer.phoneKey })
       .from(customer)
       .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)))
+      .for("update");
+    const [account] = await tx
+      .select({ phoneKey: portalUser.phoneKey })
+      .from(portalUser)
+      .where(eq(portalUser.id, portalUserId))
       .for("update");
 
     const [person] = await tx
@@ -94,6 +96,11 @@ export function updatePortalProfile(
       .update(customer)
       .set(valuesFor(record?.phoneKey))
       .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)));
+    // Número novo: o pedido antigo cai e abre-se o do número atual (se ficou pendente).
+    if (record?.phoneKey !== phone.phoneKey) {
+      await closeVerificationsOf(tx, { type: "customer", id: current.id });
+    }
+    await ensureCustomerVerification(tx, tenantId, current.id);
     await auditInTransaction(tx, "portal.profile_updated", {
       actor: { type: "portal_user", id: portalUserId },
       tenantId,

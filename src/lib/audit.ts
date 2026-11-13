@@ -42,6 +42,10 @@ export type AuditAction =
   | "customer.invited"
   // A ficha de cliente ligada à pessoa da equipe (`customer.user_id`); `metadata.userId`.
   | "customer.team_linked"
+  // Telefone de um cadastro confirmado (link ou liberação manual). Só `via` e contagens.
+  | "phone.verified"
+  // A conta perdeu a confirmação: outra provou a posse do mesmo número (`metadata.reason`).
+  | "phone.unverified"
   | "portal.signed_up"
   | "portal.profile_updated"
   | "portal.password_set"

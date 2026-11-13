@@ -31,6 +31,7 @@ import { purgeCustomerContacts } from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { closeVerificationsOf, deleteVerificationsOf } from "@/lib/phone/requests";
 import { type PhoneVerifiedVia, verifiedPhone } from "@/lib/phone/verification";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 import {
@@ -365,6 +366,10 @@ export async function updateCustomer(
       if (!row) throw notFound(NOT_FOUND);
 
       if (tagIds) await replaceCustomerTags(tx, tenantId, customerId, tagIds);
+      // A equipe informou outro número, que já vale: o pedido do número antigo é encerrado.
+      if (phone && phone.phoneKey !== current.phoneKey) {
+        await closeVerificationsOf(tx, { type: "customer", id: customerId });
+      }
 
       if (current.portalUserId && (emailChanged || status !== "active")) {
         await leavePortalTenant(tx, current.portalUserId, tenantId);
@@ -413,6 +418,7 @@ export async function deleteCustomer(
     if (!found) throw notFound(NOT_FOUND);
 
     const inbox = await purgeCustomerContacts(tx, [found.id]);
+    await deleteVerificationsOf(tx, "customer", [found.id]);
     const [removed] = await tx
       .delete(customer)
       .where(byId(tenantId, customerId))
@@ -480,7 +486,7 @@ export async function inviteCustomer(
 
   const portalUserId =
     current.portalUserId ??
-    (await ensurePortalUser(current.email, current.name, current.phone, current));
+    (await ensurePortalUser(current.email, current.name, current.phone));
 
   await withTenant(tenant.id, async (tx) => {
     await tx

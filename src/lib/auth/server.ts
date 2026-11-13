@@ -31,6 +31,7 @@ import {
 } from "@/lib/auth/permissions";
 import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { passwordPolicyHook } from "@/lib/auth/password-hook";
+import { ensureUserVerification } from "@/lib/phone/requests";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
@@ -170,6 +171,9 @@ function createAuth() {
             await recordSignupConsent({ type: "user", id: user.id }).catch((error) =>
               logError("Falha ao registrar o consentimento", error),
             );
+            // O telefone do cadastro é só declarado: abre o pedido de confirmação. Quem entrar
+            // numa organização por convite leva o pedido para ela (`invitations.ts`).
+            runInBackground(ensureUserVerification(user.id));
             runInBackground(
               audit("auth.signed_up", {
                 actor: { id: user.id },

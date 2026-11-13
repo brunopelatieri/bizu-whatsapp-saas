@@ -253,6 +253,13 @@
       "when": 1794576614816,
       "tag": "0035_telefone_verificado",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794592883185,
+      "tag": "0036_pedido_verificacao_telefone",
+      "breakpoints": true
     }
   ]
 }

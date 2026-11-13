@@ -1,6 +1,7 @@
-import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Tx } from "@/db/rls";
 import { customer, member, user } from "@/db/schema";
+import { userPhoneConfirmedGlobally, userPhoneConfirmedIn } from "@/lib/phone/confirmed";
 import { TenantRuleError } from "@/lib/tenant/errors";
 
 /**
@@ -15,7 +16,11 @@ import { TenantRuleError } from "@/lib/tenant/errors";
  * também é cliente tem dois cadastros (`src/lib/tenant/team-customer.ts`).
  *
  * Nas contas (`user`), só o telefone **confirmado** conta: um número apenas declarado não
- * reserva nada, senão qualquer um trancaria o número de outra pessoa cadastrando-se com ele.
+ * reserva nada, senão qualquer um trancaria o número de outra pessoa cadastrando-se com ele. E
+ * "confirmado" depende do grupo (`src/lib/phone/confirmed.ts`): nos grupos que atravessam
+ * organizações (owners, equipe da plataforma) só vale o que vale no sistema inteiro; na equipe
+ * de uma organização vale também o que o owner dela liberou.
+ *
  * `user` é global e o papel fica em `member`, então não cabe índice único: quem confirma um
  * número chama estas funções na mesma transação, sob `lockPhoneKey`.
  */
@@ -23,7 +28,8 @@ import { TenantRuleError } from "@/lib/tenant/errors";
 /** O papel `owner` na coluna `member.role`, que guarda papéis separados por vírgula. */
 const isOwner = sql`'owner' = any(string_to_array(${member.role}, ','))`;
 
-const confirmed = isNotNull(user.phoneVerifiedAt);
+/** Teto de detentores devolvidos: mais que isso é dado inconsistente, não um caso de uso. */
+const MAX_HOLDERS = 50;
 
 /** Resposta única para número de conta em uso: não diz de quem é. */
 export const accountPhoneInUse = () =>
@@ -39,36 +45,38 @@ export async function lockPhoneKey(tx: Tx, phoneKey: string) {
   );
 }
 
+const ids = (rows: { id: string }[]) => [...new Set(rows.map(({ id }) => id))];
+
 /**
- * Outro owner, de qualquer organização, com este número confirmado. `member` e `user` não têm
- * RLS: a consulta atravessa organizações de propósito e só devolve o id.
+ * Os outros owners, de qualquer organização, com este número confirmado para o sistema inteiro.
+ * `member` e `user` não têm RLS: a consulta atravessa organizações de propósito e só devolve ids.
  */
-export async function ownerPhoneHolder(tx: Tx, phoneKey: string, exceptUserId?: string) {
-  const [row] = await tx
+export async function ownerPhoneHolders(tx: Tx, phoneKey: string, exceptUserId?: string) {
+  const rows = await tx
     .select({ id: user.id })
     .from(user)
     .innerJoin(member, eq(member.userId, user.id))
     .where(
       and(
         eq(user.phoneKey, phoneKey),
-        confirmed,
+        userPhoneConfirmedGlobally,
         isOwner,
         exceptUserId ? ne(user.id, exceptUserId) : undefined,
       ),
     )
-    .limit(1);
+    .limit(MAX_HOLDERS);
 
-  return row?.id ?? null;
+  return ids(rows);
 }
 
-/** Outro membro da organização (owner incluído) com este número confirmado. */
-export async function teamPhoneHolder(
+/** Os outros membros da organização (owner incluído) com este número confirmado para ela. */
+export async function teamPhoneHolders(
   tx: Tx,
   tenantId: string,
   phoneKey: string,
   exceptUserId?: string,
 ) {
-  const [row] = await tx
+  const rows = await tx
     .select({ id: user.id })
     .from(user)
     .innerJoin(member, eq(member.userId, user.id))
@@ -76,13 +84,35 @@ export async function teamPhoneHolder(
       and(
         eq(member.organizationId, tenantId),
         eq(user.phoneKey, phoneKey),
-        confirmed,
+        userPhoneConfirmedIn(tenantId),
         exceptUserId ? ne(user.id, exceptUserId) : undefined,
       ),
     )
-    .limit(1);
+    .limit(MAX_HOLDERS);
 
-  return row?.id ?? null;
+  return ids(rows);
+}
+
+/** As outras pessoas da equipe da plataforma (proprietário ou suporte) com este número. */
+export async function platformStaffPhoneHolders(
+  tx: Tx,
+  phoneKey: string,
+  exceptUserId?: string,
+) {
+  const rows = await tx
+    .select({ id: user.id })
+    .from(user)
+    .where(
+      and(
+        eq(user.phoneKey, phoneKey),
+        userPhoneConfirmedGlobally,
+        inArray(user.role, ["platform_owner", "platform_support"]),
+        exceptUserId ? ne(user.id, exceptUserId) : undefined,
+      ),
+    )
+    .limit(MAX_HOLDERS);
+
+  return ids(rows);
 }
 
 /**
@@ -110,28 +140,6 @@ export async function customerPhoneHolder(
   return row?.id ?? null;
 }
 
-/** Outra pessoa da equipe da plataforma (proprietário ou suporte) com este número confirmado. */
-export async function platformStaffPhoneHolder(
-  tx: Tx,
-  phoneKey: string,
-  exceptUserId?: string,
-) {
-  const [row] = await tx
-    .select({ id: user.id })
-    .from(user)
-    .where(
-      and(
-        eq(user.phoneKey, phoneKey),
-        confirmed,
-        inArray(user.role, ["platform_owner", "platform_support"]),
-        exceptUserId ? ne(user.id, exceptUserId) : undefined,
-      ),
-    )
-    .limit(1);
-
-  return row?.id ?? null;
-}
-
 export type PhoneGroup = "team" | "customer";
 
 /**
@@ -146,27 +154,39 @@ export async function assertPhoneFreeInTenant(
   phoneKey: string,
   exceptId?: string,
 ) {
-  const holder =
+  const taken =
     group === "team"
-      ? await teamPhoneHolder(tx, tenantId, phoneKey, exceptId)
-      : await customerPhoneHolder(tx, tenantId, phoneKey, exceptId);
+      ? (await teamPhoneHolders(tx, tenantId, phoneKey, exceptId)).length > 0
+      : (await customerPhoneHolder(tx, tenantId, phoneKey, exceptId)) !== null;
 
-  if (holder) throw accountPhoneInUse();
+  if (taken) throw accountPhoneInUse();
 }
 
 /** 409 `PHONE_IN_USE` se outro owner do SaaS tem o número confirmado. */
 export async function assertOwnerPhoneFree(tx: Tx, phoneKey: string, exceptUserId?: string) {
-  if (await ownerPhoneHolder(tx, phoneKey, exceptUserId)) throw accountPhoneInUse();
+  if ((await ownerPhoneHolders(tx, phoneKey, exceptUserId)).length > 0) {
+    throw accountPhoneInUse();
+  }
 }
 
 /**
- * Tudo o que a conta `userId` precisa ter livre para ficar com o número confirmado: o grupo de
- * cada organização de que ela é membro, o dos owners se ela é owner de alguma, e o da equipe
- * da plataforma se ela faz parte. Devolve os ids das contas que hoje têm o número em algum
- * desses grupos (vazio = livre). Quem chama decide o que fazer com elas: recusar (liberação
- * manual) ou mandá-las de volta a "telefone pendente" (quem provou a posse fica com o número).
+ * As contas que hoje têm o número confirmado em algum grupo de que `userId` faz parte (vazio =
+ * livre). Quem chama decide o que fazer com elas: recusar (liberação à mão) ou mandá-las de
+ * volta a "telefone pendente" (quem provou a posse fica com o número).
+ *
+ * `onlyTenantId` limita a pergunta à equipe de UMA organização: é o que a liberação do owner
+ * dela confere, porque essa liberação só vale ali dentro. Sem ele, a pergunta é a do sistema
+ * inteiro: a equipe de cada organização da conta, o grupo dos owners se ela é owner de alguma, e
+ * a equipe da plataforma se faz parte.
  */
-export async function accountPhoneConflicts(tx: Tx, userId: string, phoneKey: string) {
+export async function accountPhoneConflicts(
+  tx: Tx,
+  userId: string,
+  phoneKey: string,
+  { onlyTenantId }: { onlyTenantId?: string } = {},
+) {
+  if (onlyTenantId) return teamPhoneHolders(tx, onlyTenantId, phoneKey, userId);
+
   const [account] = await tx
     .select({ role: user.role })
     .from(user)
@@ -177,19 +197,30 @@ export async function accountPhoneConflicts(tx: Tx, userId: string, phoneKey: st
     .where(eq(member.userId, userId));
 
   const holders = new Set<string>();
-  const add = (id: string | null) => {
-    if (id) holders.add(id);
-  };
 
   for (const { tenantId } of memberships) {
-    add(await teamPhoneHolder(tx, tenantId, phoneKey, userId));
+    for (const id of await teamPhoneHolders(tx, tenantId, phoneKey, userId)) holders.add(id);
   }
   if (memberships.some(({ owner }) => owner)) {
-    add(await ownerPhoneHolder(tx, phoneKey, userId));
+    for (const id of await ownerPhoneHolders(tx, phoneKey, userId)) holders.add(id);
   }
   if (account?.role === "platform_owner" || account?.role === "platform_support") {
-    add(await platformStaffPhoneHolder(tx, phoneKey, userId));
+    for (const id of await platformStaffPhoneHolders(tx, phoneKey, userId)) holders.add(id);
   }
 
   return [...holders];
+}
+
+/** A conta responde a alguém além da própria organização: é owner de alguma, ou da plataforma. */
+export async function isOwnerOrPlatformStaff(tx: Tx, userId: string) {
+  const [account] = await tx.select({ role: user.role }).from(user).where(eq(user.id, userId));
+  if (account?.role === "platform_owner" || account?.role === "platform_support") return true;
+
+  const [owned] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(and(eq(member.userId, userId), isOwner))
+    .limit(1);
+
+  return owned !== undefined;
 }

@@ -158,6 +158,12 @@ export const envSchema = z
       z.coerce.number().int().min(1).max(1440).default(15),
     ),
 
+    // Minutos de validade do link de verificação de telefone (`src/lib/phone/requests.ts`).
+    PHONE_VERIFICATION_TTL_MINUTES: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(5).max(1440).default(30),
+    ),
+
     PAYMENT_PROVIDERS: csvList,
     STRIPE_SECRET_KEY: optionalString,
     STRIPE_WEBHOOK_SECRET: optionalString,

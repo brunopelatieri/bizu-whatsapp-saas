@@ -16,6 +16,7 @@ import { platformReplyRoles } from "@/lib/inbox/constants";
 import { notifyInbox } from "@/lib/inbox/notify";
 import type { InboxActor, InboxCapabilities } from "@/lib/inbox/visibility";
 import { normalizePhone, phoneErrorMessage } from "@/lib/phone/br";
+import { userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
 import type { PlatformLinkContactInput, PlatformStartConversationInput } from "@/lib/schemas/inbox";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -102,14 +103,18 @@ async function destinationOf(tx: Tx, input: PlatformStartConversationInput) {
 
   if (input.userId) {
     const [row] = await tx
-      .select({ phone: user.phoneNormalized, verifiedAt: user.phoneVerifiedAt })
+      .select({
+        phone: user.phoneNormalized,
+        confirmed: sql<boolean>`coalesce(${userPhoneConfirmedGlobally}, false)`,
+      })
       .from(user)
       .where(and(eq(user.id, input.userId), eq(user.banned, false)));
     if (!row) throw notFound("Usuário não encontrado.");
     if (!row.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    // Só telefone confirmado liga o contato ao usuário (como no tenant, `destinationPhone`).
-    if (row.verifiedAt) link = { userId: input.userId };
+    // Só telefone confirmado para o sistema inteiro liga o contato ao usuário na plataforma: a
+    // liberação do owner de uma organização não vale aqui (`src/lib/phone/confirmed.ts`).
+    if (row.confirmed) link = { userId: input.userId };
   } else {
     raw = input.phone ?? "";
   }

@@ -1,5 +1,6 @@
 import { and, asc, eq, gt } from "drizzle-orm";
 import { invitation, member, organization, session, user } from "@/db/schema";
+import { logError } from "@/api/log";
 import { getDb } from "@/db";
 import { type Tx, withTenant } from "@/db/rls";
 import { auditInTransaction } from "@/lib/audit";
@@ -13,6 +14,7 @@ import {
 import { releaseAssignments } from "@/lib/inbox/assignment";
 import { inboxCapabilities } from "@/lib/inbox/visibility";
 import { normalizePhone } from "@/lib/phone/br";
+import { phoneAfterMemberLeft, routeVerificationToPlatform } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Quem está agindo: permissões já resolvidas em `requireTenant`. */
@@ -201,17 +203,20 @@ function isLastOwner(
   );
 }
 
-export function changeMemberRole(
+export async function changeMemberRole(
   tenantId: string,
   memberId: string,
   role: string,
   actor: TeamActor,
 ) {
-  return withTenant(tenantId, async (tx) => {
+  let promotedUserId: string | null = null;
+
+  const result = await withTenant(tenantId, async (tx) => {
     const members = await lockMembers(tx, tenantId);
     const target = members.find(({ id }) => id === memberId);
 
     if (!target) throw notFound(MEMBER_NOT_FOUND);
+    if (isOwner(role)) promotedUserId = target.userId;
     if (!canActOnRole(actor.permissions, actor.catalog, target.role)) {
       throw OUTRANKED;
     }
@@ -233,18 +238,30 @@ export function changeMemberRole(
 
     return { id: memberId, role };
   });
+
+  // Owner responde à plataforma pelo telefone: o pedido sai da fila das organizações.
+  if (promotedUserId) {
+    await routeVerificationToPlatform(promotedUserId).catch((error: unknown) =>
+      logError("Falha ao encaminhar o pedido de verificação à plataforma", error),
+    );
+  }
+
+  return result;
 }
 
-export function removeMember(
+export async function removeMember(
   tenantId: string,
   memberId: string,
   actor: TeamActor,
 ) {
-  return withTenant(tenantId, async (tx) => {
+  let removedUserId: string | null = null;
+
+  await withTenant(tenantId, async (tx) => {
     const members = await lockMembers(tx, tenantId);
     const target = members.find(({ id }) => id === memberId);
 
     if (!target) throw notFound(MEMBER_NOT_FOUND);
+    removedUserId = target.userId;
     if (!canActOnRole(actor.permissions, actor.catalog, target.role)) {
       throw OUTRANKED;
     }
@@ -271,6 +288,14 @@ export function removeMember(
       ip: actor.ip,
     });
   });
+
+  // Depois do commit, em outro escopo: a liberação que o owner daqui fez no telefone da pessoa
+  // deixa de valer, e o pedido que estava na fila desta organização volta à plataforma.
+  if (removedUserId) {
+    await phoneAfterMemberLeft(removedUserId, tenantId).catch((error: unknown) =>
+      logError("Falha ao encerrar a verificação de telefone do membro removido", error),
+    );
+  }
 }
 
 /**

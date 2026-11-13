@@ -1,0 +1,117 @@
+import { sql } from "drizzle-orm";
+import {
+  check,
+  index,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+import {
+  phoneVerificationStatuses,
+  phoneVerificationSubjects,
+} from "../../lib/phone/verification";
+import { scopedPolicy, tenantPolicy } from "../tenant-policy";
+import { user } from "./auth";
+import { organization } from "./tenant";
+
+const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
+
+/**
+ * Pedido de confirmação do telefone de um cadastro (`docs/specs/pre-producao/spec.md`, bloco T).
+ * Confirma o número que o cadastro tem **agora** (`phone_key`): se o cadastro trocar de número
+ * antes, o pedido deixa de valer.
+ *
+ * `tenant_id` é o escopo **responsável** por confirmar, não o do cadastro: a organização, para os
+ * clientes dela e para quem entrou na equipe por convite; nulo (plataforma) para quem se
+ * cadastrou sem convite e para a equipe da plataforma. É quem envia o link e quem libera à mão.
+ *
+ * `subject_id` não tem FK (aponta para `user` ou `customer`): quem apaga ou anonimiza o cadastro
+ * apaga os pedidos dele (`deleteVerificationsOf`, `src/lib/phone/requests.ts`).
+ *
+ * O token só existe no link; aqui fica o SHA-256, que some quando é usado.
+ */
+export const phoneVerification = pgTable(
+  "phone_verification",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
+    subjectType: text("subject_type", { enum: phoneVerificationSubjects }).notNull(),
+    subjectId: uuid("subject_id").notNull(),
+    phoneNormalized: text("phone_normalized").notNull(),
+    phoneKey: text("phone_key").notNull(),
+    status: text("status", { enum: phoneVerificationStatuses })
+      .notNull()
+      .default("awaiting_manual"),
+    tokenHash: text("token_hash").unique(),
+    expiresAt: timestamptz("expires_at"),
+    confirmedAt: timestamptz("confirmed_at"),
+    /** Quem liberou à mão (`user.id`); nulo na confirmação por link. */
+    confirmedBy: uuid("confirmed_by"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at")
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Um pedido aberto por cadastro e por responsável: quem é da equipe de duas organizações
+    // pode estar na fila das duas (e na da plataforma), sem uma cancelar a outra. Com
+    // `tenant_id` nulo o Postgres não vê dois nulos como iguais: a plataforma tem o índice dela.
+    uniqueIndex("phone_verification_open_tenant_idx")
+      .on(table.subjectType, table.subjectId, table.tenantId)
+      .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.tenantId} is not null`),
+    uniqueIndex("phone_verification_open_platform_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.tenantId} is null`),
+    index("phone_verification_scope_status_idx").on(table.tenantId, table.status),
+    index("phone_verification_updated_at_idx").on(table.updatedAt),
+    check(
+      "phone_verification_token_with_expiry",
+      sql`(${table.tokenHash} is null) = (${table.expiresAt} is null)`,
+    ),
+    check(
+      "phone_verification_status_known",
+      sql`${table.status} in ('sent', 'awaiting_manual', 'confirmed', 'canceled')`,
+    ),
+    check("phone_verification_subject_known", sql`${table.subjectType} in ('user', 'customer')`),
+    // A ficha de cliente é sempre de uma organização; só a conta pode estar com a plataforma.
+    check(
+      "phone_verification_customer_has_tenant",
+      sql`${table.subjectType} <> 'customer' or ${table.tenantId} is not null`,
+    ),
+    scopedPolicy(),
+  ],
+).enableRLS();
+
+/**
+ * A liberação à mão que o owner de uma organização fez no telefone da conta de um membro: uma
+ * linha por par (conta, organização). Vale **só naquela organização** e só para o número que a
+ * conta tinha na hora (`phone_key`): trocou de número, a linha deixa de casar e não vale mais.
+ *
+ * Fica fora de `user` de propósito. A conta é global e qualquer pessoa cria uma organização: uma
+ * coluna na conta faria a liberação de uma organização valer nas outras, ou a de uma apagar a
+ * de outra. Aqui cada organização responde só pelo que ela atestou, e o RLS do tenant esconde as
+ * linhas das demais. Sai sozinha com a conta ou com a organização (`cascade`).
+ */
+export const phoneTenantVouch = pgTable(
+  "phone_tenant_vouch",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    phoneKey: text("phone_key").notNull(),
+    vouchedBy: uuid("vouched_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.tenantId] }),
+    index("phone_tenant_vouch_tenant_idx").on(table.tenantId),
+    tenantPolicy(),
+  ],
+).enableRLS();

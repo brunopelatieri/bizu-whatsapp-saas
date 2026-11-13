@@ -193,23 +193,17 @@ export function leavePortalTenant(
  * o do cliente convidado e só entra na criação: quem já tem conta (mesmo e-mail em outro
  * tenant) mantém o dele. Este `INSERT` direto não passa pelo hook do Better Auth.
  *
- * O estado do telefone é o da ficha, copiado: confirmado se a ficha o tem confirmado, pendente se
- * não. Nunca um valor fixo: a conta é global, e uma organização qualquer criaria uma identidade
- * com o número de outra pessoa já "confirmado", ou lavaria o número pendente de uma ficha.
+ * A conta é global e nasce sempre com o telefone **pendente**, qualquer que seja o estado da
+ * ficha. O que uma organização atesta (`team`, a liberação do owner) vale só nela: copiado para
+ * a conta, valeria em todas, e uma organização de fachada criaria uma identidade com o número de
+ * outra pessoa já "confirmado". Nem a prova de posse da ficha é copiada: foi dada por outra
+ * identidade (a ficha pode ter trocado de e-mail). Quem confirma a conta é a prova feita na
+ * sessão dela (`confirmCustomer`).
  */
-export async function ensurePortalUser(
-  email: string,
-  name: string,
-  phone: string,
-  verification: Pick<typeof portalUser.$inferInsert, "phoneVerifiedAt" | "phoneVerifiedVia">,
-) {
-  const state = verification.phoneVerifiedAt
-    ? { phoneVerifiedAt: verification.phoneVerifiedAt, phoneVerifiedVia: verification.phoneVerifiedVia }
-    : UNVERIFIED_PHONE;
-
+export async function ensurePortalUser(email: string, name: string, phone: string) {
   await getDb()
     .insert(portalUser)
-    .values({ email, name, ...phoneValues(phone), ...state })
+    .values({ email, name, ...phoneValues(phone), ...UNVERIFIED_PHONE })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [row] = await getDb()

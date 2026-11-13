@@ -19,6 +19,7 @@ import {
   organizationProfile,
   organizationRole,
   organizationTag,
+  phoneTenantVouch,
   portalAccount,
   portalSession,
   portalTwoFactor,
@@ -36,6 +37,7 @@ import type {
   DeletionSubjectType,
 } from "@/db/schema/lgpd";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
+import { deleteVerificationsOf, releaseTenantPhoneResponsibility } from "@/lib/phone/requests";
 import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { appLink } from "@/lib/auth/links";
 import { getPortalAuth } from "@/lib/auth/portal";
@@ -773,6 +775,10 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await releaseAssignments(tx, id);
   // Caixa de entrada: mensagens e anexos sem autor; contatos ligados a ela só perdem o vínculo.
   await detachUserFromInbox(tx, id);
+  // Pedidos de verificação de telefone da conta e o que as organizações atestaram sobre o
+  // número dela: o número saiu, e a linha de `user` fica (o `cascade` não dispara).
+  await deleteVerificationsOf(tx, "user", [id]);
+  await tx.delete(phoneTenantVouch).where(eq(phoneTenantVouch.userId, id));
   // A linha de `user` fica (anonimizada), então o `set null` da FK não dispara: a ficha de
   // cliente que a pessoa tinha em cada organização deixa de apontar para ela aqui.
   await tx.update(customer).set({ userId: null }).where(eq(customer.userId, id));
@@ -815,6 +821,11 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
   // As conversas de WhatsApp com esses cadastros saem junto (SPEC da caixa de entrada, LGPD).
   const inbox = await purgeCustomerContacts(
     tx,
+    customers.map((row) => row.id),
+  );
+  await deleteVerificationsOf(
+    tx,
+    "customer",
     customers.map((row) => row.id),
   );
 
@@ -873,6 +884,10 @@ async function anonymizeTenant(tx: Tx, id: string, now: Date): Promise<Anonymize
   await tx.delete(organizationTag).where(eq(organizationTag.organizationId, id));
   await tx.delete(organizationProfile).where(eq(organizationProfile.organizationId, id));
   await tx.update(customer).set(anonymizedCustomer).where(eq(customer.tenantId, id));
+  // A organização deixa de responder pelo telefone da equipe: as liberações dela caem, os
+  // pedidos dela saem, e quem segue sem o número confirmado ganha o pedido da plataforma. A
+  // linha da organização fica (anonimizada), então o `cascade` não faria isso.
+  await releaseTenantPhoneResponsibility(tx, id);
   // Caixa de entrada: todos os contatos (com ou sem cliente), conversas e mensagens; e os avisos
   // de canal, cujo `raw` tem telefone e texto. A mídia das mensagens é `file` do tenant (abaixo).
   const inbox = await purgeTenantInbox(tx, id);

@@ -208,6 +208,13 @@ export async function cleanUp(owner: postgres.Sql) {
         select id from "user" where email like ${pattern}
       )
     `;
+    // `phone_verification.subject_id` não tem FK: os pedidos das contas de teste saem aqui (os
+    // de cliente e os que passaram a uma organização saem com ela, pelo `cascade`).
+    await tx`
+      delete from phone_verification where subject_type = 'user' and subject_id in (
+        select id from "user" where email like ${pattern}
+      )
+    `;
     await tx`delete from "user" where email like ${pattern}`;
   });
 }

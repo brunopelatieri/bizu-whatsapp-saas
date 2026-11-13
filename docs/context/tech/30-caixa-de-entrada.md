@@ -82,7 +82,9 @@ canais); `undefined` volta à ingestão real. Retorno `false` = aviso `ignored`.
    55; número que o normalizador recusa fica com os próprios dígitos). `upsertContact` acha ou cria pela
    `phone_key` em um comando (`xmax = 0` diz se nasceu). Só o recém-criado ganha vínculo automático
    (`autoLinkContact`), **só com correspondência única e só com telefone confirmado**
-   (`phone_verified_at`, `tech/28`): cliente do tenant, depois membro do tenant (não banido); na
+   (`tech/28`: a ficha com `team`, `whatsapp` ou `inbound`, nunca a liberada à mão; o membro
+   com a conta confirmada no sistema ou liberada naquela organização, `userPhoneConfirmed(scope)`):
+   cliente do tenant, depois membro do tenant (não banido); na
    plataforma, usuário, e nunca `customer` de tenant. O cliente vem antes porque quem é da equipe e
    também é cliente tem os dois cadastros com o mesmo número, e a conversa fica na ficha de cliente.
    `linkCandidates` é a mesma consulta que o painel (C2) usa para os candidatos, ali sem o filtro de

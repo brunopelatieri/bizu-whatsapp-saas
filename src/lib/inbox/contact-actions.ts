@@ -18,6 +18,8 @@ import {
 import { notifyInbox } from "@/lib/inbox/notify";
 import { type InboxActor, readsCustomers, visibleConversation } from "@/lib/inbox/visibility";
 import { canWhatsApp, normalizePhone, type PhoneKind, phoneErrorMessage } from "@/lib/phone/br";
+import { userPhoneConfirmedIn } from "@/lib/phone/confirmed";
+import { attractsConversations } from "@/lib/phone/verification";
 import type {
   LinkContactInput,
   SaveContactAsCustomerInput,
@@ -271,22 +273,33 @@ async function destinationPhone(tx: Tx, tenantId: string, input: StartConversati
 
   if (input.customerId) {
     const [row] = await tx
-      .select({ phone: customer.phoneNormalized, verifiedAt: customer.phoneVerifiedAt })
+      .select({
+        phone: customer.phoneNormalized,
+        verifiedAt: customer.phoneVerifiedAt,
+        via: customer.phoneVerifiedVia,
+      })
       .from(customer)
       .where(and(eq(customer.id, input.customerId), eq(customer.tenantId, tenantId)));
     if (!row) throw notFound("Cliente não encontrado.");
     if (!row.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    if (row.verifiedAt) link = { customerId: input.customerId };
+    // A mesma regra do vínculo automático: a ficha liberada à mão (número declarado pelo
+    // próprio cliente) não leva sozinha a conversa de quem tiver o número.
+    if (row.verifiedAt && row.via && attractsConversations(row.via)) {
+      link = { customerId: input.customerId };
+    }
   } else if (input.userId) {
     if (!(await isActiveMember(tx, tenantId, input.userId))) throw notFound("Membro não encontrado.");
     const [row] = await tx
-      .select({ phone: user.phoneNormalized, verifiedAt: user.phoneVerifiedAt })
+      .select({
+        phone: user.phoneNormalized,
+        confirmed: sql<boolean>`coalesce(${userPhoneConfirmedIn(tenantId)}, false)`,
+      })
       .from(user)
       .where(eq(user.id, input.userId));
     if (!row?.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    if (row.verifiedAt) link = { userId: input.userId };
+    if (row.confirmed) link = { userId: input.userId };
   } else {
     raw = input.phone ?? "";
   }

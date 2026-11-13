@@ -19,6 +19,7 @@ import {
   requirePortalTenant,
 } from "@/api/portal-auth";
 import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
+import { confirmRateLimit } from "@/api/phone-verification";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
 import { INVALID_LINK_MESSAGE } from "@/api/verification-guard";
@@ -54,6 +55,8 @@ import { LEGAL_VERSIONS } from "@/lib/legal/versions";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { acceptConsentSchema } from "@/lib/schemas/lgpd";
+import { phoneVerificationTokenSchema } from "@/lib/schemas/phone";
+import { confirmPhoneVerificationByToken, ownPhoneVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /**
@@ -349,6 +352,39 @@ portalRoutes.post(
     }
 
     await enterPortalTenant(c.get("portalSession").id, id, tenantId);
+
+    return c.json({ ok: true });
+  },
+);
+
+/**
+ * O pedido de confirmação do telefone da ficha do cliente na organização ativa. O link que chega
+ * ao número só confirma aqui, na sessão do próprio cliente: o token vai no corpo e a ficha vem da
+ * sessão, nunca da requisição.
+ */
+portalRoutes.get(
+  "/api/portal/me/phone-verification",
+  authRateLimit,
+  requirePortalAuth,
+  requirePortalTenant,
+  async (c) =>
+    c.json({
+      pending: await ownPhoneVerification({ type: "customer", id: c.get("customer").id }),
+    }),
+);
+
+portalRoutes.post(
+  "/api/portal/me/phone-verification/confirm",
+  authRateLimit,
+  confirmRateLimit("portal-phone-verification-confirm"),
+  requirePortalAuth,
+  requirePortalTenant,
+  zValidator("json", phoneVerificationTokenSchema, validationError),
+  async (c) => {
+    await confirmPhoneVerificationByToken(c.req.valid("json").token, {
+      type: "customer",
+      id: c.get("customer").id,
+    });
 
     return c.json({ ok: true });
   },

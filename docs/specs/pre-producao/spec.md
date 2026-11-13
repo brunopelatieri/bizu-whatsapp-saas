@@ -163,6 +163,12 @@ Duas colunas em `customer`, `user` e `portal_user`:
 - **O vínculo automático só usa telefone confirmado.** `linkCandidates` passa a exigir
   `phone_verified_at IS NOT NULL` do `customer` ou do `user`. É o que fecha o risco aberto.
   Exportação e exclusão continuam por `chat_contact.customer_id` (P1).
+- **Nas contas (`user` e `portal_user`) só valem `whatsapp` e `manual`** (`CHECK`
+  `user_phone_via_global` e `portal_user_phone_via_global`, T2a): a conta é global, e a coluna
+  só guarda o que vale no sistema inteiro. `team` e `inbound` são formas da ficha de cliente.
+- Na ficha de cliente, `manual` (liberada pelo owner, número declarado pelo cliente) não atrai
+  conversa nem é ligada à pessoa da equipe com o número; `team`, `whatsapp` e `inbound`, sim. Por
+  isso a migration da T2a converte em `team` as fichas que a da T1 marcou `manual`.
 - Migration: os cadastros que já existem (só de desenvolvimento) nascem `manual`, e o seed
   marca os seus usuários como `manual`. Sem isso, ligar a exigência trancaria todo mundo,
   inclusive o primeiro proprietário da plataforma.
@@ -178,14 +184,58 @@ Duas colunas em `customer`, `user` e `portal_user`:
 | Cliente cadastrado ou importado pela equipe | **Não envia link** | Nasce `team` |
 
 - A liberação manual usa a permissão nova `phone:confirm`, que nasce só no papel owner; o
-  proprietário da plataforma usa `requirePlatform`. Toda liberação é auditada
-  (`phone.confirmed_manually`, com quem liberou).
+  proprietário da plataforma usa `requirePlatform`. Toda confirmação é auditada
+  (`phone.verified`, com a forma e quem liberou; `phone.unverified` quando ela cai).
+- **A tabela acima diz quem responde, não até onde a resposta vale.** O alcance está na seção
+  seguinte, e muda a leitura das linhas de membro, admin e cliente: o que uma organização
+  confirma, pelo link ou à mão, vale só dentro dela.
 - O responsável é avisado por e-mail quando um cadastro cai em liberação manual, e a tela dele
   mostra a fila de pendentes.
 - Cliente criado pela equipe não recebe link: uma importação de 10.000 linhas viraria 10.000
   mensagens a quem nunca escreveu, e o número seria bloqueado pelo WhatsApp. O telefone que a
   equipe informa é aceito como `team`. A **troca** do telefone de um cliente, por ele ou pela
   equipe, sempre passa pelo link (P1).
+
+### Alcance da confirmação (T2a, revisões de segurança)
+
+**A confirmação vale até onde vale o responsável do pedido, nunca mais.** Qualquer pessoa cria
+uma organização. Se o que o owner atesta valesse fora dela, uma organização de fachada
+"confirmaria" o número de uma vítima numa conta do atacante, e essa conta passaria a atrair as
+conversas e a ficha da vítima em outras organizações. O mesmo vale para o **link**: ele sai pelo
+canal do responsável, e o canal por QR Code de uma organização é o WhatsApp do próprio owner,
+que lê o que enviou e portanto conhece o link de qualquer número que mandar verificar.
+
+| Pedido de | Fechado por | Efeito | Onde vale |
+|---|---|---|---|
+| Plataforma (`tenant_id` nulo) | Link, na sessão da própria conta | `user.phone_verified_via = whatsapp`. Quem provou fica com o número: a outra conta do grupo volta a pendente, com pedido novo e auditoria | Sistema inteiro |
+| Plataforma | Proprietário da plataforma, à mão | `user.phone_verified_via = manual`. Recusada (409 `PHONE_IN_USE`) se outra conta do grupo já tem o número | Sistema inteiro |
+| Organização, conta de membro | Link (sessão da conta) ou owner, à mão | Linha em `phone_tenant_vouch` (conta, organização). A conta **não muda**. Recusada se um colega já tem o número (não tira o número de ninguém) | Só naquela organização |
+| Organização, ficha de cliente | Link, na sessão do portal | `customer.phone_verified_via = whatsapp`; liga o contato que já escreveu e a pessoa da equipe com o mesmo número | A ficha, que já é da organização |
+| Organização, ficha de cliente | Owner, à mão | `customer.phone_verified_via = manual`. Não liga contato nem pessoa da equipe, e **não atrai** as próximas conversas do número | Idem |
+
+- **Um pedido por (cadastro, responsável).** A conta tem sempre o pedido da plataforma, que é o
+  caminho dela para a confirmação que vale em todo lugar, e mais um por organização em que é
+  membro comum. Confirmada para o sistema inteiro, os demais pedidos são encerrados.
+- **Owner e equipe da plataforma só respondem à plataforma** (P16): não entram na fila de
+  organização nenhuma. Quem vira owner sai das filas em que estava; a tentativa de liberá-lo
+  por uma organização responde 409 `PLATFORM_ONLY` e encaminha o pedido.
+- **A fila do proprietário da plataforma** mostra owners, a equipe da plataforma e quem não é
+  de organização nenhuma. O membro comum tem o pedido da plataforma aberto, mas quem o libera à
+  mão é a organização.
+- **O link só confirma na sessão do próprio cadastro.** Não há rota pública de confirmação: o
+  token vai no corpo de um `POST` autenticado, e o cadastro vem da sessão. Sem isso, bastava se
+  cadastrar com o número da vítima e esperar ela clicar. Token inválido, usado, vencido, de
+  outro cadastro ou de um número que o cadastro já trocou respondem o mesmo 400.
+- **A conta do portal (`portal_user`) nunca é confirmada por um pedido de organização**, nem
+  nasce confirmada a partir de uma ficha: é global e é outra identidade. Enquanto não existir
+  pedido da plataforma para ela, o portal avalia a **ficha** (T3).
+- **A ligação da ficha de cliente com a pessoa da equipe (D-9) exige confirmação que vale no
+  sistema inteiro** (`userPhoneConfirmedGlobally`); a liberação de organização não a cria.
+- **A liberação de organização cai** quando a pessoa sai da equipe, a organização é excluída, a
+  conta troca de número ou outra conta prova a posse do número. A manutenção apaga as que
+  sobrarem sem membro ou com número antigo.
+- **Para o vínculo automático da conversa**, o membro vale se a conta está confirmada no sistema
+  ou liberada **naquela** organização; a ficha vale com `team`, `whatsapp` ou `inbound`.
 
 ### Bloqueio de acesso enquanto pendente (D-2)
 
@@ -202,6 +252,9 @@ PHONE_VERIFICATION_REQUIRED=true   # false: entra sem confirmar; o vínculo auto
 - O link sai sempre, também com `false`. Nesse modo a pessoa entra, vê um aviso, e o vínculo
   automático com a conversa espera a confirmação.
 - Vale junto com `EMAIL_VERIFICATION_REQUIRED`, sem substituí-la.
+- **Predicado do portão (decorre da T2a):** a equipe de uma organização passa com a conta
+  confirmada no sistema **ou** liberada naquela organização; owner e equipe da plataforma, só
+  com a confirmação do sistema; o portal avalia a ficha de cliente da organização em uso.
 
 ### Envio do link: Cloud, QR Code ou manual (D-3)
 
@@ -231,15 +284,41 @@ Job `phone.verify`, para o escopo responsável da tabela acima:
 - O envio de verificação **não entra na caixa de entrada**: não cria `chat_contact`,
   `conversation` nem `message`. O id da mensagem no provedor fica no pedido, e
   `applyChannelEvent` consulta o pedido quando chega um status de mensagem que não é da caixa.
+- **Restrições que a T2a deixou para a T2b:** (a) a conta com pedidos em vários responsáveis
+  não recebe um link por pedido no mesmo número: o da plataforma sai primeiro, e o da
+  organização só se a plataforma não tem canal; (b) a URL do botão do modelo Cloud é conferida
+  contra `APP_URL` antes de aceitar o modelo; (c) a página `/verificar-telefone` exige a sessão
+  do cadastro e leva ao login quando não há; (d) o lead do portal sem ficha não passa por
+  `requirePortalTenant` e precisa de um caminho próprio para confirmar;
+  (e) **o job escolhe o canal estritamente pelo `tenant_id` do pedido**: pedido da plataforma
+  enviado pelo canal de uma organização reabriria a falha que o alcance por responsável fechou
+  (`issueVerificationToken` não confere escopo, quem chama confere); (f) quem controla o canal
+  da organização (`channel:manage`, não só o owner) lê o link que ela envia, então consegue
+  liberar o próprio número **naquela organização** pelo link, e `SELF_CONFIRMATION` não cobre
+  esse caminho: o efeito fica dentro dela, e a T2b decide se o aceita ou se o link de organização
+  só vale para quem não administra o canal; (g) `GET /api/me/phone-verification` precisa dizer a
+  situação por responsável (hoje devolve "pendente" enquanto houver qualquer pedido aberto), para
+  a tela e para o portão da T3.
+- **Decisão de custo em aberto para a T2b:** todo membro comum tem o pedido da plataforma aberto.
+  Enviar esse link a todos significa o número da plataforma escrevendo a toda a equipe de toda
+  organização (custo de modelo na Cloud, risco de bloqueio no QR Code). Alternativa: a plataforma
+  só envia a quem responde a ela (owners e quem não tem organização), e o membro pede o link da
+  plataforma quando quiser a confirmação que vale em todo lugar.
 
 ### Pedido de verificação: `phone_verification`
 
-`scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma.
+`scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
+`id`, `tenant_id`, `subject_type` (`user` ou `customer`), `subject_id` (sem FK: quem apaga o
+cadastro apaga os pedidos, e a manutenção tira os órfãos), `phone_normalized`, `phone_key`,
+`status` (`sent`, `awaiting_manual`, `confirmed`, `canceled`), `token_hash`, `expires_at`,
+`confirmed_at`, `confirmed_by` e as datas. As demais colunas da tabela abaixo entram na T2b,
+com o envio. A T2a criou também `phone_tenant_vouch` (`user_id`, `tenant_id`, `phone_key`,
+`vouched_by`; chave `(user_id, tenant_id)`; `tenantPolicy()`), a liberação de organização.
 
 | Coluna | Observação |
 |---|---|
 | `id`, `tenant_id` | Escopo responsável pelo envio |
-| `subject_type`, `subject_id` | `customer`, `user` ou `portal_user` |
+| `subject_type`, `subject_id` | `customer` ou `user` |
 | `purpose` | `signup` (número do cadastro), `change` (troca) ou `claim` (número que já existe, P3) |
 | `payload` | `jsonb` nulo: dados validados da ficha que nasce na confirmação (`claim`) |
 | `phone`, `phone_normalized`, `phone_key` | O número a confirmar, de `phoneValues`. Na troca, o cadastro mantém o antigo até a confirmação |
@@ -249,19 +328,21 @@ Job `phone.verify`, para o escopo responsável da tabela acima:
 | `requested_by_type`, `requested_by_id` | Quem pediu |
 | `expires_at`, `created_at`, `confirmed_at`, `confirmed_by` | Validade por `PHONE_VERIFICATION_TTL_MINUTES`; `confirmed_by` só na liberação manual |
 
-Índice único parcial em `(subject_type, subject_id)` para pedidos abertos: um por cadastro; o
-novo substitui o anterior. Fechados e vencidos saem no `maintenance.prune`.
+Dois índices únicos parciais para pedidos abertos: `(subject_type, subject_id, tenant_id)` nos
+de organização e `(subject_type, subject_id)` nos da plataforma. É um pedido por (cadastro,
+responsável); o do número novo substitui o do antigo. Encerrados há mais de 30 dias e órfãos
+saem no `maintenance.prune`, que também devolve a `awaiting_manual` o pedido de link vencido.
 
 ### Confirmação
 
 ```
-1. Pessoa abre /verificar-telefone?token=… → a página renderiza e mostra um botão
-2. POST /api/phone-verification/confirm consome o token (um DELETE … RETURNING, como
-   confirmPortalDeletion) e, na mesma transação:
-   - confere a unicidade do grupo (e aplica "quem provou fica com o número");
-   - grava o telefone e phone_verified_at/via = whatsapp;
-   - liga ao cadastro o chat_contact sem vínculo que já tenha a phone_key confirmada;
-   - audita `phone.verified` (só os 4 últimos dígitos).
+1. Pessoa abre /verificar-telefone?token=… → sem sessão, vai ao login e volta; com sessão, a
+   página renderiza e mostra um botão (T2b)
+2. POST /api/me/phone-verification/confirm (equipe) ou /api/portal/me/phone-verification/confirm
+   (portal), com { token } no corpo. O cadastro vem da sessão. Na mesma transação:
+   - trava o cadastro e o pedido, e confere que o token ainda é o do pedido (uso único);
+   - aplica o efeito conforme o responsável do pedido ("Alcance da confirmação");
+   - audita `phone.verified` (ids e enums; o número nunca vai para a auditoria).
 ```
 
 Na troca, o `chat_contact` do número antigo **continua ligado ao cliente**: o histórico é do
@@ -296,17 +377,20 @@ o número, e o cadastro de **cliente** que o tinha, agora sem telefone, é **apa
 
 | Método e rota | Entrada (Zod) | Saída | Autorização |
 |---|---|---|---|
-| `GET /api/me/phone-verification` e `GET /api/portal/me/phone-verification` | sem corpo | `{ status, phoneHint, awaiting }` | sessão; liberada mesmo com telefone pendente |
+| `GET /api/me/phone-verification` e `GET /api/portal/me/phone-verification` (**T2a**) | sem corpo | `{ pending: { status, phoneHint } \| null }` | sessão; liberada mesmo com telefone pendente |
+| `POST /api/me/phone-verification/confirm` e a do portal (**T2a**) | `{ token }` | 200, 400 `INVALID_OR_EXPIRED`, 409 `PHONE_IN_USE` ou `PLATFORM_ONLY` | sessão do próprio cadastro; bloqueada em personificação; rate limit |
 | `POST /api/me/phone-verification/resend` (e a do portal) | sem corpo | 202 | idem; rate limit por cadastro |
 | `POST /api/me/phone-change` | `userPhoneChangeSchema { phone }` | 202 | `requireAuth`; bloqueada em personificação; liberada com telefone pendente (corrigir o número) |
 | `POST /api/portal/me/phone-change` | `phoneChangeSchema` | 202 | `requirePortalAuth` + `requirePortalTenant` |
 | `POST /api/customers/:id/phone-change` | `phoneChangeSchema` | 202 | `requireAuth` + `requireTenant` + `customer:update` |
 | `DELETE …/phone-change` (as três) | sem corpo | 204 | a mesma de quem pediu |
-| `GET /api/phone-verifications` | `?status=awaiting_manual` | fila da organização | `requireTenant` + `phone:confirm` |
-| `POST /api/phone-verifications/:id/confirm` | sem corpo | 200 ou 409 `PHONE_IN_USE` | `requireTenant` + `phone:confirm` |
-| `GET` e `POST /api/admin/phone-verifications…` | as mesmas | as mesmas, escopo da plataforma | `requirePlatform`, só o proprietário |
-| `GET /api/phone-verification/:token` | sem corpo | `{ purpose, phoneHint, orgName }` ou 404 | pública, rate limit por IP; **não consome** |
-| `POST /api/phone-verification/confirm` | `{ token }` | 200 ou 400 `INVALID_OR_EXPIRED` | pública, `sameOrigin`, rate limit por IP |
+| `GET /api/phone-verifications` (**T2a**) | `?page=` | fila da organização, mais antigos primeiro, paginada | `requireTenant` + `phone:confirm` |
+| `POST /api/phone-verifications/:id/confirm` (**T2a**) | sem corpo | 200; 403 `SELF_CONFIRMATION`; 404; 409 `PHONE_IN_USE`, `PLATFORM_ONLY` ou `VERIFICATION_STALE` | `requireTenant` + `phone:confirm` |
+| `GET` e `POST /api/admin/phone-verifications…` (**T2a**) | as mesmas | as mesmas, escopo da plataforma | `requirePlatform`, só o proprietário |
+
+Não existe rota pública de confirmação nem `GET` com o token no caminho (o token iria para o
+log de acesso): a revisão de segurança da T2a trocou as duas rotas públicas previstas pelas
+rotas autenticadas acima.
 | `PUT /api/channels/:id/verification-template` (e a de `/api/admin/channels`) | `{ name, language }` ou `null` | 200 | `channel:manage` |
 
 `PATCH /api/customers/:id`, `PATCH /api/portal/me` e a edição de pessoa em `/admin` deixam de
@@ -314,8 +398,10 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 
 ### Segurança
 
-- Token só em hash, validade curta, uso único, consumido só por POST.
-- `GET` do token devolve os 4 últimos dígitos e o nome da organização, nunca o cadastro.
+- Token só em hash, validade curta, uso único, consumido só por POST autenticado, com o token
+  no corpo e o cadastro tirado da sessão.
+- O link de uma organização não é prova fora dela ("Alcance da confirmação").
+- Ninguém libera o próprio telefone (403 `SELF_CONFIRMATION`).
 - As respostas de cadastro seguem neutras: não dizem se um número já tem conta.
 - Rate limit: 3 envios por hora por cadastro, além do limite por IP.
 - O link vai a um número que pode nunca ter escrito ao remetente: em canal QR é envio frio. O
@@ -329,7 +415,8 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | Fase | Entrega | Verificação | LLM |
 |---|---|---|---|
 | T1 (**implementada**; a tabela de pedidos e o modelo de verificação do canal Cloud passaram para a T2, que é quem os usa) | Migration (colunas), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
-| T2 | Pedido, job `phone.verify` com a cascata, status de falha pelo webhook, página e confirmação, `claim` do portal, liberação manual e e-mail ao responsável | `tests/db`: token de uso único, vencido, GET não consome; Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; "quem provou fica com o número"; liberação manual recusada com número em uso | Fable 5.2 ou Opus 5.5 + `/security-review` |
+| T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
+| T2b | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, troca de telefone pelo pedido, `claim` do portal (D-1), e-mail ao responsável e à conta que perdeu a confirmação, e as restrições listadas em "Envio do link" | `tests/db`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; um link só por número; modelo com URL fora de `APP_URL` é recusado | Fable 5.2 ou Opus 5.5 + `/security-review` |
 | T3 | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | T4 | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 

@@ -10,6 +10,7 @@ import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
 import { assertWithinLimit } from "@/lib/billing/limits";
+import { ensureUserVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 import { activateTenant, findMembership } from "@/lib/tenant/membership";
 import { findOpenInvitation } from "@/lib/tenant/team";
@@ -86,6 +87,13 @@ invitationRoutes.post(
     // Falha aqui não desfaz a entrada: a equipe liga a ficha depois.
     await linkMemberCustomer(invitation.tenantId, user.id).catch((error: unknown) =>
       logError("Falha ao ligar a ficha de cliente do membro", error),
+    );
+    // Telefone ainda pendente: quem responde por confirmá-lo agora é a organização.
+    await ensureUserVerification(user.id, {
+      kind: "tenant",
+      tenantId: invitation.tenantId,
+    }).catch((error: unknown) =>
+      logError("Falha ao passar o pedido de verificação à organização", error),
     );
     await audit("member.joined", {
       actor: { id: user.id },

@@ -22,15 +22,26 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     o vínculo automático das conversas só usa telefone confirmado, com o cliente antes do membro; o cliente que troca o
     próprio telefone no portal volta a pendente; a conta da equipe só aceita número que recebe WhatsApp; quem é da equipe
     pode ser também cliente da organização (`customer.user_id`); permissão reservada `phone:confirm`.
-  - **Migração:** migrations `0034` (tabela `login_throttle`) e `0035` (colunas de verificação e `customer.user_id`).
-    Variáveis novas, todas com padrão: `LOGIN_LOCKOUT_SCOPE`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_ATTEMPT_WINDOW_MINUTES`,
+  - **Pedido de verificação de telefone (T2a):** tabelas `phone_verification` (um pedido por cadastro e responsável) e
+    `phone_tenant_vouch` (liberação de uma organização para um membro). Rotas novas: `/api/me/phone-verification` e
+    `/api/portal/me/phone-verification` (estado e confirmação pelo link, só na sessão do próprio cadastro),
+    `/api/phone-verifications` (fila do owner, `phone:confirm`) e `/api/admin/phone-verifications` (fila do
+    proprietário da plataforma). O que a plataforma confirma vale no sistema inteiro; o que uma organização confirma, à
+    mão ou pelo link dela, vale só nela. **Ainda sem envio do link e sem tela** (fases T2b e T4): até lá todo pedido
+    espera a liberação manual, e nada bloqueia o acesso de quem está pendente (T3).
+  - **Migração:** migrations `0034` (tabela `login_throttle`), `0035` (colunas de verificação e `customer.user_id`) e
+    `0036` (as duas tabelas da T2a e o `CHECK` que só aceita `whatsapp` e `manual` nas contas; conta com outra forma
+    volta a pendente; as fichas de cliente que a `0035` marcou `manual` passam a `team`, para continuarem atraindo as
+    conversas do número). Variável nova, com padrão: `PHONE_VERIFICATION_TTL_MINUTES` (30).
+    Demais variáveis novas, todas com padrão: `LOGIN_LOCKOUT_SCOPE`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_ATTEMPT_WINDOW_MINUTES`,
     `LOGIN_LOCKOUT_MINUTES`. Projeto derivado com dados reais: (1) a `0035` marca como **confirmado** (`manual`) todo
     telefone que já existe, inclusive o declarado em autocadastro e os fixos de contas da equipe, para ninguém perder o
     vínculo das conversas; revise os que não forem de confiança; (2) senha antiga com espaço nas pontas deixa de entrar e
     volta pelo "esqueci a senha"; (3) conta da equipe com telefone fixo continua existindo, mas não passa mais no cadastro
     nem na edição pelo `/admin`; (4) integração que fazia login por formulário (`application/x-www-form-urlencoded`)
     precisa enviar JSON; (5) a ordem do vínculo automático mudou: com cliente e membro no mesmo número, a conversa vai
-    para o cliente.
+    para o cliente; (6) a conta do portal criada por convite nasce com o telefone pendente, e a ficha de cliente liberada
+    à mão pelo owner não atrai conversas sozinha (a equipe vincula no painel).
 
 - **Caixa de entrada, fase C7 (LGPD e fechamento)**: excluir um cliente (`DELETE /api/customers/:id`) ou anonimizar a
   pessoa do portal apaga os contatos de WhatsApp vinculados a ele, com conversas, mensagens, arquivos e objetos do

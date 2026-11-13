@@ -30,3 +30,12 @@ export const whatsappPhoneSchema = phoneSchema.superRefine((value, ctx) => {
     ctx.addIssue({ code: "custom", message: WHATSAPP_PHONE_REQUIRED });
   }
 });
+
+/** O token do link de verificação: 32 bytes em base64url (43 caracteres). */
+const verificationToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Link inválido ou expirado.");
+
+export const phoneVerificationTokenSchema = z.object({ token: verificationToken });
+
+export const phoneVerificationPageSchema = z.object({
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+});
