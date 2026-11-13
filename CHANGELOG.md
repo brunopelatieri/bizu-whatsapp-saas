@@ -43,7 +43,8 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   - **Bloqueio com telefone pendente (T3):** com `PHONE_VERIFICATION_REQUIRED=true` (padrão), a conta cujo WhatsApp
     não vale recebe 403 `PHONE_UNVERIFIED` em toda rota privada da equipe, da plataforma e do portal, menos na lista
     fechada do que confirma o número ou sai (`src/api/phone-gate.ts`): ler o estado, reenviar, confirmar, trocar a
-    organização em uso, aceitar convite, encerrar a personificação e, no portal, corrigir o número. O membro comum
+    organização em uso, aceitar convite, encerrar a personificação, pedir a exclusão da própria conta (LGPD: pedir,
+    ver e desistir, com a senha de sempre) e, no portal, corrigir o número. O membro comum
     passa na organização ativa que o liberou; owner e equipe da plataforma, só com a confirmação da plataforma; o
     portal avalia a ficha de cliente da organização em uso. As leituras de `/api/auth/admin/*` ganham o mesmo portão.
     A área autenticada mostra só "Confirme seu WhatsApp" (situação por responsável, reenviar, trocar de

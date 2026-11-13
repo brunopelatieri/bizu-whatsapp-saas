@@ -33,6 +33,7 @@ import {
 } from "@/lib/lgpd/deletion";
 import { confirmIdentitySchema, portalDeleteSchema } from "@/lib/schemas/lgpd";
 import { portalTokenSchema } from "@/lib/schemas/portal";
+import { hasPortalPassword } from "@/lib/portal/profile";
 import { getStorage } from "@/lib/storage";
 import { listMemberships } from "@/lib/tenant/membership";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
@@ -284,9 +285,20 @@ portalLgpdRoutes.post(
   },
 );
 
-portalLgpdRoutes.get("/api/portal/me/deletion", authRateLimit, requirePortalAuth, async (c) =>
-  c.json(await listPendingDeletions({ type: "portal_user", id: c.get("portalUser").id })),
-);
+/**
+ * `needsPassword` diz como a pessoa confirma o pedido (a senha, ou o link por e-mail de quem não
+ * tem senha). Vem daqui porque a tela "Confirme seu WhatsApp" não lê `/api/portal/me`, que fica
+ * atrás do portão de telefone, e esta rota passa por ele (T3-7).
+ */
+portalLgpdRoutes.get("/api/portal/me/deletion", authRateLimit, requirePortalAuth, async (c) => {
+  const { id } = c.get("portalUser");
+  const [pending, needsPassword] = await Promise.all([
+    listPendingDeletions({ type: "portal_user", id }),
+    hasPortalPassword(id),
+  ]);
+
+  return c.json({ ...pending, needsPassword });
+});
 
 portalLgpdRoutes.post(
   "/api/portal/me/deletion/cancel",

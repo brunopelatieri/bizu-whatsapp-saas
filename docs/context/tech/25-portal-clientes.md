@@ -66,8 +66,9 @@ internet.
 não está confirmada (`portalPhoneGatePasses`, `src/lib/phone/gate.ts`). Sem organização em uso, passa
 se alguma ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa. A
 conta (`portal_user`) nunca é avaliada: nenhuma organização a confirma. Passam pelo portão só
-`GET`/`POST …/me/phone-verification[/resend|/confirm]`, `PATCH /api/portal/me` e
-`POST /api/portal/active-tenant` (`src/api/phone-gate.ts`); sair é do Better Auth. `PortalLayout`
+`GET`/`POST …/me/phone-verification[/resend|/confirm]`, `PATCH /api/portal/me`,
+`POST /api/portal/active-tenant` e a exclusão da própria conta (`DELETE /api/portal/me` e
+`…/me/deletion[/confirm|/cancel]`, LGPD) (`src/api/phone-gate.ts`); sair é do Better Auth. `PortalLayout`
 mostra só "Confirme seu WhatsApp" (`PortalPhoneGate`), e o login, a escolha de organização e
 `/portal/verificar-telefone` lidam com a sessão sem `/api/portal/me`. Detalhe e decisões em
 `tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".

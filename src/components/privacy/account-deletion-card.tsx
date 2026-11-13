@@ -10,6 +10,8 @@ import { apiFetch } from "@/lib/api/client";
 export type DeletionStatus = {
   account: string | null;
   tenants: Array<{ tenantId: string; scheduledFor: string; origin?: "self" | "platform" }>;
+  /** Portal: a conta tem senha (senão o pedido é confirmado por e-mail). Ausente na equipe. */
+  needsPassword?: boolean;
 };
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
@@ -74,6 +76,8 @@ export function AccountDeletionCard({
   });
 
   const scheduled = query.data?.account ?? null;
+  // O servidor sabe se a conta tem senha; a prop é o que a tela já sabia (`/api/portal/me`).
+  const askPassword = query.data?.needsPassword ?? needsPassword;
 
   return (
     <Card>
@@ -110,13 +114,13 @@ export function AccountDeletionCard({
           open={open}
           title="Excluir sua conta?"
           description={
-            needsPassword
+            askPassword
               ? "Confirme com a sua senha. A exclusão acontece em 30 dias, e até lá você pode cancelar."
               : "Enviaremos um e-mail para confirmar que foi você. A exclusão acontece 30 dias depois da confirmação."
           }
           confirmLabel="Excluir conta"
           needsTotp={needsTotp}
-          needsPassword={needsPassword}
+          needsPassword={askPassword}
           pending={remove.isPending}
           onConfirm={(values) => remove.mutate(values)}
           onCancel={() => setOpen(false)}

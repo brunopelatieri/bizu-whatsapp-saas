@@ -1,9 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock, Loader2, MessageCircle, Send } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { AuthShell, authLinkClassName } from "@/components/auth/auth-shell";
+import {
+  AccountDeletionCard,
+  useDeletionStatus,
+} from "@/components/privacy/account-deletion-card";
+import { ConfirmDeletionCard } from "@/components/privacy/confirm-deletion-card";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -281,7 +286,40 @@ export function PhoneVerificationPanel({
   );
 }
 
-function GateShell({ children, onSignOut }: { children: ReactNode; onSignOut: () => Promise<void> }) {
+/**
+ * LGPD (T3-7): pedir a exclusão da própria conta não depende de confirmar o WhatsApp. Fica
+ * recolhido; a exclusão já agendada aparece aberta, para a pessoa poder desistir.
+ */
+function GateDeletion({ statusUrl, children }: { statusUrl: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const status = useDeletionStatus(statusUrl);
+
+  if (!open && !status.data?.account) {
+    return (
+      <Button
+        type="button"
+        variant="link"
+        className="h-auto w-fit p-0 text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        Excluir minha conta
+      </Button>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+function GateShell({
+  children,
+  deletion,
+  onSignOut,
+}: {
+  children: ReactNode;
+  /** A exclusão da conta (LGPD), abaixo de "Sair". */
+  deletion?: ReactNode;
+  onSignOut: () => Promise<void>;
+}) {
   return (
     <AuthShell title="Confirme seu WhatsApp" subtitle="Falta confirmar o seu número">
       <div className="grid gap-6">
@@ -289,6 +327,7 @@ function GateShell({ children, onSignOut }: { children: ReactNode; onSignOut: ()
         <Button type="button" variant="ghost" className="w-fit" onClick={() => void onSignOut()}>
           Sair
         </Button>
+        {deletion}
       </div>
     </AuthShell>
   );
@@ -296,10 +335,25 @@ function GateShell({ children, onSignOut }: { children: ReactNode; onSignOut: ()
 
 /** A tela inteira de `/app`, `/admin` e `/app/onboarding` enquanto a API recusa pelo telefone. */
 export function TeamPhoneGate() {
-  const { reloadAccount, switchTenant, signOut } = useAuth();
+  const { reloadAccount, switchTenant, signOut, user } = useAuth();
 
   return (
-    <GateShell onSignOut={signOut}>
+    <GateShell
+      onSignOut={signOut}
+      // O suporte, na sessão personificada, não exclui nada em nome de ninguém.
+      deletion={
+        user?.impersonatedBy ? null : (
+          <GateDeletion statusUrl="/api/me/deletion">
+            <AccountDeletionCard
+              statusUrl="/api/me/deletion"
+              deleteUrl="/api/me"
+              cancelUrl="/api/me/deletion/cancel"
+              needsTotp={user?.twoFactorEnabled ?? false}
+            />
+          </GateDeletion>
+        )
+      }
+    >
       <PhoneVerificationPanel
         area="team"
         onChanged={reloadAccount}
@@ -315,9 +369,36 @@ export function TeamPhoneGate() {
 /** A tela inteira de `/portal/**` enquanto a API recusa pelo telefone da ficha. */
 export function PortalPhoneGate() {
   const { refresh, switchTenant, signOut, sessionName } = usePortalAuth();
+  // O link de confirmação da exclusão (conta sem senha) cai em `/portal/conta`, atrás desta tela.
+  const [params, setParams] = useSearchParams();
+  const deletionToken = params.get("confirmar-exclusao");
 
   return (
-    <GateShell onSignOut={signOut}>
+    <GateShell
+      onSignOut={signOut}
+      deletion={
+        <>
+          {deletionToken ? (
+            <ConfirmDeletionCard
+              token={deletionToken}
+              onDone={() => {
+                params.delete("confirmar-exclusao");
+                setParams(params, { replace: true });
+              }}
+            />
+          ) : null}
+          <GateDeletion statusUrl="/api/portal/me/deletion">
+            {/* Se a conta tem senha, quem diz é a rota de status (`needsPassword`). */}
+            <AccountDeletionCard
+              statusUrl="/api/portal/me/deletion"
+              deleteUrl="/api/portal/me"
+              cancelUrl="/api/portal/me/deletion/cancel"
+              needsPassword={false}
+            />
+          </GateDeletion>
+        </>
+      }
+    >
       <PhoneVerificationPanel
         area="portal"
         portalName={sessionName}

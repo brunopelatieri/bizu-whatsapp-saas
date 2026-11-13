@@ -17,6 +17,11 @@ import { getEnv } from "@/lib/env";
  * número (`PATCH /api/portal/me`). Sair é do Better Auth (`/api/auth/sign-out`,
  * `/api/portal/auth/sign-out`), que não passa por estes middlewares, e, na personificação,
  * `POST /api/admin/stop-impersonating` (sem ele o suporte ficaria preso na sessão da conta).
+ *
+ * LGPD (T3-7, decidido em 2026-11-13): **pedir a exclusão da própria conta** também passa, com as
+ * rotas que mostram o pedido e deixam desistir. O direito de apagar os dados não depende de
+ * confirmar o WhatsApp; a rota continua pedindo a senha (e o código do 2FA). A exportação e a
+ * exclusão da organização seguem bloqueadas.
  */
 
 type Allowed = { method: string; path: RegExp; why: string };
@@ -38,6 +43,9 @@ export const TEAM_PHONE_PENDING_ALLOWED: readonly Allowed[] = [
     path: new RegExp(`^/api/invitations/${UUID}/accept$`, "i"),
     why: "aceitar o convite: a organização passa a responder pelo telefone",
   },
+  { method: "DELETE", path: /^\/api\/me$/, why: "LGPD: pedir a exclusão da própria conta" },
+  { method: "GET", path: /^\/api\/me\/deletion$/, why: "LGPD: ver a exclusão agendada" },
+  { method: "POST", path: /^\/api\/me\/deletion\/cancel$/, why: "LGPD: desistir da exclusão" },
 ];
 
 export const PORTAL_PHONE_PENDING_ALLOWED: readonly Allowed[] = [
@@ -54,6 +62,18 @@ export const PORTAL_PHONE_PENDING_ALLOWED: readonly Allowed[] = [
   },
   { method: "PATCH", path: /^\/api\/portal\/me$/, why: "corrigir o número" },
   { method: "POST", path: /^\/api\/portal\/active-tenant$/, why: "ir à organização da ficha confirmada" },
+  { method: "DELETE", path: /^\/api\/portal\/me$/, why: "LGPD: pedir a exclusão da própria conta" },
+  {
+    method: "POST",
+    path: /^\/api\/portal\/me\/deletion\/confirm$/,
+    why: "LGPD: confirmar a exclusão pelo link do e-mail (conta sem senha)",
+  },
+  { method: "GET", path: /^\/api\/portal\/me\/deletion$/, why: "LGPD: ver a exclusão agendada" },
+  {
+    method: "POST",
+    path: /^\/api\/portal\/me\/deletion\/cancel$/,
+    why: "LGPD: desistir da exclusão",
+  },
 ];
 
 function allowed(list: readonly Allowed[], c: Context) {

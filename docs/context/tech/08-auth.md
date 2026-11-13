@@ -225,8 +225,9 @@ confirmação" em `tech/28-crm-cadastro.md`.
 **Bloqueio enquanto pendente (T3, `PHONE_VERIFICATION_REQUIRED`, padrão `true`):** a sessão existe
 (reenviar e confirmar exigem saber quem é), mas `requireAuth` responde 403 `PHONE_UNVERIFIED` a tudo,
 menos à lista fechada de `src/api/phone-gate.ts`: ler o próprio estado, reenviar, confirmar, trocar a
-organização ativa, aceitar convite e encerrar a personificação. Sair (`/api/auth/sign-out`) é do
-Better Auth e não passa por `requireAuth`. O predicado (`src/lib/phone/gate.ts`) é o da T2a: a conta
+organização ativa, aceitar convite, encerrar a personificação e pedir a exclusão da própria conta
+(LGPD: `DELETE /api/me`, `GET /api/me/deletion`, `POST /api/me/deletion/cancel`, com a senha de
+sempre). Sair (`/api/auth/sign-out`) é do Better Auth e não passa por `requireAuth`. O predicado (`src/lib/phone/gate.ts`) é o da T2a: a conta
 confirmada no sistema passa em tudo; o membro comum passa também na organização **ativa** que o
 liberou; owner e equipe da plataforma só com a confirmação do sistema. A sessão personificada
 responde pelo telefone da conta personificada. `ProtectedRoute` mostra só "Confirme seu WhatsApp".
@@ -313,7 +314,8 @@ Quem roda o comando tem o banco; a confirmação é dele. O pedido aberto do cad
 - Telefone pendente (`PHONE_VERIFICATION_REQUIRED`): o portão é de `requireAuth` e
   `requirePortalAuth`; rota nova fica bloqueada sem marcação. Pôr rota em
   `TEAM_PHONE_PENDING_ALLOWED` ou `PORTAL_PHONE_PENDING_ALLOWED` (`src/api/phone-gate.ts`) só para
-  confirmar o telefone ou sair, com motivo; rota pública nova entra na lista `PUBLIC` de
+  confirmar o telefone, sair ou pedir a exclusão da própria conta (LGPD), com motivo; rota pública
+  nova entra na lista `PUBLIC` de
   `tests/db/phone-gate.test.ts`.
 - Toda rota privada usa `authRateLimit` e `requireAuth`.
 - Falha fechada: Auth indisponível não abre rota.

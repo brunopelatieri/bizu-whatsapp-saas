@@ -475,6 +475,13 @@ T3-9 na SPEC ("T3: o que foi feito").
   `POST /api/tenant/active`, `POST /api/invitations/:id/accept`, `POST /api/admin/stop-impersonating`.
   Portal: `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
   `PATCH /api/portal/me` (corrigir o número), `POST /api/portal/active-tenant`. Sair é do Better Auth.
+  **Exclusão da própria conta (LGPD, T3-7):** `DELETE /api/me`, `GET /api/me/deletion`,
+  `POST /api/me/deletion/cancel` e, no portal, `DELETE /api/portal/me`,
+  `POST /api/portal/me/deletion/confirm`, `GET /api/portal/me/deletion` (com `needsPassword`) e
+  `POST /api/portal/me/deletion/cancel`. A tela de bloqueio traz "Excluir minha conta"
+  (`GateDeletion`, em `phone-verification-panel.tsx`), fechado por padrão e aberto quando já há
+  exclusão agendada; no portal, o link `?confirmar-exclusao=` é atendido na própria tela
+  (`ConfirmDeletionCard`). A exportação e a exclusão da organização continuam bloqueadas.
   Rota nova entra bloqueada; pôr uma rota na lista exige motivo (campo `why`) e o teste confere que
   ela existe.
 - **Better Auth:** `/api/auth/*` não passa por `requireAuth`. As leituras do plugin admin

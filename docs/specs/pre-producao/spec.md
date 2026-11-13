@@ -364,6 +364,14 @@ Implementado como em "Bloqueio de acesso enquanto pendente (D-2)", com o detalhe
   no portal, `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
   `PATCH /api/portal/me` e `POST /api/portal/active-tenant`. Sair é `POST /api/auth/sign-out` e
   `/api/portal/auth/sign-out`, do Better Auth, que não passa pelos middlewares.
+- **Exclusão da própria conta (LGPD, T3-7, decidido em 2026-11-13):** também passa. Na equipe,
+  `DELETE /api/me`, `GET /api/me/deletion` e `POST /api/me/deletion/cancel`; no portal,
+  `DELETE /api/portal/me`, `POST /api/portal/me/deletion/confirm`, `GET /api/portal/me/deletion` e
+  `POST /api/portal/me/deletion/cancel`. As rotas seguem pedindo a senha (e o código do 2FA) ou o
+  link por e-mail, e o suporte, na sessão personificada, continua sem poder pedir. A tela "Confirme
+  seu WhatsApp" traz "Excluir minha conta"; `GET /api/portal/me/deletion` passou a devolver
+  `needsPassword`, porque a tela não lê `/api/portal/me`. A exportação e a exclusão da organização
+  continuam bloqueadas.
 - **Fora dos dois middlewares:** as leituras do plugin admin do Better Auth (`/api/auth/admin/*`,
   dados de outras pessoas) ganharam o mesmo portão; o resto de `/api/auth/*` (sessão, senha, e-mail,
   2FA, sair) é da própria conta e fica aberto. SSE, arquivos, mídia e `/api/admin/*` já passam por
@@ -406,7 +414,7 @@ abrir dado):
 | T3-4 | Sessão personificada sobre conta pendente | O portão avalia a **conta personificada**: o suporte vê a mesma tela, não confirma nem reenvia (`blockWhileImpersonating`) e sai por `stop-impersonating`, que passa | Isentar a personificação (abriria dados da organização sob uma conta que ela ainda não liberou) |
 | T3-5 | Lead do portal sem ficha ativa | Sem organização em uso (ou sem ficha nela): passa se **alguma** ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa (nada a confirmar; `requirePortalTenant` segura os dados) | Trancar: o lead que já confirmou continuaria preso até virar cliente ativo |
 | T3-6 | Corrigir o número | Portal: `PATCH /api/portal/me`, a rota que já existe (exige ficha ativa: o lead não corrige sozinho). **Equipe: não há rota para a própria conta**; a tela manda falar com a plataforma, e o proprietário corrige em `/admin/usuarios/:id`. A troca pela própria pessoa é a de `…/phone-change` (fase própria) | Criar agora uma rota de troca da conta (é o contrato `phone-change`, fora do escopo) |
-| T3-7 | O que fica bloqueado com telefone pendente | Além dos dados: `GET /api/me`, sessões (`/api/me/sessions`), consentimento, exportação e exclusão de dados da conta (LGPD), `GET /api/me/invitations` e o `set-password` do portal. Fica aberto o Better Auth da própria conta (senha, 2FA, e-mail, sessão, sair) | Abrir a exclusão e a exportação da conta (direito do titular) sem o telefone |
+| T3-7 | O que fica bloqueado com telefone pendente | Além dos dados: `GET /api/me`, sessões (`/api/me/sessions`), consentimento, **exportação** dos dados da conta, `GET /api/me/invitations` e o `set-password` do portal. Fica aberto o Better Auth da própria conta (senha, 2FA, e-mail, sessão, sair). **Confirmada em parte pelo proprietário em 2026-11-13: o pedido de exclusão da própria conta passa** (pedir, ver e desistir), porque o direito de apagar os dados não depende de confirmar o WhatsApp | Abrir também a exportação da conta sem o telefone |
 | T3-8 | Leituras do plugin admin do Better Auth | Ganham o portão (servem dados de outras pessoas e não passam por `requireAuth`) | Deixar como estão |
 | T3-9 | Contas sem telefone (anteriores ao A1, só em desenvolvimento) | Ficam na tela de confirmação até o proprietário cadastrar o número em `/admin` | Isentar quem não tem número |
 
@@ -416,7 +424,10 @@ reconexão passa pelo portão. O login do portal com o telefone pendente não es
 `?org=` (o mapeamento slug → organização vem de `/api/portal/me`, bloqueado): a tela de confirmação
 troca de organização. A sessão que ficou numa organização de que a pessoa saiu não é levada à
 preferida (quem faz isso é `/api/me`, que está atrás do portão): a tela oferece "Usar esta
-organização". A tela não foi conferida num navegador nesta fase.
+organização". O owner com telefone pendente que é o único proprietário de uma organização não
+consegue excluir a conta (409 `LAST_OWNER`, a regra de sempre), e excluir ou transferir a
+organização está atrás do portão: ele precisa confirmar o número ou falar com a plataforma. A tela
+não foi conferida num navegador nesta fase.
 
 ### Pedido de verificação: `phone_verification`
 

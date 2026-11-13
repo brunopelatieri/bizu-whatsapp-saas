@@ -15,7 +15,7 @@ import { cleanUpChannels, seedCloudChannel, tenantScope } from "./channels-helpe
 import { seedConversation } from "./inbox-helpers";
 import { uniquePhone } from "./phone-helpers";
 import { cleanUpPortal, createCustomer, customerEmail, inviteAndEnter } from "./portal-helpers";
-import { applyCookies } from "./security-helpers";
+import { applyCookies, PASSWORD } from "./security-helpers";
 import {
   addMember,
   call,
@@ -281,6 +281,85 @@ describe("com PHONE_VERIFICATION_REQUIRED=true, toda rota privada", () => {
   });
 });
 
+describe("LGPD: pedir a exclusão da conta não depende do telefone (T3-7)", () => {
+  it("a conta da equipe pendente pede, vê e desiste; exportar e excluir a organização seguem bloqueados", async () => {
+    const person = await createUser(owner);
+    await addMember(owner, tenantB, person, "member");
+    await pendingPhone(person);
+    setPhoneRequired("true");
+    await activate(person, tenantB);
+
+    // O resto da LGPD e a organização continuam atrás do portão.
+    await expectBlocked(await call("POST", "/api/me/export", { cookie: person.cookie, body: {} }));
+    await expectBlocked(await call("GET", "/api/me/export", { cookie: person.cookie }));
+    await expectBlocked(
+      await call("DELETE", "/api/tenant", { cookie: person.cookie, body: { password: PASSWORD } }),
+    );
+
+    // A rota segue pedindo a senha: o portão aberto não dispensa a prova de identidade.
+    const wrong = await call("DELETE", "/api/me", {
+      cookie: person.cookie,
+      body: { password: "errada-errada-1" },
+    });
+    expect(wrong.status).toBe(403);
+    expect(await codeOf(wrong)).toBe("INVALID_CREDENTIALS");
+
+    const asked = await call("DELETE", "/api/me", {
+      cookie: person.cookie,
+      body: { password: PASSWORD },
+    });
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toMatchObject({ scheduledFor: expect.any(String) });
+
+    const status = await call("GET", "/api/me/deletion", { cookie: person.cookie });
+    expect(status.status).toBe(200);
+    expect(((await status.json()) as { account: string | null }).account).not.toBeNull();
+
+    // Pedir a exclusão não abre mais nada.
+    await expectBlocked(await call("GET", "/api/me", { cookie: person.cookie }));
+
+    const cancel = await call("POST", "/api/me/deletion/cancel", { cookie: person.cookie });
+    expect(cancel.status).toBe(200);
+    const after = await call("GET", "/api/me/deletion", { cookie: person.cookie });
+    expect(((await after.json()) as { account: string | null }).account).toBeNull();
+  });
+
+  it("o cliente do portal com a ficha pendente pede a exclusão (sem senha: link por e-mail)", async () => {
+    const email = customerEmail();
+    const created = await createCustomer(ownerA, { email });
+    const cookie = await inviteAndEnter(ownerA, mail, created.id, email);
+    await asPlatform(
+      owner,
+      (tx) => tx`update customer set phone_verified_at = null, phone_verified_via = null where id = ${created.id}`,
+    );
+    setPhoneRequired("true");
+
+    await expectBlocked(await call("GET", "/api/portal/me", { cookie }));
+    await expectBlocked(await call("POST", "/api/portal/me/export", { cookie, body: {} }));
+
+    // A tela não lê `/api/portal/me` (bloqueado): quem diz se há senha é a rota de status.
+    const status = await call("GET", "/api/portal/me/deletion", { cookie });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ account: null, needsPassword: false });
+
+    const before = mail.sent.length;
+    const asked = await call("DELETE", "/api/portal/me", { cookie, body: {} });
+    expect(asked.status).toBe(202);
+    expect(await asked.json()).toMatchObject({ confirmationSent: true });
+    expect(
+      mail.sent.slice(before).some((m) => m.to === email && m.tags?.template === "deletion-confirm"),
+    ).toBe(true);
+
+    // O clique do link também passa pelo portão; token errado é recusado pela regra de sempre.
+    const confirm = await call("POST", "/api/portal/me/deletion/confirm", {
+      cookie,
+      body: { token: "a".repeat(43) },
+    });
+    expect(confirm.status).toBeGreaterThanOrEqual(400);
+    expect(await codeOf(confirm)).not.toBe("PHONE_UNVERIFIED");
+  });
+});
+
 describe("predicado do portão", () => {
   it("membro liberado só em A passa em A e não em B, nem sem organização ativa", async () => {
     await vouch(member, tenantA);
@@ -407,6 +486,17 @@ describe("predicado do portão", () => {
 
     await expectBlocked(await call("GET", "/api/tenant", { cookie }));
     expect((await call("GET", "/api/me/phone-verification", { cookie })).status).toBe(200);
+
+    // A exclusão da conta passa pelo portão (T3-7), mas o suporte não a pede em nome de ninguém.
+    const refused = await call("DELETE", "/api/me", { cookie, body: { password: PASSWORD } });
+    expect(refused.status).toBe(403);
+    expect(await codeOf(refused)).not.toBe("PHONE_UNVERIFIED");
+    const requests = await asPlatform(
+      owner,
+      (tx) => tx`select id from deletion_request where subject_id = ${target.id}`,
+    );
+    expect(requests).toHaveLength(0);
+
     expect((await call("POST", "/api/admin/stop-impersonating", { cookie, body: {} })).status).toBe(200);
   });
 });
