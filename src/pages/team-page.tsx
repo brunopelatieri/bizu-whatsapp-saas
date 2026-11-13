@@ -3,6 +3,7 @@ import { InviteForm } from "@/components/app/team/invite-form";
 import { MembersTable } from "@/components/app/team/members-table";
 import { useTeam } from "@/components/app/team/team-api";
 import { Can } from "@/components/auth/can";
+import { TenantPhoneReleaseCard } from "@/components/phone/phone-release-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function TeamPage() {
@@ -41,6 +42,9 @@ export function TeamPage() {
             <InviteForm roles={data.roles} />
           </Can>
           <MembersTable members={data.members} roles={data.roles} />
+          <Can resource="phone" action="confirm">
+            <TenantPhoneReleaseCard subject="user" />
+          </Can>
           <Can resource="invitation" action="create">
             <InvitationsTable invitations={data.invitations} />
           </Can>

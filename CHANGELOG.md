@@ -39,7 +39,7 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     `/verificar-telefone` (e `/portal/verificar-telefone`): o botão confirma na sessão do próprio cadastro. A confirmação
     do portal deixa de exigir organização ativa (o lead do autocadastro confirma). E-mails novos:
     `phone-verification-manual` (ao responsável) e `phone-number-claimed` (à conta que perdeu a confirmação). O envio não
-    entra na caixa de entrada. **Ainda sem tela** para o modelo e as filas (T4).
+    entra na caixa de entrada. As filas ganharam tela na T4 (abaixo); o modelo, ainda não.
   - **Bloqueio com telefone pendente (T3):** com `PHONE_VERIFICATION_REQUIRED=true` (padrão), a conta cujo WhatsApp
     não vale recebe 403 `PHONE_UNVERIFIED` em toda rota privada da equipe, da plataforma e do portal, menos na lista
     fechada do que confirma o número ou sai (`src/api/phone-gate.ts`): ler o estado, reenviar, confirmar, trocar a
@@ -68,6 +68,15 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     precisa enviar JSON; (5) a ordem do vínculo automático mudou: com cliente e membro no mesmo número, a conversa vai
     para o cliente; (6) a conta do portal criada por convite nasce com o telefone pendente, e a ficha de cliente liberada
     à mão pelo owner não atrai conversas sozinha (a equipe vincula no painel).
+  - **Telas da liberação à mão (T4, parcial):** fila de pedidos na aba "Telefones" de `/admin/usuarios` (só o
+    proprietário) e em `/app/equipe` e `/app/clientes` (`phone:confirm`), com confirmação, o aviso de que a liberação
+    à mão não prova que o número é da pessoa e uma mensagem para cada recusa. Seção "Modelo de verificação de
+    telefone" em "Gerenciar" do número Cloud (escolher entre os modelos aprovados sincronizados, tirar, sincronizar e
+    ver o motivo do 422), em `/app` e `/admin`. A leitura do canal (`GET /api/channels` e `/api/admin/channels`)
+    ganhou o campo `verificationTemplate` (`{ name, language }` ou `null`). Nenhuma rota nova, permissão ou
+    migration. Texto da tela "Confirme seu WhatsApp" corrigido. **Pendentes:** modelo de verificação na tela do
+    canal), troca de telefone e `claim`. Decisões a confirmar: T4-1 a T4-4.
+  - **Migração da T4:** nenhuma.
   - **Migração da T3:** nenhuma migration. Variável nova `PHONE_VERIFICATION_REQUIRED`, padrão **`true`**: quem tem o
     telefone pendente deixa de usar o sistema até confirmar. Antes de atualizar um projeto derivado, (1) promova o
     primeiro proprietário com o telefone confirmado (o comando de `tech/08-auth.md` mudou: `phone_verified_at` e

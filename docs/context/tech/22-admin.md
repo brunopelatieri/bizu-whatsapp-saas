@@ -97,7 +97,12 @@ responde 403 e avisa os owners. A política se edita em `/admin/configuracoes` e
 
 ## Usuários do portal
 
-`/admin/usuarios` tem duas abas. Clientes e leads são outra identidade (`portal_user`):
+`/admin/usuarios` tem uma terceira aba, **"Telefones"** (`?scope=telefones`, T4), só para o proprietário: a fila de
+liberação à mão de `GET /api/admin/phone-verifications` (owners, equipe da plataforma e contas sem organização), com
+a contagem de pendentes e o botão "Liberar" com confirmação (`POST …/:id/confirm`). O suporte não vê a aba: a rota
+é `ownerOnly`. Componentes em `src/components/phone/` (`tech/28-crm-cadastro.md`, "Telas da liberação à mão").
+
+Além dela, `/admin/usuarios` tem duas abas. Clientes e leads são outra identidade (`portal_user`):
 `GET /api/admin/users?scope=portal` traz as organizações (nome e status do vínculo) e as sessões em aberto, e
 `POST /api/admin/portal-users/:id/revoke-sessions`, só do proprietário, derruba as sessões. Não
 há banimento: o acesso é de cada tenant, por `customer.status`. O overview conta os clientes

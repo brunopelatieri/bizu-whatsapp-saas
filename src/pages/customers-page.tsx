@@ -10,6 +10,7 @@ import {
   useCustomers,
 } from "@/components/app/customers/customers-api";
 import { Can } from "@/components/auth/can";
+import { TenantPhoneReleaseCard } from "@/components/phone/phone-release-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -236,6 +237,10 @@ export function CustomersPage() {
           </Card>
         ) : null}
       </QueryState>
+
+      <Can resource="phone" action="confirm">
+        <TenantPhoneReleaseCard subject="customer" />
+      </Can>
 
       <CustomerFormDialog open={creating} onClose={() => setCreating(false)} />
     </div>

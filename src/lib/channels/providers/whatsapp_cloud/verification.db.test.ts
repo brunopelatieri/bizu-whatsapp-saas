@@ -93,13 +93,31 @@ describe("modelo de verificação do canal Cloud", () => {
     const name = await template(tenantId, GOOD_URL);
     const path = `/api/channels/${channelId}/verification-template`;
 
+    const shown = async (base: string, id: string) => {
+      const list = (await (await call("GET", base, { cookie: boss.cookie })).json()) as {
+        channels: Array<{ id: string; verificationTemplate?: unknown }>;
+      };
+      return list.channels.find((item) => item.id === id)?.verificationTemplate;
+    };
+
+    // A leitura do canal traz o modelo escolhido (nulo sem modelo), sem nada a mais.
+    expect(await shown("/api/channels", channelId)).toBeNull();
+
     const chosen = await put(boss.cookie, path, { template: { name, language: "pt_BR" } });
     expect(chosen.status).toBe(200);
     expect(await choice(channelId)).toEqual({ name, language: "pt_BR" });
+    expect(await shown("/api/channels", channelId)).toEqual({ name, language: "pt_BR" });
+    // O canal da plataforma, lido pela organização, não existe: nada vaza entre escopos.
+    expect(
+      ((await (await call("GET", "/api/channels", { cookie: boss.cookie })).json()) as {
+        channels: Array<{ id: string }>;
+      }).channels.some((item) => item.id === platformChannelId),
+    ).toBe(false);
 
     const cleared = await put(boss.cookie, path, { template: null });
     expect(cleared.status).toBe(200);
     expect(await choice(channelId)).toEqual({ name: null, language: null });
+    expect(await shown("/api/channels", channelId)).toBeNull();
   });
 
   it("recusa o modelo cujo botão manda o token para fora do APP_URL", async () => {

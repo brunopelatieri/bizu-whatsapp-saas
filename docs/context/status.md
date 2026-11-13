@@ -46,8 +46,11 @@
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
   promoção do primeiro proprietário com o telefone confirmado), com as decisões T3-1 a T3-9 a
-  confirmar pelo proprietário (SPEC, "T3: o que foi feito"). Próxima fase: T4 (telas das filas e
-  do modelo). Os blocos S, B, T, F, E, L e R
+  confirmar pelo proprietário (SPEC, "T3: o que foi feito"). **T4 parcial**: telas das filas
+  de liberação em `/admin/usuarios` (aba "Telefones", só o proprietário), `/app/equipe` e `/app/clientes`, modelo de
+  verificação na tela do canal Cloud (a leitura do canal traz `verificationTemplate`) e acertos de texto da tela da
+  T3; roteiro manual com número real na SPEC. Pendentes: troca de telefone, `claim` e ligação da ficha à equipe (SPEC, "T4: o que
+  foi feito"). Os blocos S, B, T, F, E, L e R
   seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09

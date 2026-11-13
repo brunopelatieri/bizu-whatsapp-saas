@@ -64,4 +64,5 @@ shell com outro menu; `/portal/**` é client-only como elas, com layout e sessã
 - `/portal/conta`: exportação e exclusão; `?confirmar-exclusao=<token>` só mostra o botão (o clique faz o POST).
 - `ConsentGate` (`AppLayout` e `AdminLayout`) e `ConsentDialog` (`PortalLayout`): modal sem fechar enquanto `consentRequired` não esvazia.
 - Telefone pendente (T3): com a API respondendo 403 `PHONE_UNVERIFIED`, `ProtectedRoute` (`/app`, `/admin`, onboarding) mostra só `TeamPhoneGate` e `PortalLayout` só `PortalPhoneGate` (`src/components/phone/phone-verification-panel.tsx`); com `PHONE_VERIFICATION_REQUIRED=false`, `TeamPhonePendingBanner` e `PortalPhonePendingBanner` avisam (`phonePending` de `/api/me` e `/api/portal/me`). O bloqueio é do servidor (`tech/28-crm-cadastro.md`).
+- Fila de liberação de telefone (T4): `TenantPhoneReleaseCard` (`src/components/phone/phone-release-card.tsx`) em `/app/equipe` (pessoas) e `/app/clientes` (fichas), dentro de `<Can resource="phone" action="confirm">`; a plataforma tem a aba "Telefones" em `/admin/usuarios` (`tech/22-admin.md`). Detalhe em `tech/28-crm-cadastro.md`.
 - Nada disso tem loader no servidor.

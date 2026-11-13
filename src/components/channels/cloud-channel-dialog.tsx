@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { z } from "zod";
 import type { ChannelDialogProps } from "@/components/channels/channel-dialogs";
 import { ChannelStatus } from "@/components/channels/channel-status";
+import { VerificationTemplateCard } from "@/components/channels/verification-template-card";
 import { type Channel, useChannelMutation } from "@/components/channels/channels-api";
 import { Button } from "@/components/ui/button";
 import {
@@ -538,6 +539,8 @@ function ManageView({
         </h3>
         <Diagnostics basePath={basePath} channelId={channel.id} />
       </section>
+
+      <VerificationTemplateCard basePath={basePath} channel={channel} />
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>

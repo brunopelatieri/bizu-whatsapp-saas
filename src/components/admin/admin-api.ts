@@ -31,8 +31,14 @@ type AdminRequest = {
   body?: unknown;
 };
 
-/** Escrita: avisa o resultado, recarrega as telas do admin e relê `/api/me`. */
-export function useAdminMutation<T = unknown>(successMessage: string) {
+/**
+ * Escrita: avisa o resultado e recarrega as telas do admin. `errorMessage` troca o texto do aviso
+ * de erro (uma mensagem própria por código); sem ele, vale a mensagem da API.
+ */
+export function useAdminMutation<T = unknown>(
+  successMessage: string,
+  options: { errorMessage?: (error: Error) => string } = {},
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -45,7 +51,7 @@ export function useAdminMutation<T = unknown>(successMessage: string) {
       toast.success(successMessage);
       await queryClient.invalidateQueries({ queryKey: ["admin"] });
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(options.errorMessage?.(error) ?? error.message),
   });
 }
 

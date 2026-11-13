@@ -9,6 +9,8 @@ import {
 import { OrgList, type OrgRef } from "@/components/admin/org-list";
 import { Pager } from "@/components/admin/pager";
 import { PortalUsersCard } from "@/components/admin/portal-users-card";
+import { PlatformPhoneReleaseCard } from "@/components/phone/phone-release-card";
+import { PLATFORM_PHONE_QUEUE_PATH, type PhoneRelease } from "@/components/phone/phone-release-api";
 import { InboxModeProvider } from "@/components/inbox/inbox-scope";
 import { StartConversationButton } from "@/components/inbox/new-conversation-dialog";
 import type { PhoneKind } from "@/lib/phone/br";
@@ -57,7 +59,15 @@ export function AdminUsersPage() {
   const [page, setPage] = useState(1);
   const [banning, setBanning] = useState<AdminUser | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
-  const scope = searchParams.get("scope") === "portal" ? "portal" : "team";
+  const requested = searchParams.get("scope");
+  // A fila de liberação é do proprietário: a rota recusa o suporte, então a aba nem existe para ele.
+  const scope =
+    requested === "portal" ? "portal" : requested === "telefones" && owner ? "telefones" : "team";
+  const phoneQueue = useAdminQuery<Page<PhoneRelease>>(
+    PLATFORM_PHONE_QUEUE_PATH,
+    { page: 1 },
+    owner,
+  );
   const query = useAdminQuery<Page<AdminUser>>(
     "/api/admin/users",
     { q, page, scope: "team" },
@@ -76,33 +86,47 @@ export function AdminUsersPage() {
       <Tabs
         value={scope}
         onValueChange={(next) => {
-          setSearchParams(next === "portal" ? { scope: "portal" } : {});
+          setSearchParams(next === "team" ? {} : { scope: next === "portal" ? "portal" : "telefones" });
           setPage(1);
         }}
       >
         <TabsList>
           <TabsTrigger value="team">Equipe e plataforma</TabsTrigger>
           <TabsTrigger value="portal">Portal</TabsTrigger>
+          {owner ? (
+            <TabsTrigger value="telefones">
+              Telefones
+              {phoneQueue.data && phoneQueue.data.total > 0 ? (
+                <Badge variant="default" className="ml-1.5">
+                  {phoneQueue.data.total}
+                </Badge>
+              ) : null}
+            </TabsTrigger>
+          ) : null}
         </TabsList>
       </Tabs>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          setQ(search.trim());
-          setPage(1);
-        }}
-      >
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Buscar por nome ou e-mail"
-          aria-label="Buscar usuário"
-          maxLength={100}
-        />
-      </form>
+      {scope === "telefones" ? null : (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setQ(search.trim());
+            setPage(1);
+          }}
+        >
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar por nome ou e-mail"
+            aria-label="Buscar usuário"
+            maxLength={100}
+          />
+        </form>
+      )}
 
-      {scope === "portal" ? (
+      {scope === "telefones" ? (
+        <PlatformPhoneReleaseCard />
+      ) : scope === "portal" ? (
         <PortalUsersCard q={q} page={page} onPage={setPage} />
       ) : (
       <QueryState {...query}>

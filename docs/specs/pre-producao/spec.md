@@ -429,6 +429,115 @@ consegue excluir a conta (409 `LAST_OWNER`, a regra de sempre), e excluir ou tra
 organização está atrás do portão: ele precisa confirmar o número ou falar com a plataforma. A tela
 não foi conferida num navegador nesta fase.
 
+### T4: o que foi feito (2026-11-13)
+
+**Parcial.** Entraram as três filas de liberação, o modelo de verificação na tela do canal Cloud e os acertos
+de texto da tela da T3. Ficaram de fora as telas de troca de telefone, o `claim` e a ligação da ficha à equipe,
+por falta de rota no servidor (lista abaixo). Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Telas da liberação à
+mão").
+
+- **Fila da plataforma:** aba "Telefones" em `/admin/usuarios?scope=telefones`, **só para o
+  proprietário** (`GET /api/admin/phone-verifications` é `ownerOnly`: o suporte recebe 403, então a aba nem
+  existe para ele). O número de pendentes aparece na aba. `useAdminQuery` e `useAdminMutation`.
+- **Fila da organização:** um cartão em `/app/equipe` (pedidos de pessoas da equipe) e outro em
+  `/app/clientes` (pedidos de fichas de cliente), sobre `GET /api/phone-verifications`, dentro de
+  `<Can resource="phone" action="confirm">` (a rota que lista também exige a permissão, então sem ela nada
+  é pedido). A rota devolve equipe e clientes juntos, sem filtro por tipo: cada tela filtra a página no
+  cliente, e a paginação vale para a fila toda (a tela avisa quando há mais de uma página).
+- **Em todas:** confirmação antes de liberar, com "a liberação à mão não prova que o número é da pessoa" e o
+  alcance conforme o responsável (plataforma: sistema inteiro; equipe: só a organização; ficha: só a
+  organização, sem atrair conversas nem ligar à equipe); mensagem própria para `SELF_CONFIRMATION`,
+  `PHONE_IN_USE`, `PLATFORM_ONLY`, `VERIFICATION_STALE` e 404; estado vazio; a lista relê depois de cada
+  tentativa, com sucesso ou erro. O número aparece como a rota o devolve (`phone`, o número normalizado, sem
+  máscara), junto de "Link enviado" ou "Aguardando liberação" e da data do pedido.
+- **Modelo de verificação na tela do canal Cloud** (autorizado pelo proprietário em 2026-11-13: expor o modelo
+  escolhido na leitura do canal): `verificationTemplate: { name, language } | null` passou a sair em
+  `GET /api/channels` e `GET /api/admin/channels` (`src/lib/channels/service.ts`, ao lado dos outros campos da
+  Cloud; só leitura, sem coluna `_enc`, rota, permissão ou migration; teste em
+  `whatsapp_cloud/verification.db.test.ts`). A tela é `VerificationTemplateCard`, dentro de "Gerenciar" do número
+  Cloud, um componente para `/app` e `/admin` (`basePath` por props): mostra o modelo em uso, lista os modelos
+  **aprovados** já sincronizados (`GET …/templates?status=APPROVED`), aplica (`PUT …/verification-template`),
+  tira, sincroniza (`POST …/templates/sync`) e mostra o motivo do 422 como a API o devolve. Conferida no
+  navegador (desktop e DOM em celular) em `/app/configuracoes/canais` com um número Cloud de teste local: 422 de
+  URL fora do endereço, aplicar, "Em uso" e tirar; **a variante de `/admin` não foi aberta** (mesmo componente).
+- **Tela da T3, só texto:** "aguardando a liberação de o proprietário" virou "do proprietário da
+  plataforma"; "abra o link que enviamos" só aparece quando algum link saiu (sem envio, "Falta confirmar o
+  WhatsApp terminado em …").
+- **Conferido num navegador** (Postgres local, servidor de desenvolvimento, contas do seed, sem canal
+  conectado e com `PHONE_VERIFICATION_CHANNELS` vazio, nenhuma mensagem enviada): as três filas em desktop,
+  a liberação com sucesso na equipe, 404 e `VERIFICATION_STALE` na fila de clientes, e a tela "Confirme seu
+  WhatsApp" da equipe (conta pendente da plataforma) e do portal (cliente com duas fichas pendentes) em
+  desktop. Em largura de celular os screenshots do painel saem fatiados; a conferência foi pelo DOM
+  (nenhum elemento fora de 375 px, sem rolagem horizontal) na aba do admin e nas duas telas da T3.
+  **Não exercitados na tela:** `SELF_CONFIRMATION`, `PHONE_IN_USE` e `PLATFORM_ONLY` (têm teste de servidor
+  na T2a), a fila da organização em largura de celular (é o mesmo componente da do admin) e a paginação
+  com mais de 50 pedidos.
+
+**Pendentes, com o que falta para destravar**
+
+| Pendente | Por que ficou | O que destrava |
+|---|---|---|
+| Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` | `…/phone-change` não existe (pendente da T2b) | As três rotas de "Contratos" |
+| `claim` do portal (D-1) | Idem | O `purpose = claim` e a exclusão da ficha antiga |
+| Ligar e desligar a ficha de cliente à pessoa da equipe (D-9) | Não há rota (`customer.user_id` só é gravado pelo telefone confirmado e na exclusão) | Rota com `customer:update`, auditoria `customer.team_linked` e a restrição (a) da D-11 |
+| Filtro por tipo na fila da organização | A rota lista equipe e clientes juntos | `?subject=user\|customer` em `GET /api/phone-verifications` |
+| Fila lida pelo suporte da plataforma | A rota é só do proprietário | Trocar `ownerOnly` por `requirePlatform` na leitura (decisão de regra) |
+
+**Roteiro manual com número real** (a verificação da T4; quem executa é o proprietário). Pré-requisitos:
+servidor com `APP_URL` público em `https`, `JOBS_MODE=inline` (ou o worker rodando),
+`PHONE_VERIFICATION_CHANNELS=whatsapp_cloud,whatsapp_qr`, SMTP ou Mailpit para os e-mails, um número real
+que receba WhatsApp e **não** seja o do canal que envia, e uma organização com um owner.
+O modelo se escolhe em `/app/configuracoes/canais` → "Gerenciar" no número Cloud → "Modelo de verificação de
+telefone" (ou na tela equivalente de `/admin`, para os números da plataforma). Em cada cenário, confira a auditoria (`phone.verified`, com a forma e quem liberou) e que o número não aparece em log, job nem
+auditoria.
+
+1. **Cloud com modelo.**
+   1. Em `/app/configuracoes/canais`, conecte o número oficial e confira o diagnóstico verde.
+   2. Na Meta, crie um modelo de utilidade sem variável no corpo, com **um botão de URL dinâmica** apontando
+      para `https://<APP_URL>/verificar-telefone?token={{1}}`; espere a aprovação e sincronize os modelos
+      ("Sincronizar modelos", na mesma seção).
+   3. Escolha o modelo na tela e clique "Usar este modelo". Um modelo com a URL errada deve mostrar o motivo do
+      422 (`INVALID_VERIFICATION_TEMPLATE`); "Em uso" mostra o modelo gravado, e "Tirar o modelo" o desfaz.
+   4. Convide, por e-mail, uma pessoa com o número real e aceite o convite. **Esperado:** o modelo chega no
+      WhatsApp; o botão abre `/verificar-telefone`; sem sessão vai ao login e volta; o clique em "Confirmar"
+      libera. `/app/equipe` não mostra pedido, e o pedido está `confirmed` no banco.
+   5. Abra o mesmo link com outra conta logada: **esperado** 400 "Link inválido ou expirado".
+   6. Confira que o formato do botão (`sub_type: url`, `index`) foi aceito pela Meta: a SPEC só testou isso com
+      provedor falso, e este é o ponto que o roteiro precisa fechar antes de dar a T2 por encerrada.
+2. **Cloud sem crédito caindo no QR Code.**
+   1. Conecte também um número por QR Code (`whatsapp_qr`) na mesma organização, conectado.
+   2. Deixe a Cloud sem crédito de conversa (ou com o modelo pausado), de modo que a Meta devolva o status
+      `failed` (erro `131042`).
+   3. Repita o convite com um número real. **Esperado:** a Cloud aceita o envio, o status `failed` chega pelo
+      webhook, o job passa ao QR Code e o link chega como texto livre. Em `phone_verification.attempts` há uma
+      entrada para a Cloud (com o erro) e outra para o QR Code; o token não aparece ali.
+   4. Peça "Reenviar o link" na tela de confirmação: a ordem recomeça e o limite é de 3 links por hora por
+      cadastro (a 4ª tentativa responde o aviso de limite).
+3. **Sem canal caindo na liberação.**
+   1. Desconecte ou remova os canais da organização (ou deixe `PHONE_VERIFICATION_CHANNELS` vazio).
+   2. Convide e aceite com um número real. **Esperado:** a pessoa vê "Confirme seu WhatsApp" com "Sem envio
+      automático agora: aguardando a liberação de quem administra <organização>"; o owner recebe o e-mail
+      "phone-verification-manual" uma vez; o pedido aparece em `/app/equipe` como "Aguardando liberação".
+   3. Como owner (outra pessoa, não a que espera), abra "Liberar": o diálogo mostra o aviso de que a liberação
+      não prova a posse e o alcance só na organização. Confirme. **Esperado:** "Telefone liberado", o pedido
+      sai da fila, a pessoa clica "Já confirmei" e entra; a auditoria registra `phone.verified` com `manual`.
+   4. Tente liberar o próprio número (precisa de um pedido do liberador na fila de uma organização, por
+      exemplo um colega com `phone:confirm`): **esperado** a mensagem de `SELF_CONFIRMATION`.
+   5. Repita com um cliente do portal (autocadastro): o pedido aparece em `/app/clientes`; a liberação à mão não
+      liga a ficha à equipe nem atrai conversas futuras do número.
+   6. Plataforma: cadastre um owner sem convite, sem canal da plataforma. **Esperado:** o pedido aparece na aba
+      "Telefones" de `/admin/usuarios` do proprietário; liberar vale no sistema inteiro; o suporte da
+      plataforma não vê a aba.
+
+**Decisões da T4 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| T4-1 | Onde fica a fila da plataforma | Aba "Telefones" em `/admin/usuarios`, com contagem, só para o proprietário | Cartão fixo no topo da lista, ou página própria |
+| T4-2 | Fila da organização sem filtro por tipo na rota | Duas telas filtram a página no cliente; o aviso diz que a paginação é da fila toda | Pedir `?subject=` ao servidor (pendente acima) |
+| T4-3 | Modelo de verificação na tela do canal | Tela dentro de "Gerenciar" do número Cloud; a leitura do canal passou a trazer `verificationTemplate` (autorizado em 2026-11-13) | Seção própria fora do diálogo, ou rota dedicada de leitura |
+| T4-4 | Suporte da plataforma | Não vê a fila (a rota é do proprietário) | Liberar a leitura ao suporte |
+
 ### Pedido de verificação: `phone_verification`
 
 `scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
@@ -542,7 +651,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
 | T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
 | T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
-| T4 | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
+| T4 (**parcial**: filas, modelo de verificação na tela do canal e acertos de texto da T3 implementados; telas de troca de telefone, `claim` e ligação à equipe pendentes; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 
 ---
 

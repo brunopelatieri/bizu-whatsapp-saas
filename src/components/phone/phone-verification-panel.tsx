@@ -60,8 +60,8 @@ const message = (error: unknown, fallback: string) =>
 function statusText(row: Responsible) {
   const who =
     row.responsible === "platform"
-      ? "o proprietário da plataforma"
-      : `quem administra ${row.tenantName ?? "a organização"}`;
+      ? "do proprietário da plataforma"
+      : `de quem administra ${row.tenantName ?? "a organização"}`;
 
   switch (row.status) {
     case "confirmed":
@@ -69,7 +69,7 @@ function statusText(row: Responsible) {
     case "sent":
       return "Enviamos um link. Abra-o neste navegador, com esta conta.";
     case "awaiting_manual":
-      return `Sem envio automático agora: aguardando a liberação de ${who}.`;
+      return `Sem envio automático agora: aguardando a liberação ${who}.`;
     default:
       return row.responsible === "platform"
         ? "Opcional: confirma o número para todas as organizações."
@@ -201,12 +201,16 @@ export function PhoneVerificationPanel({
 
   const rows = overview.data.responsibles;
   const hint = overview.data.phoneHint ?? rows.find((row) => row.phoneHint)?.phoneHint ?? null;
+  // "Abra o link" só faz sentido se algum link saiu; sem envio, o pedido espera a liberação.
+  const linkSent = rows.some((row) => row.status === "sent");
 
   return (
     <div className="grid gap-4 text-sm">
       <p className="text-muted-foreground">
         {hint
-          ? `Confirme que o WhatsApp terminado em ${hint} é seu: abra o link que enviamos para ele.`
+          ? linkSent
+            ? `Confirme que o WhatsApp terminado em ${hint} é seu: abra o link que enviamos para ele.`
+            : `Falta confirmar o WhatsApp terminado em ${hint}.`
           : "Confirme seu número de WhatsApp para continuar."}
         {area === "team" && overview.data.answersTo === "organization"
           ? " A confirmação de uma organização vale só nela."

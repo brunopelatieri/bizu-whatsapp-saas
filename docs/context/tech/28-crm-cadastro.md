@@ -509,6 +509,30 @@ T3-9 na SPEC ("T3: o que foi feito").
   portal pendente não escolhe a organização do `?org=`; a correção do número no portal exige ficha
   ativa (o lead não corrige sozinho).
 
+## Telas da liberação à mão (pré-produção, T4)
+
+Código: `src/components/phone/phone-release-api.ts` (rotas, tipos, mensagem de cada erro),
+`src/components/phone/phone-release-card.tsx` (a lista, o diálogo e os dois cartões),
+`src/pages/admin/users-page.tsx`, `src/pages/team-page.tsx`, `src/pages/customers-page.tsx`. Só tela sobre as
+rotas da T2a; nada de servidor mudou. Decisões a confirmar: T4-1 a T4-4 na SPEC ("T4: o que foi feito").
+
+- **Plataforma:** `PlatformPhoneReleaseCard`, aba "Telefones" de `/admin/usuarios?scope=telefones`, só quando
+  `useIsPlatformOwner()` (a rota é `ownerOnly`). A contagem da aba é o `total` da página 1.
+- **Organização:** `TenantPhoneReleaseCard subject="user"` em `/app/equipe` e `subject="customer"` em
+  `/app/clientes`, envoltos em `<Can resource="phone" action="confirm">` (a rota que lista também exige a
+  permissão). A rota devolve equipe e clientes juntos; a tela filtra a página por `subjectType`, e a
+  paginação (e o `total`) é da fila toda.
+- **Lista:** nome, número como a rota o devolve (`phone`, normalizado, sem máscara), estado ("Link enviado" ou
+  "Aguardando liberação") e data. "Liberar" abre o diálogo com o aviso de que a liberação à mão não prova que
+  o número é da pessoa e o alcance (plataforma: sistema inteiro; equipe e ficha: só a organização). A lista
+  relê depois de cada tentativa, com sucesso ou erro.
+- **Erros** (`releaseErrorMessage`): `SELF_CONFIRMATION`, `PHONE_IN_USE`, `PLATFORM_ONLY`, `VERIFICATION_STALE`
+  e 404 têm texto próprio; outro código mostra a mensagem da API. `useAdminMutation` ganhou a opção
+  `errorMessage` para isso.
+- **Modelo de verificação** (Cloud): `VerificationTemplateCard` em "Gerenciar" do número
+  (`tech/29-canais-whatsapp.md`); a leitura do canal passou a trazer `verificationTemplate`.
+- **Fica de fora:** troca de telefone e `claim` (rotas pendentes) e a ligação da ficha à equipe. Lista completa na SPEC.
+
 ## O que a SPEC pede e ainda não existe
 
 Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe: o telefone
