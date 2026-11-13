@@ -258,7 +258,7 @@ describe("quem abre o pedido", () => {
     expect((await userPhone(user.id))?.at).toBeNull();
 
     const mine = await call("GET", "/api/me/phone-verification", { cookie: user.cookie });
-    expect(await mine.json()).toEqual({
+    expect(await mine.json()).toMatchObject({
       pending: { status: "awaiting_manual", phoneHint: "4321" },
     });
   });
@@ -351,7 +351,7 @@ describe("quem abre o pedido", () => {
       phone_key: phoneValues(first).phoneKey,
     });
     const mine = await call("GET", "/api/portal/me/phone-verification", { cookie });
-    expect(await mine.json()).toEqual({
+    expect(await mine.json()).toMatchObject({
       pending: { status: "awaiting_manual", phoneHint: first.slice(-4) },
     });
 
@@ -388,7 +388,8 @@ describe("o link", () => {
     const { user } = await pendingUser();
     const request = await openRequestOf(user.id);
     const token = (await issueVerificationToken(request.id)) as string;
-    expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    // O prefixo diz à página qual sessão pedir (`u.` a da equipe); o resto são 32 bytes.
+    expect(token).toMatch(/^u\.[A-Za-z0-9_-]{43}$/);
 
     const stored = await openRequestOf(user.id);
     expect(stored.status).toBe("sent");
@@ -421,7 +422,7 @@ describe("o link", () => {
     expect(again.status).toBe(400);
     expect(await again.json()).toMatchObject({ code: "INVALID_OR_EXPIRED" });
     const mine = await call("GET", "/api/me/phone-verification", { cookie: user.cookie });
-    expect(await mine.json()).toEqual({ pending: null });
+    expect(await mine.json()).toMatchObject({ pending: null });
   });
 
   it("dois cliques ao mesmo tempo: um confirma, o outro é recusado", async () => {
@@ -444,7 +445,7 @@ describe("o link", () => {
     const current = (await issueVerificationToken(request.id)) as string;
 
     const replaced = await confirmByLink(user.cookie, old);
-    const invented = await confirmByLink(user.cookie, "a".repeat(43));
+    const invented = await confirmByLink(user.cookie, `u.${"a".repeat(43)}`);
     // `phone_verification` tem RLS forçado: até o dono da tabela precisa do bypass.
     await asPlatform(
       owner,

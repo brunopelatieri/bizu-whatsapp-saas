@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/password-policy";
 import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { getPortalAuth } from "@/lib/auth/portal";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { closeVerificationsOf, ensureCustomerVerification } from "@/lib/phone/requests";
 import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
@@ -45,7 +46,7 @@ export async function hasPortalPassword(portalUserId: string) {
 }
 
 /** Atualiza a pessoa e o cadastro dela no tenant ativo, sem tocar nos outros tenants. */
-export function updatePortalProfile(
+export async function updatePortalProfile(
   portalUserId: string,
   current: PortalCustomer,
   input: PortalProfileInput,
@@ -67,7 +68,7 @@ export function updatePortalProfile(
   const valuesFor = (currentKey: string | null | undefined) =>
     currentKey === phone.phoneKey ? base : { ...base, ...UNVERIFIED_PHONE };
 
-  return withTenant(tenantId, async (tx) => {
+  const updated = await withTenant(tenantId, async (tx) => {
     // A ficha antes da conta: é a ordem de quem confirma o telefone (`requests.ts`).
     const [record] = await tx
       .select({ phoneKey: customer.phoneKey })
@@ -100,7 +101,7 @@ export function updatePortalProfile(
     if (record?.phoneKey !== phone.phoneKey) {
       await closeVerificationsOf(tx, { type: "customer", id: current.id });
     }
-    await ensureCustomerVerification(tx, tenantId, current.id);
+    const requestId = await ensureCustomerVerification(tx, tenantId, current.id);
     await auditInTransaction(tx, "portal.profile_updated", {
       actor: { type: "portal_user", id: portalUserId },
       tenantId,
@@ -108,12 +109,17 @@ export function updatePortalProfile(
       ip,
     });
 
-    return person;
+    // Número novo: o link sai pelos canais da organização depois do commit (o job decide se o
+    // pedido que já existia precisa de outro).
+    return { person, requestId: record?.phoneKey !== phone.phoneKey ? requestId : null };
   }).catch((error: unknown) => {
     // Outro cliente do tenant já tem o número: sem dizer quem (o autor é o próprio cliente).
     if (isUniqueViolation(error)) throw phoneInUse();
     throw error;
   });
+
+  await requestPhoneVerificationSend(updated.requestId, { type: "customer", id: current.id });
+  return updated.person;
 }
 
 type PasswordActor = {

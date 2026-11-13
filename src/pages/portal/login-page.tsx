@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api/client";
+import { safeNextPath } from "@/lib/auth/next-path";
 import { lastPortalOrg, rememberPortalOrg } from "@/lib/portal/last-org";
 import {
   emailOnlySchema,
@@ -113,7 +114,16 @@ function MagicLinkForm({ org }: { org: string }) {
   );
 }
 
-function PasswordForm({ org }: { org: string | null }) {
+/**
+ * Destino depois do login do portal: só caminho interno do próprio portal (o link de verificação
+ * de telefone volta por aqui). Qualquer outra coisa vai para `/portal`.
+ */
+export function portalNextPath(next: string | null) {
+  const path = safeNextPath(next);
+  return path.startsWith("/portal/") ? path : "/portal";
+}
+
+function PasswordForm({ org, next }: { org: string | null; next: string }) {
   const navigate = useNavigate();
   const { signIn } = usePortalAuth();
   const form = useForm<LoginInput>({
@@ -125,7 +135,7 @@ function PasswordForm({ org }: { org: string | null }) {
   async function onSubmit(values: LoginInput) {
     try {
       await signIn(values, org);
-      navigate("/portal", { replace: true });
+      navigate(next, { replace: true });
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Falha ao entrar. Tente novamente.",
@@ -200,6 +210,7 @@ export function PortalLoginPage() {
   // Só depois de montar: no servidor não há `localStorage`.
   const [storedOrg, setStoredOrg] = useState<string | null>(null);
   const requestedOrg = searchParams.get("org");
+  const next = portalNextPath(searchParams.get("next"));
   const org = requestedOrg ?? storedOrg;
 
   useEffect(() => {
@@ -218,7 +229,7 @@ export function PortalLoginPage() {
   });
 
   if (loading) return <AuthSpinner />;
-  if (user) return <Navigate to="/portal" replace />;
+  if (user) return <Navigate to={next} replace />;
 
   const known = tenant.data?.tenant;
   const showPassword = usePassword || !org;
@@ -230,7 +241,7 @@ export function PortalLoginPage() {
     >
       <div className="grid gap-4">
         {showPassword ? (
-          <PasswordForm org={org} />
+          <PasswordForm org={org} next={next} />
         ) : (
           <MagicLinkForm org={org ?? ""} />
         )}

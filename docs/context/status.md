@@ -23,7 +23,7 @@
 
 ## Programas em planejamento
 
-- **Pré-produção** (`docs/specs/pre-producao/spec.md`, aprovada em 2026-11-11, nada implementado):
+- **Pré-produção** (`docs/specs/pre-producao/spec.md`, aprovada em 2026-11-11, em implementação):
   telefone verificado por link no WhatsApp (Cloud, QR Code ou liberação manual) e único dentro
   de cada grupo (owners no SaaS; equipe e clientes por organização), equipe que também é
   cliente (`customer.user_id`), acesso bloqueado com telefone pendente, perfil do
@@ -36,8 +36,14 @@
   telefone, unicidade por grupo, equipe que também é cliente, vínculo automático só com telefone
   confirmado) e **T2a** (pedido de verificação, confirmação pelo link na sessão do cadastro,
   liberação manual pelo owner e pelo proprietário da plataforma, com alcance pelo responsável do
-  pedido; ainda sem envio do link e sem tela; `tech/28-crm-cadastro.md`). Próxima fase: T2b
-  (envio pelos canais e página de confirmação). Os blocos S, B, T, F, E, L e R seguram o deploy.
+  pedido; `tech/28-crm-cadastro.md`) e **T2b** (job `phone.verify` com a cascata Cloud → QR Code →
+  manual pelos números do responsável do pedido, falha do webhook passando ao próximo número, D-12,
+  um link por número, reenvio com limite, modelo de verificação da Cloud com a URL conferida,
+  página `/verificar-telefone`, confirmação do lead do portal, e-mails ao responsável e a quem
+  perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficaram de fora da T2b
+  e estão pendentes: a troca de telefone com pedido (`…/phone-change`) e o `claim` do portal (D-1).
+  Próxima fase: T3 (bloqueio de acesso com telefone pendente). Os blocos S, B, T, F, E, L e R
+  seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e

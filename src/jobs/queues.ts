@@ -33,6 +33,8 @@ export const QUEUE = {
   inboxMediaDead: "inbox.media.dead",
   inboxSweep: "inbox.sweep",
   inboxSweepDead: "inbox.sweep.dead",
+  phoneVerify: "phone.verify",
+  phoneVerifyDead: "phone.verify.dead",
 } as const;
 
 /** Payload de `lgpd.export`: o pedido fica em `data_export`, a fila só leva o id. */
@@ -55,6 +57,19 @@ export type ChannelInboundJob = { channelEventId: string };
  * (`null` na plataforma) só escolhe o escopo da transação, o RLS confere o resto.
  */
 export type InboxMediaJob = { messageId: string; tenantId: string | null };
+
+/**
+ * Payload de `phone.verify`: só o id do pedido e o motivo. **O token nunca vai aqui**: cada
+ * tentativa gera o seu (`issueVerificationToken`). No motivo `failed`, `afterChannelId` e
+ * `failedMessageId` são o canal e a mensagem que falharam: a cascata segue do próximo canal só se
+ * essa mensagem ainda é a do pedido.
+ */
+export type PhoneVerifyJob = {
+  requestId: string;
+  reason: "open" | "resend" | "failed";
+  afterChannelId?: string;
+  failedMessageId?: string;
+};
 
 export const EMAIL_RETRY_LIMIT = 5;
 export const INBOX_MEDIA_RETRY_LIMIT = 4;
@@ -103,6 +118,7 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxMediaDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxSweepDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.phoneVerifyDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
     options: {
@@ -220,6 +236,21 @@ export const queueDefinitions: QueueDefinition[] = [
       expireInSeconds: 120,
       deleteAfterSeconds: 24 * 3600,
       deadLetter: QUEUE.inboxSweepDead,
+    },
+  },
+  {
+    // `singleton` por cadastro (`singletonKey` = `user:<id>` ou `customer:<id>`): um job ativo
+    // por pessoa, os demais esperam. É o que garante um link por número quando o cadastro e o
+    // aceite do convite abrem dois pedidos quase juntos. Falha de provedor é tratada no job (a
+    // cascata segue); o retry é só para erro de banco.
+    name: QUEUE.phoneVerify,
+    options: {
+      policy: "singleton",
+      retryLimit: 2,
+      retryDelay: 30,
+      expireInSeconds: 300,
+      deleteAfterSeconds: 24 * 3600,
+      deadLetter: QUEUE.phoneVerifyDead,
     },
   },
 ];

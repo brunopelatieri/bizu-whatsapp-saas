@@ -209,6 +209,15 @@ pelo link é `POST /api/me/phone-verification/confirm`, só na sessão da própr
 no corpo (nunca em GET nem em rota pública) e bloqueada em personificação. Detalhe em
 `tech/28-crm-cadastro.md`, "Telefone verificado e único" e "Pedido de verificação e liberação".
 
+O link que chega ao WhatsApp abre `/verificar-telefone?token=…` (rota de auth standalone, sem
+`loader`, `referrer: no-referrer`): sem sessão leva a `/login?next=…` e volta; com sessão, um
+botão faz o `POST`. Token de ficha de cliente (`c.`) segue para `/portal/verificar-telefone`, que
+pede a sessão do `portalAuth`; o login do portal passou a aceitar `?next=` (só caminho `/portal/…`).
+Os hooks de cadastro e de aceite de convite, depois de abrir o pedido, só **enfileiram** o envio
+(`src/lib/phone/dispatch.ts`): o módulo não importa canal nenhum, para o registro de canais não
+entrar no ciclo de imports da autenticação. Envio e reenvio: "Envio do link e página de
+confirmação" em `tech/28-crm-cadastro.md`.
+
 ## Bloqueio de login por tentativas
 
 Além do limite por IP, o login conta as senhas erradas por e-mail e bloqueia por um tempo

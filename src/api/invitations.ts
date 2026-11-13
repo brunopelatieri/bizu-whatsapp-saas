@@ -10,6 +10,7 @@ import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
 import { assertWithinLimit } from "@/lib/billing/limits";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { ensureUserVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 import { activateTenant, findMembership } from "@/lib/tenant/membership";
@@ -89,12 +90,15 @@ invitationRoutes.post(
       logError("Falha ao ligar a ficha de cliente do membro", error),
     );
     // Telefone ainda pendente: quem responde por confirmá-lo agora é a organização.
+    // O link sai pelos canais dela, se não há outro a caminho do mesmo número (`phone.verify`).
     await ensureUserVerification(user.id, {
       kind: "tenant",
       tenantId: invitation.tenantId,
-    }).catch((error: unknown) =>
-      logError("Falha ao passar o pedido de verificação à organização", error),
-    );
+    })
+      .then((requestId) => requestPhoneVerificationSend(requestId, { type: "user", id: user.id }))
+      .catch((error: unknown) =>
+        logError("Falha ao passar o pedido de verificação à organização", error),
+      );
     await audit("member.joined", {
       actor: { id: user.id },
       tenantId: invitation.tenantId,

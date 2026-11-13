@@ -260,6 +260,13 @@
       "when": 1794592883185,
       "tag": "0036_pedido_verificacao_telefone",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794594859062,
+      "tag": "0037_envio_verificacao_telefone",
+      "breakpoints": true
     }
   ]
 }

@@ -17,6 +17,8 @@ const PORTAL_PUBLIC_PATHS = [
   "/portal/entrar",
   "/portal/confirmar",
   "/portal/cadastro",
+  // A página trata o 401 sozinha: volta ao login levando o link (`verify-phone-page.tsx`).
+  "/portal/verificar-telefone",
 ];
 
 function signOutAt(path: string) {

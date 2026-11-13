@@ -18,6 +18,7 @@ import {
   updateCloudChannel,
 } from "@/lib/channels/providers/whatsapp_cloud/service";
 import { normalizeCloudEvents } from "@/lib/channels/providers/whatsapp_cloud/normalize";
+import { cloudVerificationDelivery } from "@/lib/channels/providers/whatsapp_cloud/verification";
 import { verifyCloudWebhook } from "@/lib/channels/providers/whatsapp_cloud/webhook";
 import type { ChannelModule } from "@/lib/channels/registry";
 import type { ChannelContext, ChannelProvider, ProbeResult } from "@/lib/channels/types";
@@ -142,6 +143,7 @@ const channelModule: ChannelModule = {
   },
   routes: cloudRoutes,
   update: updateCloudChannel,
+  verificationDelivery: cloudVerificationDelivery,
 };
 
 export default channelModule;

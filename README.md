@@ -450,6 +450,7 @@ Variáveis, topologia e riscos: [`docs/context/infra-deploy.md`](docs/context/in
 | `RATE_LIMIT_STORE` | `memory` em dev; `postgres` é obrigatório em produção |
 | `LOGIN_LOCKOUT_SCOPE`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_ATTEMPT_WINDOW_MINUTES`, `LOGIN_LOCKOUT_MINUTES` | Bloqueio de login por tentativas: escopo (`email`, `email_ip` ou `off`), falhas até bloquear, janela e duração em minutos |
 | `PHONE_VERIFICATION_TTL_MINUTES` | Validade, em minutos, do link de verificação de telefone (padrão 30) |
+| `PHONE_VERIFICATION_CHANNELS` | Ordem dos tipos de canal que enviam o link de verificação (`whatsapp_cloud,whatsapp_qr`); vazio: todo pedido espera a liberação à mão |
 | `CSP_REPORT_ONLY` | `true` só relata violações; `false` bloqueia |
 | `EMAIL_VERIFICATION_REQUIRED` | `false` (padrão): o cadastro entra direto; `true`: exige o link de confirmação |
 | `PAYMENT_PROVIDERS` | Módulos de pagamento ativos; vazio = cobrança manual pelo `/admin` |

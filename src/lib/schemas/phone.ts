@@ -31,10 +31,29 @@ export const whatsappPhoneSchema = phoneSchema.superRefine((value, ctx) => {
   }
 });
 
-/** O token do link de verificação: 32 bytes em base64url (43 caracteres). */
-const verificationToken = z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Link inválido ou expirado.");
+/**
+ * O token do link de verificação: o prefixo do cadastro (`u.` conta da equipe, `c.` ficha de
+ * cliente) e 32 bytes em base64url (43 caracteres).
+ */
+export const VERIFICATION_TOKEN_PATTERN = /^[uc]\.[A-Za-z0-9_-]{43}$/;
+
+const verificationToken = z.string().regex(VERIFICATION_TOKEN_PATTERN, "Link inválido ou expirado.");
 
 export const phoneVerificationTokenSchema = z.object({ token: verificationToken });
+
+/**
+ * Reenvio do link pedido pela pessoa. `responsible` escolhe o pedido: `platform` (a confirmação
+ * que vale em todo lugar, D-12) ou o id de uma organização. Ausente: o pedido que a tela mostra
+ * primeiro. Só serve para escolher entre os pedidos do próprio cadastro (vindo da sessão).
+ */
+export const phoneVerificationResendSchema = z
+  .object({ responsible: z.union([z.literal("platform"), z.uuid()]).optional() })
+  .strict();
+
+/** O mesmo no portal: a organização da ficha. Ausente: a organização ativa da sessão. */
+export const portalPhoneVerificationResendSchema = z
+  .object({ tenantId: z.uuid().optional() })
+  .strict();
 
 export const phoneVerificationPageSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),

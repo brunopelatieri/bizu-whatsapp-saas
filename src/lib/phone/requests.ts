@@ -2,10 +2,18 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
 import { type Scope, scopeTenantId, type Tx, withPlatformScope, withScope } from "@/db/rls";
-import { customer, member, phoneTenantVouch, phoneVerification, user } from "@/db/schema";
+import {
+  customer,
+  member,
+  organization,
+  phoneTenantVouch,
+  phoneVerification,
+  user,
+} from "@/db/schema";
 import { auditInTransaction } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
+import { notifyPhoneClaimed } from "@/lib/phone/notify";
 import { userPhoneConfirmed } from "@/lib/phone/confirmed";
 import {
   accountPhoneConflicts,
@@ -59,7 +67,7 @@ export type VerificationSubject = { type: PhoneVerificationSubject; id: string }
 
 type Request = typeof phoneVerification.$inferSelect;
 
-const OPEN = ["sent", "awaiting_manual"] as const;
+export const OPEN = ["sent", "awaiting_manual"] as const;
 const PAGE_SIZE = 50;
 const PLATFORM: Scope = { kind: "platform" };
 
@@ -71,7 +79,8 @@ const hashToken = (token: string) => createHash("sha256").update(token).digest("
 const ofSubject = ({ type, id }: VerificationSubject) =>
   and(eq(phoneVerification.subjectType, type), eq(phoneVerification.subjectId, id));
 
-const isOpen = inArray(phoneVerification.status, [...OPEN]);
+/** Pedido aberto: com link a caminho ou na fila de liberação. */
+export const isOpen = inArray(phoneVerification.status, [...OPEN]);
 
 /** O pedido é do escopo de quem pergunta: a organização, ou a plataforma (`tenant_id` nulo). */
 const inScope = (scope: Scope) =>
@@ -119,7 +128,7 @@ async function open(
  * faz assim (`lockForConfirmation`), e a ordem contrária fecharia um ciclo com ela (o Postgres
  * abortaria uma das duas, e o pedido ficaria encalhado na fila de quem perdeu).
  */
-async function lockUser(tx: Tx, userId: string) {
+export async function lockUser(tx: Tx, userId: string) {
   await tx.select({ id: user.id }).from(user).where(eq(user.id, userId)).for("update");
 }
 
@@ -333,25 +342,46 @@ export async function releaseTenantPhoneResponsibility(tx: Tx, tenantId: string)
 }
 
 /**
+ * O token do link. O prefixo diz à página `/verificar-telefone` qual sessão pedir (`u.` a da
+ * equipe, `c.` a do portal); não vale como prova de nada: quem decide é o hash, na sessão.
+ */
+const TOKEN_PREFIX = { user: "u", customer: "c" } as const satisfies Record<
+  PhoneVerificationSubject,
+  string
+>;
+
+const newToken = (type: PhoneVerificationSubject) =>
+  `${TOKEN_PREFIX[type]}.${randomBytes(32).toString("base64url")}`;
+
+/**
  * Gera o link do pedido: o token novo substitui o anterior e só o hash fica no banco. Quem envia
- * o link (T2b) chama isto a cada tentativa. Devolve `null` se o pedido já não está aberto.
+ * o link (`src/lib/phone/delivery.ts`) chama isto a cada tentativa, e a mensagem anterior deixa
+ * de ser a do pedido (o aviso de falha dela não mexe mais em nada). Devolve `null` se o pedido
+ * já não está aberto. **Não confere o escopo do canal**: quem envia confere.
  */
 export function issueVerificationToken(requestId: string, now = new Date()) {
-  const token = randomBytes(32).toString("base64url");
   const ttlMs = getEnv().PHONE_VERIFICATION_TTL_MINUTES * 60_000;
 
   return withPlatformScope("telefone: emite o link", async (tx) => {
-    const [row] = await tx
+    const [found] = await tx
+      .select({ subjectType: phoneVerification.subjectType })
+      .from(phoneVerification)
+      .where(and(eq(phoneVerification.id, requestId), isOpen))
+      .for("update");
+    if (!found) return null;
+
+    const token = newToken(found.subjectType);
+    await tx
       .update(phoneVerification)
       .set({
         tokenHash: hashToken(token),
         expiresAt: new Date(now.getTime() + ttlMs),
         status: "sent",
+        providerMessageId: null,
       })
-      .where(and(eq(phoneVerification.id, requestId), isOpen))
-      .returning({ id: phoneVerification.id });
+      .where(eq(phoneVerification.id, requestId));
 
-    return row ? token : null;
+    return token;
   });
 }
 
@@ -381,6 +411,244 @@ export function ownPhoneVerification(subject: VerificationSubject) {
       status: rows.some(({ status }) => status === "sent") ? ("sent" as const) : first.status,
       phoneHint: phoneHint(first.phoneNormalized),
     };
+  });
+}
+
+/** A situação do telefone perante um responsável: confirmado, link a caminho, na fila, ou nada. */
+export type ResponsibleStatus = "confirmed" | "sent" | "awaiting_manual" | "none";
+
+export type ResponsibleView = {
+  responsible: "platform" | "organization";
+  tenantId: string | null;
+  tenantName: string | null;
+  status: ResponsibleStatus;
+};
+
+/**
+ * Quem responde à plataforma (D-12): owners, a equipe da plataforma e quem não é de organização
+ * nenhuma. Só para eles a plataforma envia o link sem que a pessoa peça.
+ */
+export async function answersToPlatform(tx: Tx, userId: string) {
+  if (await isOwnerOrPlatformStaff(tx, userId)) return true;
+
+  const [membership] = await tx
+    .select({ id: member.id })
+    .from(member)
+    .where(eq(member.userId, userId))
+    .limit(1);
+
+  return membership === undefined;
+}
+
+/**
+ * A situação do telefone da conta **por responsável** (restrição (g) da T2b): a plataforma, que dá
+ * a confirmação que vale em todo lugar, e cada organização em que a pessoa é membro comum (o
+ * owner e a equipe da plataforma só respondem à plataforma). É o que a tela "Confirme seu
+ * WhatsApp" mostra e o que o portão da T3 vai ler.
+ */
+export function userPhoneOverview(userId: string) {
+  return withPlatformScope("telefone: situação da conta por responsável", async (tx) => {
+    const [person] = await tx
+      .select({
+        phoneNormalized: user.phoneNormalized,
+        phoneKey: user.phoneKey,
+        verifiedAt: user.phoneVerifiedAt,
+      })
+      .from(user)
+      .where(eq(user.id, userId));
+    const requests = await tx
+      .select({
+        tenantId: phoneVerification.tenantId,
+        status: phoneVerification.status,
+        phoneNormalized: phoneVerification.phoneNormalized,
+      })
+      .from(phoneVerification)
+      .where(and(ofSubject({ type: "user", id: userId }), isOpen))
+      .orderBy(asc(phoneVerification.createdAt));
+    const statusOf = (tenantId: string | null): ResponsibleStatus => {
+      const found = requests.find((row) => row.tenantId === tenantId)?.status;
+      return found === "sent" || found === "awaiting_manual" ? found : "none";
+    };
+
+    const global = person?.verifiedAt != null;
+    const platformOnly = await answersToPlatform(tx, userId);
+    const responsibles: ResponsibleView[] = [
+      {
+        responsible: "platform",
+        tenantId: null,
+        tenantName: null,
+        status: global ? "confirmed" : statusOf(null),
+      },
+    ];
+
+    if (!platformOnly) {
+      const memberships = await tx
+        .select({
+          tenantId: member.organizationId,
+          name: organization.name,
+          vouched: sql<boolean>`exists (select 1 from phone_tenant_vouch v where v.user_id = ${userId} and v.tenant_id = ${member.organizationId} and v.phone_key = ${person?.phoneKey ?? ""})`,
+        })
+        .from(member)
+        .innerJoin(organization, eq(organization.id, member.organizationId))
+        .where(eq(member.userId, userId))
+        .orderBy(asc(organization.name));
+
+      for (const { tenantId, name, vouched } of memberships) {
+        responsibles.push({
+          responsible: "organization",
+          tenantId,
+          tenantName: name,
+          status: global || vouched ? "confirmed" : statusOf(tenantId),
+        });
+      }
+    }
+
+    // O resumo da T2a (`ownPhoneVerification`), sem outra ida ao banco.
+    const [first] = requests;
+    const pending = first
+      ? {
+          status: requests.some(({ status }) => status === "sent") ? ("sent" as const) : first.status,
+          phoneHint: phoneHint(first.phoneNormalized),
+        }
+      : null;
+
+    return {
+      pending,
+      phoneHint: person?.phoneNormalized ? phoneHint(person.phoneNormalized) : null,
+      confirmedGlobally: global,
+      answersTo: platformOnly ? ("platform" as const) : ("organization" as const),
+      responsibles,
+    };
+  });
+}
+
+/** As fichas de cliente (uma por organização) da pessoa do portal, com a situação de cada uma. */
+export function portalPhoneOverview(portalUserId: string) {
+  return withPlatformScope("telefone: situação das fichas do portal", async (tx) => {
+    const records = await tx
+      .select({
+        id: customer.id,
+        tenantId: customer.tenantId,
+        name: organization.name,
+        phoneNormalized: customer.phoneNormalized,
+        verifiedAt: customer.phoneVerifiedAt,
+        request: sql<string | null>`(select pv.status from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') limit 1)`,
+      })
+      .from(customer)
+      .innerJoin(organization, eq(organization.id, customer.tenantId))
+      .where(eq(customer.portalUserId, portalUserId))
+      .orderBy(asc(organization.name));
+
+    return records.map((record) => {
+      const request = record.request === "sent" || record.request === "awaiting_manual" ? record.request : "none";
+      const view: ResponsibleView = {
+        responsible: "organization",
+        tenantId: record.tenantId,
+        tenantName: record.name,
+        status: record.verifiedAt ? "confirmed" : request,
+      };
+
+      return {
+        customerId: record.id,
+        view,
+        phoneHint: record.phoneNormalized ? phoneHint(record.phoneNormalized) : null,
+      };
+    });
+  });
+}
+
+/**
+ * A ficha a que o token do portal pertence, entre as fichas **da própria pessoa** (o lead que
+ * ainda não é cliente ativo não passa por `requirePortalTenant`, restrição (d) da T2b). Só ficha
+ * `lead` ou `active` de organização ativa: a ficha bloqueada e a organização suspensa ou em
+ * exclusão ficam de fora, como no `requirePortalTenant`. `null` quando o token não serve: quem
+ * chama responde o mesmo 400 de sempre.
+ */
+export function portalTokenSubject(token: string, portalUserId: string) {
+  return withPlatformScope("telefone: ficha do link no portal", async (tx) => {
+    const [row] = await tx
+      .select({ id: phoneVerification.subjectId })
+      .from(phoneVerification)
+      .innerJoin(customer, eq(customer.id, phoneVerification.subjectId))
+      .innerJoin(organization, eq(organization.id, customer.tenantId))
+      .where(
+        and(
+          eq(phoneVerification.tokenHash, hashToken(token)),
+          eq(phoneVerification.subjectType, "customer"),
+          eq(customer.portalUserId, portalUserId),
+          inArray(customer.status, ["lead", "active"]),
+          eq(organization.status, "active"),
+        ),
+      );
+
+    return row ? ({ type: "customer", id: row.id } as const) : null;
+  });
+}
+
+/**
+ * O pedido que o "Reenviar" da conta vai usar. `platform`: o da plataforma (o membro comum o
+ * pede quando quer a confirmação que vale em todo lugar, D-12); o id de uma organização: o dela,
+ * só se a organização responde por esta conta. Ausente: o da plataforma para quem responde a
+ * ela, senão o mais antigo das organizações. Abre o pedido se o telefone ainda não está
+ * confirmado para esse responsável. `null`: nada a reenviar.
+ */
+export function userResendTarget(userId: string, responsible?: string) {
+  return withPlatformScope("telefone: escolhe o pedido do reenvio", async (tx) => {
+    let wanted: Scope = PLATFORM;
+    if (responsible && responsible !== "platform") {
+      wanted = { kind: "tenant", tenantId: responsible };
+    } else if (!responsible && !(await answersToPlatform(tx, userId))) {
+      const [oldest] = await tx
+        .select({ tenantId: phoneVerification.tenantId })
+        .from(phoneVerification)
+        .where(
+          and(
+            ofSubject({ type: "user", id: userId }),
+            isOpen,
+            isNotNull(phoneVerification.tenantId),
+          ),
+        )
+        .orderBy(asc(phoneVerification.createdAt))
+        .limit(1);
+      if (oldest?.tenantId) wanted = { kind: "tenant", tenantId: oldest.tenantId };
+    }
+
+    // `ensureUser` devolve o pedido da plataforma quando a organização não responde por esta
+    // conta: o reenvio só vale para o responsável pedido.
+    const id = await ensureUser(tx, userId, wanted);
+    if (!id) return null;
+    const [row] = await tx
+      .select({ id: phoneVerification.id })
+      .from(phoneVerification)
+      .where(and(eq(phoneVerification.id, id), inScope(wanted)));
+
+    return row?.id ?? null;
+  });
+}
+
+/**
+ * O pedido aberto da ficha do portal numa organização. Abre se a ficha ainda não está confirmada.
+ * Só a ficha que pode confirmar (`lead` ou `active`, organização ativa): as mesmas regras de
+ * `portalTokenSubject`, para não mandar um link que não serviria.
+ */
+export function portalResendTarget(portalUserId: string, tenantId: string) {
+  return withPlatformScope("telefone: escolhe o pedido do reenvio no portal", async (tx) => {
+    const [record] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .innerJoin(organization, eq(organization.id, customer.tenantId))
+      .where(
+        and(
+          eq(customer.portalUserId, portalUserId),
+          eq(customer.tenantId, tenantId),
+          inArray(customer.status, ["lead", "active"]),
+          eq(organization.status, "active"),
+        ),
+      );
+    if (!record) return null;
+
+    const requestId = await ensureCustomerVerification(tx, tenantId, record.id);
+    return requestId ? { requestId, customerId: record.id } : null;
   });
 }
 
@@ -490,7 +758,7 @@ async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation)
         set: { ...values, createdAt: sql`now()` },
       });
 
-    return { demoted: 0, global: false };
+    return { demoted: [] as string[], global: false };
   }
 
   // Pedido da plataforma: só ela o fecha, pelo link do canal dela ou pelo proprietário.
@@ -509,7 +777,7 @@ async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation)
     await linkExistingCustomer(tx, tenantId, person.id);
   }
 
-  return { demoted: holders.length, global: true };
+  return { demoted: holders, global: true };
 }
 
 /** Confirma o número na ficha de cliente. Os efeitos que dependem de prova só vêm com o link. */
@@ -552,7 +820,7 @@ async function confirmCustomer(tx: Tx, request: Request, confirmation: Confirmat
   //
   // A conta global do portal (`portal_user`) nunca é confirmada aqui: o pedido da ficha é da
   // organização, e o que ela atesta não sai dela.
-  if (!proven) return { demoted: 0, global: false };
+  if (!proven) return { demoted: [] as string[], global: false };
 
   if (!record.userId) {
     const teamUserId = await matchingTeamMember(tx, record.tenantId, request.phoneKey);
@@ -569,7 +837,7 @@ async function confirmCustomer(tx: Tx, request: Request, confirmation: Confirmat
 
   await linkUnlinkedContactToCustomer(tx, record.tenantId, request.phoneKey, record.id);
 
-  return { demoted: 0, global: false };
+  return { demoted: [] as string[], global: false };
 }
 
 /**
@@ -636,8 +904,10 @@ async function confirm(tx: Tx, request: Request, confirmation: Confirmation, now
     tenantId: request.tenantId,
     target: { type: request.subjectType, id: request.subjectId },
     // Só ids e enums: o número nunca vai para a auditoria.
-    metadata: { via: confirmation.via, demoted: outcome.demoted },
+    metadata: { via: confirmation.via, demoted: outcome.demoted.length },
   });
+
+  return outcome.demoted;
 }
 
 /**
@@ -650,11 +920,20 @@ export async function confirmPhoneVerificationByToken(
   subject: VerificationSubject,
   now = new Date(),
 ) {
+  let claimed: Awaited<ReturnType<typeof consumeToken>>;
   try {
-    await consumeToken(token, subject, now);
+    claimed = await consumeToken(token, subject, now);
   } catch (error) {
     await rerouteIfPlatformOnly(error, subject.id);
     throw error;
+  }
+
+  // Depois do commit: quem perdeu a confirmação para quem provou o número fica sabendo. Falha
+  // no aviso não desfaz a confirmação.
+  if (claimed.demoted.length > 0) {
+    await notifyPhoneClaimed(claimed.demoted, claimed.hint).catch((error: unknown) =>
+      logError("Falha ao avisar quem perdeu a confirmação do telefone", error),
+    );
   }
 }
 
@@ -689,7 +968,9 @@ function consumeToken(token: string, subject: VerificationSubject, now: Date) {
       throw INVALID_LINK();
     }
 
-    await confirm(tx, locked, { via: "whatsapp" }, now);
+    const demoted = await confirm(tx, locked, { via: "whatsapp" }, now);
+
+    return { demoted, hint: phoneHint(locked.phoneNormalized) };
   });
 }
 

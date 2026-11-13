@@ -16,6 +16,7 @@ import { type ConsentMeta, withSignupConsent } from "@/lib/lgpd/consent";
 import { checkLimit } from "@/lib/billing/limits";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { ensurePortalUser } from "@/lib/portal/access";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { ensureCustomerVerification } from "@/lib/phone/requests";
 import type { PortalSignupInput } from "@/lib/schemas/portal";
 
@@ -174,7 +175,7 @@ export async function confirmPortalSignup(email: string, org: string) {
   const { allowed } = await checkLimit(tenant.id, "customers");
   if (!allowed) return;
 
-  await withTenant(tenant.id, async (tx) => {
+  const opened = await withTenant(tenant.id, async (tx) => {
     const [row] = await tx
       .insert(customer)
       .values({
@@ -201,21 +202,28 @@ export async function confirmPortalSignup(email: string, org: string) {
       })
       .returning({ id: customer.id });
 
-    if (!row) return;
+    if (!row) return null;
 
-    // Telefone do autocadastro, só declarado: entra na fila de verificação da organização.
-    await ensureCustomerVerification(tx, tenant.id, row.id);
+    // Telefone do autocadastro, só declarado: entra na fila de verificação da organização, e o
+    // link sai pelos canais dela depois do commit.
+    const requestId = await ensureCustomerVerification(tx, tenant.id, row.id);
 
     await auditInTransaction(tx, "portal.signed_up", {
       actor: { type: "portal_user", id: person.id },
       tenantId: tenant.id,
       target: { type: "customer", id: row.id },
     });
+
+    return { requestId, customerId: row.id };
   }).catch((error: unknown) => {
     // O telefone do autocadastro é de outro cliente do tenant (índice único por `phone_key`).
     // Quem se cadastrou escolhe o número: responder diferente (500) viraria um oráculo de quem é
     // cliente do tenant. Sem linha de cliente, a resposta é a mesma de sempre; a equipe cadastra.
-    if (isUniqueViolation(error)) return;
+    if (isUniqueViolation(error)) return null;
     throw error;
   });
+
+  if (opened) {
+    await requestPhoneVerificationSend(opened.requestId, { type: "customer", id: opened.customerId });
+  }
 }

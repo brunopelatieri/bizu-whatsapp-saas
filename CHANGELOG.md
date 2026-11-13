@@ -27,12 +27,29 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     `/api/portal/me/phone-verification` (estado e confirmação pelo link, só na sessão do próprio cadastro),
     `/api/phone-verifications` (fila do owner, `phone:confirm`) e `/api/admin/phone-verifications` (fila do
     proprietário da plataforma). O que a plataforma confirma vale no sistema inteiro; o que uma organização confirma, à
-    mão ou pelo link dela, vale só nela. **Ainda sem envio do link e sem tela** (fases T2b e T4): até lá todo pedido
-    espera a liberação manual, e nada bloqueia o acesso de quem está pendente (T3).
+    mão ou pelo link dela, vale só nela.
+  - **Envio do link de verificação (T2b):** job `phone.verify` com a cascata da ordem de `PHONE_VERIFICATION_CHANNELS`
+    (Cloud com o modelo de verificação do número, depois QR Code, depois a liberação à mão), sempre pelos números do
+    **responsável** do pedido (a plataforma ou a organização; o banco recusa canal de outro escopo). O aviso `failed`
+    que chega pelo webhook passa ao próximo número. A plataforma só manda o link sozinha a owners, à equipe dela e a quem
+    não é de organização nenhuma (D-12); um link por número; 3 links por hora por cadastro. Rotas novas:
+    `POST /api/me/phone-verification/resend`, `POST /api/portal/me/phone-verification/resend` e
+    `PUT /api/channels/:id/verification-template` (e a de `/api/admin/channels`, com a URL do botão conferida contra
+    `APP_URL`). `GET /api/me/phone-verification` e a do portal dizem a situação por responsável (mantêm `pending`). Página
+    `/verificar-telefone` (e `/portal/verificar-telefone`): o botão confirma na sessão do próprio cadastro. A confirmação
+    do portal deixa de exigir organização ativa (o lead do autocadastro confirma). E-mails novos:
+    `phone-verification-manual` (ao responsável) e `phone-number-claimed` (à conta que perdeu a confirmação). O envio não
+    entra na caixa de entrada. **Ainda sem tela** para o modelo, o reenvio e as filas (T4), e nada bloqueia o acesso de
+    quem está pendente (T3).
   - **Migração:** migrations `0034` (tabela `login_throttle`), `0035` (colunas de verificação e `customer.user_id`) e
     `0036` (as duas tabelas da T2a e o `CHECK` que só aceita `whatsapp` e `manual` nas contas; conta com outra forma
     volta a pendente; as fichas de cliente que a `0035` marcou `manual` passam a `team`, para continuarem atraindo as
-    conversas do número). Variável nova, com padrão: `PHONE_VERIFICATION_TTL_MINUTES` (30).
+    conversas do número) e `0037` (envio do link: colunas `channel_id`, `provider_message_id`, `attempts` e
+    `manual_notified_at` em `phone_verification`, o modelo de verificação em `channel_whatsapp_cloud` e o gatilho que
+    recusa canal de outro escopo no pedido). Variáveis novas, com padrão: `PHONE_VERIFICATION_TTL_MINUTES` (30) e
+    `PHONE_VERIFICATION_CHANNELS` (vazio: nenhum envio, como antes). O token do link passou a ter prefixo (`u.` ou
+    `c.`): links emitidos antes da `0037` deixam de valer (só havia emissão em teste). Rode o worker, ou
+    `JOBS_MODE=inline`, para a fila `phone.verify` andar.
     Demais variáveis novas, todas com padrão: `LOGIN_LOCKOUT_SCOPE`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_ATTEMPT_WINDOW_MINUTES`,
     `LOGIN_LOCKOUT_MINUTES`. Projeto derivado com dados reais: (1) a `0035` marca como **confirmado** (`manual`) todo
     telefone que já existe, inclusive o declarado em autocadastro e os fixos de contas da equipe, para ninguém perder o

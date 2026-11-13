@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -10,11 +11,13 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import {
+  type PhoneDeliveryAttempt,
   phoneVerificationStatuses,
   phoneVerificationSubjects,
 } from "../../lib/phone/verification";
 import { scopedPolicy, tenantPolicy } from "../tenant-policy";
 import { user } from "./auth";
+import { channel } from "./channels";
 import { organization } from "./tenant";
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
@@ -50,6 +53,17 @@ export const phoneVerification = pgTable(
     confirmedAt: timestamptz("confirmed_at"),
     /** Quem liberou à mão (`user.id`); nulo na confirmação por link. */
     confirmedBy: uuid("confirmed_by"),
+    /**
+     * Envio do link (T2b): o canal e a mensagem da tentativa atual. Sempre um canal do mesmo
+     * escopo do pedido (`src/lib/phone/delivery.ts`). O id da mensagem é o que o aviso de
+     * status do provedor cita quando a entrega falha depois.
+     */
+    channelId: uuid("channel_id").references(() => channel.id, { onDelete: "set null" }),
+    providerMessageId: text("provider_message_id"),
+    /** Histórico das tentativas (canal, tipo, hora, resultado, código do erro). Sem telefone nem token. */
+    attempts: jsonb("attempts").$type<PhoneDeliveryAttempt[]>().notNull().default([]),
+    /** Quando o responsável foi avisado por e-mail de que o pedido espera a liberação à mão. */
+    manualNotifiedAt: timestamptz("manual_notified_at"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at")
       .notNull()
@@ -68,6 +82,9 @@ export const phoneVerification = pgTable(
       .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.tenantId} is null`),
     index("phone_verification_scope_status_idx").on(table.tenantId, table.status),
     index("phone_verification_updated_at_idx").on(table.updatedAt),
+    index("phone_verification_message_idx")
+      .on(table.channelId, table.providerMessageId)
+      .where(sql`${table.providerMessageId} is not null`),
     check(
       "phone_verification_token_with_expiry",
       sql`(${table.tokenHash} is null) = (${table.expiresAt} is null)`,

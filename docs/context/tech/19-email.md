@@ -157,6 +157,19 @@ de `List-Unsubscribe`.
 - `data-export-ready` (link assinado de 7 dias) e `deletion-scheduled` (conta, conta do portal ou organização) são enviados por `src/lib/lgpd/export.ts` e `deletion.ts`; `deletion-confirm` (novo) leva o link de confirmação da exclusão do cliente do portal, que só vale com o clique.
 - A exclusão apaga `email_message` do e-mail anonimizado (busca por `to_hash`).
 
+## Templates do telefone verificado (pré-produção, T2b)
+
+Enviados por `src/lib/phone/notify.ts`, depois do commit de quem chama. Nenhum leva o número
+inteiro, só os 4 últimos dígitos (`tech/28-crm-cadastro.md`).
+
+- `phone-verification-manual`: o link de verificação não saiu (nenhum canal apto, ou todos
+  falharam) e o pedido espera a liberação à mão. Vai aos owners da organização (botão para
+  `/app/equipe` ou `/app/clientes`) ou aos proprietários da plataforma (`/admin/usuarios`), uma vez
+  por pedido (`phone_verification.manual_notified_at`), e só quando o pedido é da fila desse
+  responsável. Pede que o número seja conferido por outro meio antes da liberação.
+- `phone-number-claimed`: outra conta confirmou pelo link o número que esta conta tinha
+  confirmado (celular troca de dono); a conta voltou a pendente.
+
 ## Templates do `/admin` (admin-crud)
 
 - `deletion-scheduled` ganhou a variante `byPlatform`: quando a administração agenda a

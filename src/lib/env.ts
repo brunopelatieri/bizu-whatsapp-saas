@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { loginLockoutScopes } from "@/lib/auth/login-throttle";
+import { channelTypes } from "@/lib/channels/types";
 
 /**
  * Variáveis de ambiente do servidor, validadas uma vez na inicialização.
@@ -162,6 +163,13 @@ export const envSchema = z
     PHONE_VERIFICATION_TTL_MINUTES: z.preprocess(
       emptyToUndefined,
       z.coerce.number().int().min(5).max(1440).default(30),
+    ),
+    // Ordem dos tipos de canal que enviam o link de verificação de telefone (job `phone.verify`,
+    // `src/lib/phone/delivery.ts`). Vazio: nenhum envio, todo pedido espera a liberação à mão.
+    PHONE_VERIFICATION_CHANNELS: csvList.pipe(
+      z.array(z.enum(channelTypes)).refine((items) => new Set(items).size === items.length, {
+        message: "tipo de canal repetido",
+      }),
     ),
 
     PAYMENT_PROVIDERS: csvList,

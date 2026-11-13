@@ -16,6 +16,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/db/**/*.test.ts", "src/lib/channels/providers/**/*.db.test.ts"],
+    // Fila de `phone.verify` desligada por padrão (ver o arquivo).
+    setupFiles: ["tests/db/setup.ts"],
     // Fixos: os testes simulam um proxy e nunca enviam e-mail de verdade.
     env: {
       NODE_ENV: "test",

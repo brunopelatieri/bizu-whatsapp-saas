@@ -16,6 +16,11 @@ import { logChannelError, sanitizeChannelError } from "@/lib/channels/log";
 import { deleteInboundMedia, INBOUND_PREFIX, storeInboundMedia } from "@/lib/channels/media";
 import { findProvider } from "@/lib/channels/registry";
 import { inboxHandlers as defaultInboxHandlers } from "@/lib/inbox/ingest";
+import {
+  applyVerificationStatus,
+  isVerificationEcho,
+  isVerificationMessage,
+} from "@/lib/phone/delivery";
 import type {
   ChannelEventKind,
   ChannelEventStatus,
@@ -247,9 +252,18 @@ export async function applyChannelEvent(
       const target = await resolveTarget(tx, scope, origin, event.channelPhoneNumberId);
       if (!target || target.status === "disabled") return false;
 
+      // O link de verificação de telefone que o próprio número enviou e voltou como aviso: não é
+      // conversa e não entra na caixa de entrada (`src/lib/phone/delivery.ts`).
+      if (event.type === "message" && (await isVerificationMessage(tx, target, event))) return true;
+
       const handler = event.type === "message" ? inboxHandlers.message : inboxHandlers.status;
       // Sem tratador (só em teste), o aviso fica `ignored`: nada é aplicado.
-      return handler ? handler(tx, scope, target, event as never, after) : false;
+      const applied = handler ? await handler(tx, scope, target, event as never, after) : false;
+      // Status de mensagem que não é da caixa: pode ser o link de verificação que falhou.
+      if (!applied && event.type === "status") {
+        return applyVerificationStatus(tx, scope, target, event, after);
+      }
+      return applied;
     }
   }
 }
@@ -341,6 +355,8 @@ export async function processChannelEvent(
 
     const normalized = provider.normalizeEvents(raw);
     const after: AfterCommit = [];
+    // O eco do link de verificação traz o token no texto: o `raw` não fica guardado.
+    const scrub = normalized.some((item) => item.type === "message" && isVerificationEcho(item));
 
     const outcome = await withScope(scope, async (tx) => {
       // Dois jobs do mesmo aviso: o segundo espera aqui e encontra o trabalho feito.
@@ -359,7 +375,7 @@ export async function processChannelEvent(
       const status: ChannelEventStatus = applied ? "processed" : "ignored";
       await tx
         .update(channelEvent)
-        .set({ status, processedAt: now, error: null })
+        .set({ status, processedAt: now, error: null, ...(scrub ? { raw: {} } : {}) })
         .where(eq(channelEvent.id, id));
 
       return status;

@@ -174,6 +174,25 @@ export type SendTemplate = {
 
 export type SendResult = { providerMessageId: string };
 
+/**
+ * Como um canal leva o link de verificação de telefone (SPEC `pre-producao`, T2b). O núcleo monta
+ * o link e chama `sendText` ou `sendTemplate`; o módulo só diz qual dos dois e com quê.
+ *
+ * - `text`: texto livre com o link (QR Code).
+ * - `template`: modelo aprovado com botão de URL dinâmica; `components` recebe o token, que vai
+ *   como sufixo do botão (Cloud).
+ * - `unavailable`: o canal não está apto agora (Cloud sem modelo de verificação). O núcleo pula.
+ */
+export type VerificationDelivery =
+  | { kind: "text" }
+  | {
+      kind: "template";
+      name: string;
+      language: string;
+      components(token: string): unknown[];
+    }
+  | { kind: "unavailable"; reason: string };
+
 export type ProbeResult = {
   status: Extract<ChannelStatus, "connected" | "connecting" | "disconnected" | "error">;
   detail: string | null;

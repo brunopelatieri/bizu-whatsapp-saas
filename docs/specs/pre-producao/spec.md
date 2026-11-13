@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); nada implementado
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B e as fases T1, T2a e T2b do bloco T
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -309,6 +309,44 @@ Job `phone.verify`, para o escopo responsável da tabela acima:
   plataforma escrevendo a toda a equipe de toda organização (custo de modelo na Cloud, risco de
   bloqueio no QR Code).
 
+### T2b: o que foi feito (2026-11-13)
+
+Implementado como descrito acima, com o detalhe em `docs/context/tech/28-crm-cadastro.md`
+("Envio do link e página de confirmação"). Onde o código ficou diferente do texto desta SPEC, vale
+o código, e o motivo está aqui:
+
+- **Sem o estado `pending`.** A T2a não o criou: o pedido nasce `awaiting_manual` e vira `sent`
+  quando um canal aceita o link. Entre a abertura e o job, o pedido aparece na fila de liberação
+  (como já aparecia na T2a).
+- **O reenvio tem corpo opcional:** `{ responsible?: "platform" | <tenantId> }` na equipe (o
+  membro comum escolhe a plataforma, D-12) e `{ tenantId? }` no portal (padrão: a organização
+  ativa). Sem corpo continua valendo.
+- **`GET …/phone-verification` cresceu sem quebrar:** mantém `pending` e acrescenta a situação por
+  responsável (`responsibles`, `confirmedGlobally`, `answersTo`), restrição (g).
+- **Token com prefixo** `u.` (conta) ou `c.` (ficha): diz à página qual sessão pedir. O portal tem a
+  própria página, `/portal/verificar-telefone`, porque a sessão do `portalAuth` só existe sob
+  `/portal/**`; o link que sai é sempre `/verificar-telefone`, que encaminha.
+- **Limite também no job:** além de 3 reenvios por hora por cadastro na rota, o job não manda mais
+  de 3 links por hora ao mesmo cadastro, venha o pedido de onde vier (contenção do envio frio,
+  inclusive da troca de telefone repetida no portal).
+- **Restrição (a), na prática:** o pedido de organização espera enquanto outro pedido da mesma
+  conta tem link válido a caminho do mesmo número; se o da plataforma cai na liberação à mão, o da
+  organização é disparado. Reenvio pedido pela pessoa não espera (ela escolheu).
+- **Restrição (e) em quatro lugares:** lista de candidatos, a função que envia
+  (`sendVerificationMessage`), o envio do canal pelo escopo, e um gatilho no banco
+  (`phone_verification_channel_same_scope`).
+- **A conta que perde a confirmação (`demote`) não recebe link:** o número agora é de outra
+  pessoa; ela recebe o e-mail `phone-number-claimed` e o pedido da plataforma fica na fila.
+- **E-mail ao responsável uma vez por pedido** (`manual_notified_at`), e só se o pedido é da fila
+  dele (o pedido da plataforma de um membro comum não avisa o proprietário).
+
+**Ficou de fora da T2b (pendente):** a troca de telefone com o cadastro mantendo o número antigo
+até a confirmação (`POST …/phone-change` e `DELETE`, os três contratos acima; hoje o portal grava
+o número novo como pendente e o link vai para ele) e o `claim` do portal com exclusão da ficha
+antiga (D-1). Seguem também a T3 (bloqueio) e a T4 (telas, inclusive a do modelo de verificação e a
+do reenvio). O formato do modelo na Meta (botão de URL dinâmica e `index`) só foi testado com
+provedor falso: conferir no smoke com conta real antes de fechar a T2.
+
 ### Pedido de verificação: `phone_verification`
 
 `scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
@@ -383,7 +421,7 @@ o número, e o cadastro de **cliente** que o tinha, agora sem telefone, é **apa
 |---|---|---|---|
 | `GET /api/me/phone-verification` e `GET /api/portal/me/phone-verification` (**T2a**) | sem corpo | `{ pending: { status, phoneHint } \| null }` | sessão; liberada mesmo com telefone pendente |
 | `POST /api/me/phone-verification/confirm` e a do portal (**T2a**) | `{ token }` | 200, 400 `INVALID_OR_EXPIRED`, 409 `PHONE_IN_USE` ou `PLATFORM_ONLY` | sessão do próprio cadastro; bloqueada em personificação; rate limit |
-| `POST /api/me/phone-verification/resend` (e a do portal) | sem corpo | 202 | idem; rate limit por cadastro |
+| `POST /api/me/phone-verification/resend` (e a do portal) (**T2b**) | opcional: `{ responsible?: "platform" \| <tenantId> }` (portal: `{ tenantId? }`) | 202 | idem; rate limit por cadastro (3 por hora) |
 | `POST /api/me/phone-change` | `userPhoneChangeSchema { phone }` | 202 | `requireAuth`; bloqueada em personificação; liberada com telefone pendente (corrigir o número) |
 | `POST /api/portal/me/phone-change` | `phoneChangeSchema` | 202 | `requirePortalAuth` + `requirePortalTenant` |
 | `POST /api/customers/:id/phone-change` | `phoneChangeSchema` | 202 | `requireAuth` + `requireTenant` + `customer:update` |
@@ -395,7 +433,7 @@ o número, e o cadastro de **cliente** que o tinha, agora sem telefone, é **apa
 Não existe rota pública de confirmação nem `GET` com o token no caminho (o token iria para o
 log de acesso): a revisão de segurança da T2a trocou as duas rotas públicas previstas pelas
 rotas autenticadas acima.
-| `PUT /api/channels/:id/verification-template` (e a de `/api/admin/channels`) | `{ name, language }` ou `null` | 200 | `channel:manage` |
+| `PUT /api/channels/:id/verification-template` (e a de `/api/admin/channels`) (**T2b**) | `{ template: { name, language } \| null }` | 200; 404; 422 `INVALID_VERIFICATION_TEMPLATE` | `channel:manage` |
 
 `PATCH /api/customers/:id`, `PATCH /api/portal/me` e a edição de pessoa em `/admin` deixam de
 gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `team`.
@@ -420,7 +458,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 |---|---|---|---|
 | T1 (**implementada**; a tabela de pedidos e o modelo de verificação do canal Cloud passaram para a T2, que é quem os usa) | Migration (colunas), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
 | T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
-| T2b | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, troca de telefone pelo pedido, `claim` do portal (D-1), e-mail ao responsável e à conta que perdeu a confirmação, e as restrições listadas em "Envio do link" | `tests/db`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; um link só por número; modelo com URL fora de `APP_URL` é recusado | Fable 5.2 ou Opus 5.5 + `/security-review` |
+| T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
 | T3 | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | T4 | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 

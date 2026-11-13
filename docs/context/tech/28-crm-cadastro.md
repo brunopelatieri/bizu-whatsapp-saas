@@ -195,11 +195,12 @@ platform`. **Regra central: o owner e a equipe do tenant nunca veem a anotação
   (as duas tabelas e `tag`/`custom_field` nos modos), `admin.test.ts` (matriz de acesso),
   `lgpd-export`/`lgpd-deletion`.
 
-## Telefone verificado e único (pré-produção, T1 e T2a)
+## Telefone verificado e único (pré-produção, T1, T2a e T2b)
 
 SPEC: `docs/specs/pre-producao/spec.md`, bloco T. A T1 entrega o estado e a unicidade; a T2a, o
-pedido de verificação, a confirmação pelo link e a liberação manual (seção seguinte). O **envio**
-do link pelos canais é da T2b; o bloqueio de acesso, da T3; as telas, da T4.
+pedido de verificação, a confirmação pelo link e a liberação manual; a T2b, o **envio** do link
+pelos canais e a página `/verificar-telefone` (seções seguintes). O bloqueio de acesso é da T3; as
+telas das filas e do modelo, da T4.
 
 - **Estado de verificação:** `phone_verified_at` e `phone_verified_via` em `customer`, `user` e
   `portal_user` (`src/lib/phone/verification.ts`). Nulos = número só **declarado**. Formas:
@@ -257,14 +258,16 @@ do link pelos canais é da T2b; o bloqueio de acesso, da T3; as telas, da T4.
   quem é da equipe.
 - **Permissão `phone:confirm`:** reservada ao owner (`tech/21`); é a das rotas de liberação
   manual da organização (seção seguinte).
-- **Ainda não existe (T2b a T4 e bloco E):** o envio do link pelos canais e a página
-  `/verificar-telefone`, a troca de telefone com verificação (hoje a equipe troca direto e o
-  cliente do portal volta a pendente), o bloqueio de acesso com telefone pendente, as telas das
-  filas, o selo e o filtro na tela, ligar e desligar a ficha à mão, e apagar a ficha ligada quando
-  a pessoa sai da equipe (D-11).
+- **Ainda não existe (T3, T4, troca com pedido, `claim` e bloco E):** a troca de telefone que
+  mantém o número antigo até a confirmação (`POST …/phone-change`; hoje a equipe troca direto e o
+  cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), o
+  bloqueio de acesso com telefone pendente, as telas das filas e do modelo de verificação, o selo
+  e o filtro na tela, ligar e desligar a ficha à mão, e apagar a ficha ligada quando a pessoa sai
+  da equipe (D-11).
 - **Testes:** `tests/db/phone-verified.test.ts`, `tests/db/phone-requests.test.ts`,
-  `tests/db/inbox-ingest.test.ts` (vínculo), `tests/db/phone-accounts.test.ts` e
-  `src/lib/schemas/phone.test.ts`.
+  `tests/db/phone-delivery.test.ts` (envio, T2b), `tests/db/inbox-ingest.test.ts` (vínculo),
+  `tests/db/phone-accounts.test.ts`, `src/lib/schemas/phone.test.ts` e, no módulo Cloud,
+  `verification.test.ts` e `verification.db.test.ts`.
 
 ## Pedido de verificação e liberação (pré-produção, T2a)
 
@@ -322,10 +325,20 @@ nada fora dela. Só o canal e o proprietário da **plataforma** valem para todos
   owners, a equipe da plataforma e quem não é de organização nenhuma. Ninguém libera o próprio
   telefone (403 `SELF_CONFIRMATION`); pedido de outro escopo é 404; cadastro que mudou é 409
   `VERIFICATION_STALE`.
-- **Estado para a própria pessoa:** `GET /api/me/phone-verification` e a do portal devolvem
-  `{ pending: { status, phoneHint } | null }` (os 4 últimos dígitos).
-- **Emissão do token:** `issueVerificationToken(requestId)` gera um token novo e invalida o
-  anterior. Na T2a ninguém a chama fora dos testes: quem envia é o job da T2b.
+- **Estado para a própria pessoa:** `GET /api/me/phone-verification` devolve `pending: { status,
+  phoneHint } | null` (o resumo da T2a, 4 últimos dígitos) e, desde a T2b, a situação **por
+  responsável**: `confirmedGlobally`, `answersTo` (`platform` ou `organization`), `phoneHint` e
+  `responsibles: [{ responsible, tenantId, tenantName, status }]`, com `status` `confirmed`,
+  `sent`, `awaiting_manual` ou `none` (`userPhoneOverview`). A plataforma vem sempre; cada
+  organização em que a pessoa é membro comum vem depois (owner e equipe da plataforma só
+  respondem à plataforma). No portal, `GET /api/portal/me/phone-verification` traz `pending` (a
+  organização ativa, ou a primeira com pedido aberto) e uma linha por ficha da pessoa
+  (`portalPhoneOverview`), **sem `requirePortalTenant`**.
+- **Emissão do token:** `issueVerificationToken(requestId)` gera um token novo, invalida o anterior
+  e tira do pedido a mensagem anterior (`provider_message_id`). O token é `u.` (conta da equipe) ou
+  `c.` (ficha de cliente) seguido de 32 bytes em base64url: o prefixo só diz à página qual sessão
+  pedir. Quem chama é o job `phone.verify` (seção seguinte); a função não confere o escopo do
+  canal, quem envia confere.
 - **Manutenção** (`prunePhoneVerifications`, no `maintenance.prune`): apaga pedidos encerrados
   há mais de 30 dias e os de cadastro que sumiu, devolve a `awaiting_manual` o pedido de link
   vencido, encerra o pedido de organização de quem não é mais da equipe dela e apaga liberações
@@ -338,11 +351,96 @@ nada fora dela. Só o canal e o proprietário da **plataforma** valem para todos
   usado em `autoLinkContact` e em `linkExistingCustomer`).
 - **Auditoria:** `phone.verified` (`via`: `whatsapp`, `manual` ou `tenant`; `demoted`) e
   `phone.unverified` (`reason`: `claimed` ou `left_tenant`). Só ids e enums, nunca o número.
-- **Limites conhecidos, para a T2b e a T3:** sem envio, todo pedido espera a liberação manual; a
-  conta com pedidos em vários responsáveis não deve receber um link por pedido no mesmo número;
-  o modelo Cloud precisa ter a URL conferida contra `APP_URL`; a conta do portal não tem pedido
-  próprio (o portal avalia a ficha); o lead sem ficha não passa por `requirePortalTenant`; não há
-  e-mail ao responsável nem à conta que perdeu a confirmação; a fila não tem busca.
+- **Limites conhecidos, para a T3 e a T4:** a conta do portal não tem pedido próprio (o portal
+  avalia a ficha); a fila não tem busca. Os da T2b estão na seção seguinte.
+
+## Envio do link e página de confirmação (pré-produção, T2b)
+
+Código: `src/lib/phone/delivery.ts` (cascata e aviso de falha), `src/lib/phone/dispatch.ts`
+(enfileirar, sem dependência de canal), `src/lib/phone/notify.ts` (e-mails), `src/jobs/phone.ts`
+(job), `src/lib/channels/providers/whatsapp_cloud/verification.ts` (modelo da Cloud),
+`src/pages/verify-phone-page.tsx` (página). Migration `0037`.
+
+- **Job `phone.verify`** (`tech/20-jobs.md`): payload `{ requestId, reason, afterChannelId?,
+  failedMessageId? }`, **nunca o token**. Fila `singleton` por cadastro (`user:<id>` ou
+  `customer:<id>`): os jobs da mesma pessoa rodam um de cada vez.
+- **Cascata (D-3):** os canais `connected` **do responsável do pedido**, na ordem de
+  `PHONE_VERIFICATION_CHANNELS` (o padrão do tipo primeiro, depois o mais antigo). Vazio: nenhum
+  envio, todo pedido espera a liberação à mão. Cada canal pergunta ao módulo como levar o link
+  (`ChannelModule.verificationDelivery`): a Cloud manda o modelo de verificação escolhido no canal
+  (sem modelo, ou com modelo que deixou de valer, o canal é pulado); o QR Code, texto livre com o
+  link. Cada tentativa chama `issueVerificationToken`. Erro na chamada passa ao próximo; sem canal
+  apto, ou todos falharam, o pedido volta a `awaiting_manual`, sem token.
+- **O canal é sempre do responsável:** pedido da plataforma só sai por canal da plataforma, pedido
+  de organização só por canal dela. Conferido na lista de candidatos, em `sendVerificationMessage`
+  (a função que envia; `VerificationScopeError`), no envio do canal (`requireChannelRow` pelo
+  escopo) e num gatilho do banco (`phone_verification_channel_same_scope`, migration `0037`). Um
+  pedido da plataforma pelo QR Code de uma organização daria ao owner dela o link que confirma a
+  conta para o sistema inteiro.
+- **Quem dispara:** o cadastro da equipe (hook do Better Auth), o aceite de convite, o autocadastro
+  do portal e a troca de telefone no portal, depois do commit (`requestPhoneVerificationSend`). O
+  job decide se é a vez do pedido:
+  - **D-12:** o pedido da plataforma só sai sozinho para quem responde a ela (owner, equipe da
+    plataforma, quem não é de organização nenhuma: `answersToPlatform`). O do membro comum espera
+    ele pedir ("Reenviar" com `responsible: "platform"`).
+  - **Um link por número (restrição (a)):** o pedido de organização não sai enquanto outro pedido
+    da mesma conta tem link válido a caminho do mesmo número (o da plataforma sai primeiro). Se o
+    da plataforma cai na liberação à mão, o da organização que esperava a vez (sem nenhuma
+    tentativa) é disparado; o que já falhou em todos os canais não recebe outra mensagem sozinho.
+  - **3 links por hora por cadastro** (`MAX_LINKS_PER_HOUR`, `src/lib/phone/dispatch.ts`), contados
+    em `attempts` de todos os pedidos do cadastro, inclusive o link automático da abertura: o
+    quarto vira `limited`, sem envio. A falha assíncrona que encontra o limite esgotado cai na
+    liberação à mão (o link não chegou).
+  - Quem perdeu a confirmação para quem provou o número **não** recebe link: o número agora é de
+    outra pessoa.
+- **Falha assíncrona:** o aviso `failed` de uma mensagem que não é da caixa de entrada (sem
+  crédito, `131042`, modelo pausado) é procurado em `phone_verification` (`channel_id` +
+  `provider_message_id`, no escopo do canal) por `applyVerificationStatus`, chamada por
+  `applyChannelEvent` quando o tratador da caixa não achou a mensagem. Registra a falha e enfileira
+  `phone.verify` com o motivo `failed`, que segue do próximo canal **se a mensagem que falhou ainda
+  é a do pedido** (um reenvio no meio torna o aviso velho: `stale`).
+- **Fora da caixa de entrada:** o envio não cria `chat_contact`, `conversation` nem `message`. O
+  eco que o QR Code devolve (`fromMe` com `/verificar-telefone?token=`) é reconhecido por
+  `isVerificationMessage`: pelo id da mensagem gravado no pedido e, para a corrida em que o eco
+  chega antes desse id, pelo texto (`isVerificationEcho`). Não entra na caixa, e o `raw` do aviso
+  com o texto do link é apagado.
+- **Colunas novas em `phone_verification`:** `channel_id` (FK `set null`), `provider_message_id`,
+  `attempts` (`jsonb`, as 20 últimas: canal, tipo, hora, `sent`/`failed`/`skipped`/`limited` e o
+  código do erro, sem telefone nem token) e `manual_notified_at`.
+- **Modelo de verificação da Cloud:** `verification_template_name` e
+  `verification_template_language` em `channel_whatsapp_cloud` (`CHECK` de par). `PUT
+  /api/channels/:id/verification-template` e `PUT /api/admin/channels/:id/verification-template`
+  (`channel:manage`; na plataforma, o proprietário), com `{ template: { name, language } | null }`.
+  Só modelo aprovado do WABA do canal, no mesmo escopo, com **um** botão de URL igual a
+  `APP_URL/verificar-telefone?token={{1}}`, sem outra variável e com cabeçalho de texto (422
+  `INVALID_VERIFICATION_TEMPLATE`, com o motivo). A regra é conferida de novo a cada envio.
+- **Reenvio:** `POST /api/me/phone-verification/resend` (`{ responsible?: "platform" | <tenantId> }`)
+  e `POST /api/portal/me/phone-verification/resend` (`{ tenantId? }`; padrão: a organização
+  ativa). Corpo opcional. 202, ou 429 `PHONE_VERIFICATION_LIMIT` quando o cadastro já recebeu os 3
+  links da hora (para não aceitar um reenvio que o job não cumpriria). 3 pedidos por hora **por
+  cadastro**, além do `authRateLimit` por IP; bloqueado em personificação. Tenta o próximo canal da
+  ordem e volta ao primeiro no fim; sem canal apto agora, o link que já saiu continua valendo.
+  Responsável que não responde pela pessoa não envia nada (`userResendTarget`).
+- **Página `/verificar-telefone?token=…`** (rota de auth, sem `loader`): sem sessão, vai a
+  `/login?next=…` e volta; com sessão, um botão faz o `POST` de confirmação. Token `c.` vai para
+  `/portal/verificar-telefone`, que pede a sessão do portal (`/portal/login?next=…`, só caminho
+  `/portal/…`). Meta `referrer: no-referrer` e `noindex`.
+- **Portal sem `requirePortalTenant` (restrição (d)):** a confirmação do portal acha a ficha pelo
+  token entre as fichas da própria pessoa (`portalTokenSubject`, `customer.portal_user_id`), em
+  qualquer organização: o lead do autocadastro confirma antes de virar cliente ativo. Só ficha
+  `lead` ou `active` de organização `active` (a bloqueada e a organização suspensa ficam de fora,
+  como no `requirePortalTenant`). A página trata o 401 sozinha: sai da sessão e volta ao login com
+  o link (`/portal/verificar-telefone` está em `PORTAL_PUBLIC_PATHS` do `apiFetch`).
+- **E-mails** (`tech/19-email.md`): `phone-verification-manual` ao responsável quando o pedido cai
+  na liberação à mão (uma vez por pedido, e só se o pedido é da fila dele: o da plataforma de um
+  membro comum não avisa o proprietário); `phone-number-claimed` à conta que perdeu a confirmação
+  para quem provou o número. Só os 4 últimos dígitos.
+- **Limites conhecidos:** o login por link mágico do portal não preserva o `next` (a pessoa abre o
+  link do WhatsApp de novo); a ordem entre dois pedidos da mesma conta disparados juntos depende
+  da fila `singleton`; o eco do QR Code é reconhecido pelo texto (`/verificar-telefone?token=`),
+  então uma mensagem com esse texto mandada à mão pelo celular do canal também fica fora da caixa;
+  o modelo Cloud precisa do smoke com conta real da Meta (formato do botão e do `index`) antes de
+  fechar a T2; não há tela para escolher o modelo nem para reenviar (T4).
 
 ## O que a SPEC pede e ainda não existe
 

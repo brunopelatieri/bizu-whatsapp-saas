@@ -57,3 +57,20 @@ export const AUTO_LINK_CUSTOMER_VIAS = ["whatsapp", "team", "inbound"] as const 
 
 export const attractsConversations = (via: PhoneVerifiedVia) =>
   (AUTO_LINK_CUSTOMER_VIAS as readonly PhoneVerifiedVia[]).includes(via);
+
+/**
+ * Uma tentativa de envio do link (`phone_verification.attempts`). Só ids, tipo, hora, resultado e
+ * o código do erro: nunca o telefone, o texto da mensagem nem o token.
+ *
+ * - `sent`: o provedor aceitou a mensagem.
+ * - `failed`: o provedor recusou na chamada, ou o aviso de status disse `failed` depois.
+ * - `skipped`: o canal não estava apto (Cloud sem modelo de verificação, por exemplo).
+ * - `limited`: o cadastro já recebeu o máximo de links da hora.
+ */
+export type PhoneDeliveryAttempt = {
+  channelId: string | null;
+  type: string | null;
+  at: string;
+  outcome: "sent" | "failed" | "skipped" | "limited";
+  error?: string | null;
+};

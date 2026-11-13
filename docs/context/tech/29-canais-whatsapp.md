@@ -46,6 +46,7 @@ comuns apenas iteram `getModules()` (um provedor novo não os edita):
 | `routes(kit)` | `buildChannelRoutes` (`src/api/channels.ts`) | Rotas do tipo (criar, diagnosticar, modelos, QR); recebem base, escopo, ator e autorização pelo `ChannelRouteKit`, e por isso servem ao tenant e à plataforma sem mudar. Cloud responde 404 com o módulo fora de `CHANNEL_PROVIDERS`; QR, 503 |
 | `requiredEnv` | `missingProviderEnv` (`registry.ts`) | Variáveis sem as quais o módulo não funciona; `/api/admin/channels` devolve o **nome** das que faltam |
 | `update(scope, id, input, actor)` | `updateChannel` (serviço comum) | Campos do `PATCH /:id` além do nome |
+| `verificationDelivery(scope, id)` | `src/lib/phone/delivery.ts` (job `phone.verify`) | Como o canal leva o link de verificação de telefone: `template` (Cloud, com o modelo escolhido no canal), `text` (padrão, QR Code) ou `unavailable` (pula o canal). O núcleo monta o link e chama `sendChannelText` ou `sendChannelTemplate` |
 
 `registry.ts` não tem `await` no topo: no app o `import.meta.glob` é estático; script `tsx` que
 precise dos módulos chama `await loadChannelModules()` (o módulo importa o serviço comum, que
@@ -67,7 +68,11 @@ O webhook **grava e enfileira**; quem aplica é `channel.inbound`:
    `connection` (estado, telefone, JID) e `template` (status de modelo já existente); `message` e
    `status` vão à ingestão da caixa de entrada (`src/lib/inbox/ingest.ts`, `tech/30-caixa-de-entrada.md`),
    com a lista `after` para o que roda depois do commit. `setInboxHandlers({})` a desliga nos testes da
-   camada de canais (o aviso fica `ignored`); `undefined` volta à real.
+   camada de canais (o aviso fica `ignored`); `undefined` volta à real. **Link de verificação de
+   telefone (T2b, `tech/28-crm-cadastro.md`):** o `status` que a caixa não reconhece vai a
+   `applyVerificationStatus` (o `failed` da mensagem atual de um pedido do mesmo escopo passa ao
+   próximo canal); a mensagem `fromMe` que é o link (pelo id gravado no pedido, ou pelo texto
+   `/verificar-telefone?token=`: o eco do QR Code) não entra na caixa e o `raw` do aviso é apagado.
 4. Falha soma `attempts` e guarda o erro **sem telefone nem e-mail** (`sanitizeChannelError`); na
    última tentativa vira `failed` e o job vai para `channel.inbound.dead`.
 
@@ -200,6 +205,7 @@ antes da transação; falha dele é 503 `PROVIDER_UNAVAILABLE` e o canal fica co
 | `POST /:id/test` | `channel:manage` | `checks`: `credentials_readable`, `token_valid`, `phone_reachable`, `waba_subscribed`, `webhook_verified`, `last_event_at`. 4xx da Meta marca `error`; 5xx, 429 e timeout não mudam o estado |
 | `GET /:id/templates?status=` | `channel:read` | Modelos do WABA do canal, no escopo |
 | `POST /:id/templates/sync` | `channel:manage`, 5/min | Lê a Meta, cria/atualiza e **apaga** o que sumiu lá |
+| `PUT /:id/verification-template` | `channel:manage`, 30/min | `{ template: { name, language } \| null }`: o modelo que leva o link de verificação de telefone (`verification.ts`, colunas `verification_template_*`). Só modelo `APPROVED` do WABA do canal, no escopo, com **um** botão de URL igual a `APP_URL/verificar-telefone?token={{1}}`, sem outra variável e com cabeçalho de texto; senão 422 `INVALID_VERIFICATION_TEMPLATE` (motivo na mensagem) ou 404. A regra é conferida de novo a cada envio. Auditoria `channel.updated` |
 
 - A conferência de número em uso vem **depois** de a Meta aceitar o token: só quem tem credencial
   válida daquele número descobre que ele já está em uso. Canal `disabled` do mesmo número no mesmo

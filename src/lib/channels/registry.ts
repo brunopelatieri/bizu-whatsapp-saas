@@ -9,6 +9,7 @@ import {
   type ChannelStatus,
   type ChannelType,
   channelTypes,
+  type VerificationDelivery,
 } from "@/lib/channels/types";
 import { type Env, getEnv } from "@/lib/env";
 import type { UpdateChannelInput } from "@/lib/schemas/channels";
@@ -85,6 +86,11 @@ export type ChannelModule = {
   routes?(kit: ChannelRouteKit): Hono<any>;
   /** `PATCH /:id` com campos além do nome. Ausente: o canal só renomeia. */
   update?(scope: Scope, id: string, input: UpdateChannelInput, actor: ChannelActor): Promise<void>;
+  /**
+   * Como o canal leva o link de verificação de telefone (`src/lib/phone/delivery.ts`). Ausente:
+   * texto livre. Roda no escopo do canal, que é sempre o do pedido.
+   */
+  verificationDelivery?(scope: Scope, channelId: string): Promise<VerificationDelivery>;
 };
 
 type ModuleFile = { default: ChannelModule };

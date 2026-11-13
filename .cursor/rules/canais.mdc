@@ -1,6 +1,6 @@
 ---
 description: Canais de WhatsApp (módulos, caixa de avisos e segredos)
-globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/api/admin-channel-events.ts,src/api/admin-channels.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts,src/components/channels/**,src/routes/app.settings.channels.tsx,src/routes/admin/channels.tsx
+globs: src/lib/channels/**,src/db/schema/channels.ts,src/api/channels.ts,src/api/webhooks-channels.ts,src/api/admin-channel-events.ts,src/api/admin-channels.ts,src/jobs/channels.ts,src/lib/schemas/channels.ts,src/components/channels/**,src/routes/app.settings.channels.tsx,src/routes/admin/channels.tsx,src/lib/phone/delivery.ts,src/jobs/phone.ts
 alwaysApply: false
 ---
 
@@ -17,6 +17,7 @@ alwaysApply: false
 - `registry.ts` não tem `await` no topo (ciclo módulo → serviço → registro); script `tsx` chama `loadChannelModules()`.
 - Tela: um tipo novo entra com uma linha em `src/components/channels/channel-dialogs.tsx` e o texto em `channel-kinds.tsx`. Componentes recebem `basePath` por props: nada de `/api/channels` escrito dentro deles.
 - Roteamento por `phone_number_id` só entre os canais do escopo do canal verificado.
+- Link de verificação de telefone (`src/lib/phone/delivery.ts`): sai **só** por canal do mesmo escopo do pedido (`phone_verification.tenant_id`); a conferência fica na função que envia e num gatilho do banco. O módulo diz como levar o link por `ChannelModule.verificationDelivery` (a Cloud exige o modelo escolhido, com o botão no `APP_URL`); o envio não entra na caixa de entrada, e o token nunca vai a payload de job, log, auditoria nem `attempts`.
 - Falar com o provedor vem antes da transação local. Erro de provedor vai a log só por `logChannelError` (sem a mensagem dele).
 - Limite do plano: `assertChannelWithinLimit` com `lockScopeType` na mesma transação da criação.
 - Mudança aqui atualiza `docs/context/tech/29-canais-whatsapp.md`.

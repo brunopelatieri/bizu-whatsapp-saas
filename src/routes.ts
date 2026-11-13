@@ -31,6 +31,9 @@ export default [
   route("redefinir-senha", "routes/auth/reset-password.tsx"),
   route("convite/:id", "routes/auth/invite.tsx"),
   route("2fa", "routes/auth/two-factor.tsx"),
+  // Link de verificação do WhatsApp (bloco T): o token `c.` (ficha de cliente) segue para a
+  // página do portal, que tem a sessão do cliente.
+  route("verificar-telefone", "routes/auth/verify-phone.tsx"),
 
   // ---------------------------------------------------------------------------
   // Área do tenant (owner e equipe) — client-only (SEM loader de servidor).
@@ -97,6 +100,7 @@ export default [
     route("portal/confirmar", "routes/portal/confirm.tsx"),
     route("portal/cadastro", "routes/portal/signup.tsx"),
     route("portal/escolher", "routes/portal/choose.tsx"),
+    route("portal/verificar-telefone", "routes/portal/verify-phone.tsx"),
     route("portal", "components/portal/portal-layout.tsx", [
       index("routes/portal/home.tsx"),
       route("conta", "routes/portal/account.tsx"),

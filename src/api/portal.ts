@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import {
   createRateLimitByEmail,
   forwardedHeaders,
@@ -19,7 +19,12 @@ import {
   requirePortalTenant,
 } from "@/api/portal-auth";
 import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
-import { confirmRateLimit } from "@/api/phone-verification";
+import {
+  confirmRateLimit,
+  optionalJson,
+  resendRateLimit,
+  tooManyLinks,
+} from "@/api/phone-verification";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
 import { INVALID_LINK_MESSAGE } from "@/api/verification-guard";
@@ -55,8 +60,17 @@ import { LEGAL_VERSIONS } from "@/lib/legal/versions";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { acceptConsentSchema } from "@/lib/schemas/lgpd";
-import { phoneVerificationTokenSchema } from "@/lib/schemas/phone";
-import { confirmPhoneVerificationByToken, ownPhoneVerification } from "@/lib/phone/requests";
+import {
+  phoneVerificationTokenSchema,
+  portalPhoneVerificationResendSchema,
+} from "@/lib/schemas/phone";
+import { requestPhoneVerificationSend, sendLimitReached } from "@/lib/phone/dispatch";
+import {
+  confirmPhoneVerificationByToken,
+  portalPhoneOverview,
+  portalResendTarget,
+  portalTokenSubject,
+} from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /**
@@ -358,35 +372,88 @@ portalRoutes.post(
 );
 
 /**
- * O pedido de confirmação do telefone da ficha do cliente na organização ativa. O link que chega
- * ao número só confirma aqui, na sessão do próprio cliente: o token vai no corpo e a ficha vem da
- * sessão, nunca da requisição.
+ * A confirmação do telefone das fichas de cliente da própria pessoa, uma por organização. Sem
+ * `requirePortalTenant`: o lead do autocadastro ainda não é cliente ativo e precisa confirmar o
+ * número mesmo assim (restrição (d) da T2b). Tudo sai da sessão do portal: a ficha é sempre uma
+ * das da pessoa (`customer.portal_user_id`), nunca a que a requisição disser.
+ *
+ * `pending` é o resumo de antes, da organização ativa (ou a primeira com pedido aberto);
+ * `responsibles` traz a situação em cada organização.
  */
 portalRoutes.get(
   "/api/portal/me/phone-verification",
   authRateLimit,
   requirePortalAuth,
-  requirePortalTenant,
-  async (c) =>
-    c.json({
-      pending: await ownPhoneVerification({ type: "customer", id: c.get("customer").id }),
-    }),
+  async (c) => {
+    const records = await portalPhoneOverview(c.get("portalUser").id);
+    const active = c.get("portalSession").activeTenantId;
+    const open = records.filter(
+      ({ view }) => view.status === "sent" || view.status === "awaiting_manual",
+    );
+    const first = open.find(({ view }) => view.tenantId === active) ?? open[0];
+
+    return c.json({
+      pending: first
+        ? { status: first.view.status, phoneHint: first.phoneHint }
+        : null,
+      responsibles: records.map(({ view, phoneHint }) => ({ ...view, phoneHint })),
+    });
+  },
 );
 
+/**
+ * O link que chegou ao número confirma aqui, na sessão do próprio cliente: o token vai no corpo e
+ * a ficha é uma das da pessoa, achada pelo token (qualquer organização, ativa ou não).
+ */
 portalRoutes.post(
   "/api/portal/me/phone-verification/confirm",
   authRateLimit,
   confirmRateLimit("portal-phone-verification-confirm"),
   requirePortalAuth,
-  requirePortalTenant,
   zValidator("json", phoneVerificationTokenSchema, validationError),
   async (c) => {
-    await confirmPhoneVerificationByToken(c.req.valid("json").token, {
-      type: "customer",
-      id: c.get("customer").id,
-    });
+    const { token } = c.req.valid("json");
+    const subject = await portalTokenSubject(token, c.get("portalUser").id);
+    if (!subject) {
+      throw new TenantRuleError(400, "INVALID_OR_EXPIRED", "Link inválido ou expirado.");
+    }
+
+    await confirmPhoneVerificationByToken(token, subject);
 
     return c.json({ ok: true });
+  },
+);
+
+/**
+ * Pede o link de novo para a ficha numa organização (a do corpo, ou a ativa). Sempre 202, com 3
+ * por hora por pessoa do portal.
+ */
+portalRoutes.post(
+  "/api/portal/me/phone-verification/resend",
+  authRateLimit,
+  requirePortalAuth,
+  resendRateLimit(
+    "portal-phone-verification-resend",
+    (c) => (c as Context<PortalTenantEnv>).get("portalUser").id,
+  ),
+  async (c) => {
+    const body = await optionalJson(c, portalPhoneVerificationResendSchema);
+    if (!body.ok) return body.response;
+
+    const tenantId = body.data.tenantId ?? c.get("portalSession").activeTenantId;
+    const target = tenantId ? await portalResendTarget(c.get("portalUser").id, tenantId) : null;
+    if (target && (await sendLimitReached({ type: "customer", id: target.customerId }))) {
+      return tooManyLinks(c);
+    }
+    if (target) {
+      await requestPhoneVerificationSend(
+        target.requestId,
+        { type: "customer", id: target.customerId },
+        "resend",
+      );
+    }
+
+    return c.json({ ok: true }, 202);
   },
 );
 

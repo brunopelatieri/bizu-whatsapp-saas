@@ -102,6 +102,13 @@ export const channelWhatsappCloud = pgTable(
     registeredAt: timestamptz("registered_at"),
     subscribedAt: timestamptz("subscribed_at"),
     lastError: text("last_error"),
+    /**
+     * Modelo aprovado que leva o link de verificação de telefone (SPEC `pre-producao`, T2b). Sem
+     * ele, o envio de verificação pula este canal. O modelo tem um botão de URL dinâmica que
+     * aponta para `APP_URL/verificar-telefone?token={{1}}`, conferido ao escolher e ao enviar.
+     */
+    verificationTemplateName: text("verification_template_name"),
+    verificationTemplateLanguage: text("verification_template_language"),
     updatedAt: timestamptz("updated_at")
       .notNull()
       .defaultNow()
@@ -110,6 +117,10 @@ export const channelWhatsappCloud = pgTable(
   (table) => [
     index("channel_whatsapp_cloud_tenant_idx").on(table.tenantId),
     index("channel_whatsapp_cloud_waba_idx").on(table.wabaId),
+    check(
+      "channel_whatsapp_cloud_verification_template_pair",
+      sql`(${table.verificationTemplateName} is null) = (${table.verificationTemplateLanguage} is null)`,
+    ),
     scopedPolicy(),
   ],
 ).enableRLS();
