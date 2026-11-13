@@ -18,6 +18,7 @@ import {
   requirePortalAuth,
   requirePortalTenant,
 } from "@/api/portal-auth";
+import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
 import { INVALID_LINK_MESSAGE } from "@/api/verification-guard";
@@ -56,11 +57,11 @@ import { acceptConsentSchema } from "@/lib/schemas/lgpd";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /**
- * O que o portal expõe do Better Auth. Lista fechada: magic link, cadastro e reset passam
+ * O que o portal expõe do Better Auth, além do login por senha (`sign-in/email`, com rota
+ * própria abaixo). Lista fechada: magic link, cadastro e reset passam
  * pelas rotas abaixo, com resposta uniforme, e `verify` não pode consumir token em GET.
  */
 const PORTAL_AUTH_PATHS = new Set([
-  "POST /sign-in/email",
   "POST /sign-out",
   "GET /get-session",
   "GET /list-sessions",
@@ -176,6 +177,31 @@ portalRoutes.post(
   },
 );
 
+/**
+ * Login por senha. O corpo é validado por `throttledSignIn` e repassado sempre em JSON: o
+ * endpoint do Better Auth também aceita formulário, que `barredSignIn` não leria. Falhas
+ * repetidas bloqueiam o e-mail por um tempo (variáveis `LOGIN_*`).
+ */
+portalRoutes.post(
+  `${PORTAL_AUTH_BASE_PATH}/sign-in/email`,
+  signInRateLimit("portal-sign-in"),
+  (c) =>
+    throttledSignIn(c, "portal", async (validated) => {
+      const headers = forwardedHeaders(c);
+      headers.set("Content-Type", "application/json");
+
+      return hideUnverified(
+        await getPortalAuth().handler(
+          new Request(c.req.url, {
+            method: "POST",
+            headers,
+            body: await barredSignIn(validated),
+          }),
+        ),
+      );
+    }),
+);
+
 portalRoutes.on(["GET", "POST"], `${PORTAL_AUTH_BASE_PATH}/*`, async (c) => {
   const { method, url, path } = c.req;
 
@@ -183,10 +209,7 @@ portalRoutes.on(["GET", "POST"], `${PORTAL_AUTH_BASE_PATH}/*`, async (c) => {
     return c.json({ error: "Não encontrado." }, 404);
   }
 
-  let body = method === "POST" ? await c.req.text() : undefined;
-  if (body && path === `${PORTAL_AUTH_BASE_PATH}/sign-in/email`) {
-    body = await barredSignIn(body);
-  }
+  const body = method === "POST" ? await c.req.text() : undefined;
   const response = await getPortalAuth().handler(
     new Request(url, { method, headers: forwardedHeaders(c), body }),
   );

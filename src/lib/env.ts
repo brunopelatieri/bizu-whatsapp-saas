@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loginLockoutScopes } from "@/lib/auth/login-throttle";
 
 /**
  * Variáveis de ambiente do servidor, validadas uma vez na inicialização.
@@ -137,6 +138,25 @@ export const envSchema = z
 
     JOBS_MODE: z.enum(["inline", "worker", "off"]).default("inline"),
     RATE_LIMIT_STORE: z.enum(["memory", "postgres"]).default("memory"),
+
+    // Bloqueio de login por tentativas (`src/lib/auth/login-throttle.ts`). O escopo diz o que
+    // fica bloqueado: o e-mail, o par e-mail e IP (o dono nunca fica trancado), ou nada.
+    LOGIN_LOCKOUT_SCOPE: z.preprocess(
+      emptyToUndefined,
+      z.enum(loginLockoutScopes).default("email"),
+    ),
+    LOGIN_MAX_ATTEMPTS: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(100).default(5),
+    ),
+    LOGIN_ATTEMPT_WINDOW_MINUTES: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(1440).default(15),
+    ),
+    LOGIN_LOCKOUT_MINUTES: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(1440).default(15),
+    ),
 
     PAYMENT_PROVIDERS: csvList,
     STRIPE_SECRET_KEY: optionalString,

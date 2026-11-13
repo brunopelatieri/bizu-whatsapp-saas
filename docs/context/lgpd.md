@@ -18,6 +18,7 @@ Mecânica (consentimento, exportação, exclusão, arquivos): `tech/27-lgpd-arqu
 | Auditoria | `audit_log` | `platform_setting.audit_retention_days` (padrão **365**, mínimo 30) | `maintenance.prune` | Legítimo interesse (segurança e suporte); só ids e enums, sem texto livre |
 | Exportação de dados | `data_export` e o zip no armazenamento | **7 dias** (arquivo) e mais 7 (registro) | `maintenance.prune` | Atender o titular |
 | Buckets de rate limit | `rate_limit_bucket` | 1 dia | `maintenance.prune` | Legítimo interesse (segurança) |
+| Falhas de login | `login_throttle` (só HMAC do e-mail e do IP, contagem e horários; existe também para e-mail sem conta; a auditoria `auth.login_locked` não leva esse hash) | janela mais bloqueio (`LOGIN_ATTEMPT_WINDOW_MINUTES` + `LOGIN_LOCKOUT_MINUTES`, padrão 30 min) depois da última falha | `maintenance.prune`; some antes com o login certo ou a senha redefinida | Legítimo interesse (segurança) |
 | Faturas | `invoice` | **5 anos**, fixo (sem configuração nem job), anonimizadas se a organização for excluída | não há job: guarda por obrigação fiscal | Obrigação legal |
 | Prova de consentimento | `consent_log` | enquanto durar a relação e o prazo de defesa; sem nome nem e-mail (só id e hash de IP) | não é apagado pela exclusão | Exercício regular de direitos |
 | Pedido de exclusão e de exportação | `deletion_request`, `data_export` | `deletion_request` fica como registro da execução | — | Prestação de contas |

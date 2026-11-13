@@ -11,6 +11,8 @@ export type AuditAction =
   | "auth.email_verified"
   | "auth.email_changed"
   | "auth.password_reset"
+  // Só hashes em `metadata`: o e-mail bloqueado pode nem ter conta (`actor_id` nulo).
+  | "auth.login_locked"
   | "auth.2fa_enabled"
   | "auth.2fa_disabled"
   | "auth.session_revoked"

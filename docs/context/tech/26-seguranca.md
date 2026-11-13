@@ -16,6 +16,7 @@
 | CSRF | `csrfGuard`, `sameOrigin` e a checagem do Better Auth | `src/api/security.test.ts`, `tenant-http.test.ts` |
 | XSS | CSP com nonce, sem `unsafe-inline` nem `unsafe-eval` em `script-src` | `src/api/security.test.ts`; smoke no navegador |
 | Clickjacking | `frame-ancestors 'none'`; em report-only, `X-Frame-Options: DENY` | `src/api/security.test.ts` |
+| Adivinhação de senha, inclusive vinda de muitos IPs | Bloqueio de login por tentativas, por e-mail (`LOGIN_*`, `tech/08-auth.md`) | `tests/db/login-throttle.test.ts` |
 | Rate limit dividido entre réplicas | `RATE_LIMIT_STORE=postgres`, obrigatório em produção | `tests/db/rate-limit-store.test.ts` |
 | Banco ou backup vazado | Credenciais em AES-256-GCM, com a chave só no ambiente | `src/lib/crypto/secrets.test.ts`, `tests/db/credentials.test.ts` |
 
@@ -75,7 +76,9 @@ store compartilhado.
 A chave vai em hash com `AUDIT_SALT`, para o IP não ficar legível. Store fora do ar responde 503 (falha
 fechada). Buckets com mais de 24 h saem no `maintenance.prune`: uma janela maior que isso exige
 aumentar `RATE_LIMIT_RETENTION_MS`. `failureLimit`, dos webhooks, segue em memória: com N instâncias, o
-teto real é N vezes o limite. O rate limit do Better Auth é outro, na tabela `rate_limit`.
+teto real é N vezes o limite. O rate limit do Better Auth é outro, na tabela `rate_limit`. O
+bloqueio de login por tentativas é um terceiro mecanismo, por e-mail e sempre no banco
+(`login_throttle`, `tech/08-auth.md`).
 
 ## Criptografia de credenciais
 

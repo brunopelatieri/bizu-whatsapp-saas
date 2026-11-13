@@ -12,6 +12,7 @@ import {
   session,
   verification,
 } from "@/db/schema";
+import { pruneLoginThrottle } from "@/lib/auth/login-throttle-store";
 import { loadSettings } from "@/lib/billing/settings";
 import { getEnv } from "@/lib/env";
 import { deleteOldExportRecords, pruneExports } from "@/lib/lgpd/export";
@@ -35,7 +36,7 @@ const daysAgo = (now: Date, days: number) => new Date(now.getTime() - days * DAY
  * - sessões vencidas da equipe e do portal, e `verification`/`portal_verification` vencidos;
  * - exportações de dados (arquivo e registro) vencidas;
  * - `audit_log` mais antigo que `platform_setting.audit_retention_days` (padrão 365);
- * - buckets vencidos de rate limit.
+ * - buckets vencidos de rate limit e contadores vencidos do bloqueio de login.
  *
  * Faturas (5 anos) e `consent_log` (prova de consentimento) nunca passam por aqui.
  * Idempotente: rodar duas vezes seguidas não apaga nada a mais.
@@ -127,6 +128,7 @@ export async function pruneOldData(now = new Date()) {
     exportFiles: await pruneExports(now),
     exportRecords: await deleteOldExportRecords(now),
     rateLimitBuckets: await pruneRateLimitBuckets(now),
+    loginThrottles: await pruneLoginThrottle(now),
   };
 }
 

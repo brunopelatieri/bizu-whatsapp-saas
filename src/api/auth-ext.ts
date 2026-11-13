@@ -12,6 +12,7 @@ import {
 import { resolveSession } from "@/api/auth";
 import { refuseImpersonated } from "@/api/impersonation";
 import { logError } from "@/api/log";
+import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { withSignupConsent } from "@/lib/lgpd/consent";
 import {
@@ -97,7 +98,8 @@ const rateLimitByEmail = createRateLimitByEmail("resend-by-email");
  *
  * - Cadastro: exige o aceite de termos e devolve sempre o mesmo corpo, sem sessão. O do
  *   Better Auth traz id e datas, que diferem entre e-mail novo e existente.
- * - Login: conta não verificada responde como senha errada (`hideUnverified`).
+ * - Login: conta não verificada responde como senha errada (`hideUnverified`), e falhas
+ *   repetidas bloqueiam o e-mail por um tempo (`throttledSignIn`, variáveis `LOGIN_*`).
  * - `verify-email`: o endpoint do Better Auth é GET e consumiria o token em qualquer
  *   visita. Aqui só existe POST, atrás do `verificationGuard`.
  * - `/api/auth-ext/*`: respondem `{ ok: true }` na hora, antes de saber se o e-mail
@@ -215,6 +217,20 @@ authRoutes.post(
 
     return c.json({ step: verificationStep(token) });
   },
+);
+
+authRoutes.post("/api/auth/sign-in/email", signInRateLimit("sign-in"), (c) =>
+  // O corpo que chega ao Better Auth é o validado por `throttledSignIn`, sempre em JSON.
+  throttledSignIn(c, "team", async (body) => {
+    const headers = forwardedHeaders(c);
+    headers.set("Content-Type", "application/json");
+
+    return hideUnverified(
+      await getAuth().handler(
+        new Request(c.req.url, { method: "POST", headers, body }),
+      ),
+    );
+  }),
 );
 
 authRoutes.all("/api/auth/organization/*", (c) =>

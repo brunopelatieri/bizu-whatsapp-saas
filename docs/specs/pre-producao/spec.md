@@ -545,7 +545,8 @@ A chave do contador muda com o escopo: `HMAC(e-mail)` ou `HMAC(e-mail + IP)`, co
 - **Não revela se o e-mail existe:** e-mail inexistente soma e bloqueia igual; a mensagem é a
   mesma de hoje ("Muitas tentativas. Tente mais tarde.").
 - Redefinir a senha zera o contador daquele e-mail.
-- Audita `auth.login_locked` (com o hash, sem o e-mail). Linhas vencidas saem no
+- Audita `auth.login_locked`, sem o e-mail e sem o hash dele (a auditoria dura muito mais
+  que o contador; ajuste da revisão de segurança). Linhas vencidas saem no
   `maintenance.prune`.
 - O limite por IP continua como está.
 

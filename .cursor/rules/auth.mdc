@@ -1,13 +1,13 @@
 ---
 description: Autenticação com Better Auth, sessão em cookie e falha fechada
-globs: src/api/auth.ts,src/api/auth-ext.ts,src/api/portal.ts,src/api/portal-auth.ts,src/lib/portal/**,src/db/schema/portal-auth.ts,src/api/verification-guard.ts,src/lib/auth/**,src/lib/schemas/auth.ts,src/lib/email/templates/auth/**,src/db/schema/auth.ts,src/providers/auth-provider.tsx,src/components/auth/**,src/routes/auth/**,src/pages/login-page.tsx,src/pages/two-factor-page.tsx,src/pages/signup-page.tsx,src/pages/verify-email-page.tsx,src/pages/forgot-password-page.tsx,src/pages/reset-password-page.tsx,src/lib/legal/**,src/lib/lgpd/consent.ts,src/lib/lgpd/identity.ts
+globs: src/api/auth.ts,src/api/auth-ext.ts,src/api/login-throttle.ts,src/api/portal.ts,src/api/portal-auth.ts,src/lib/portal/**,src/db/schema/portal-auth.ts,src/api/verification-guard.ts,src/lib/auth/**,src/lib/schemas/auth.ts,src/lib/email/templates/auth/**,src/db/schema/auth.ts,src/providers/auth-provider.tsx,src/components/auth/**,src/routes/auth/**,src/pages/login-page.tsx,src/pages/two-factor-page.tsx,src/pages/signup-page.tsx,src/pages/verify-email-page.tsx,src/pages/forgot-password-page.tsx,src/pages/reset-password-page.tsx,src/lib/legal/**,src/lib/lgpd/consent.ts,src/lib/lgpd/identity.ts
 alwaysApply: false
 ---
 
 # Autenticação com Better Auth, sessão em cookie e falha fechada
 
 - Instância `getAuth()` em `src/lib/auth/server.ts`; rotas em `src/api/auth-ext.ts`.
-- Clientes e leads usam `getPortalAuth()` (`src/lib/auth/portal.ts`), com segredo derivado, cookies `bizu_portal` e tabelas `portal_*`: um cookie nunca vale pelo outro. Por HTTP, só o que está em `PORTAL_AUTH_PATHS` (`src/api/portal.ts`); `/api/portal/auth/magic-link/verify` só aceita POST.
+- Clientes e leads usam `getPortalAuth()` (`src/lib/auth/portal.ts`), com segredo derivado, cookies `bizu_portal` e tabelas `portal_*`: um cookie nunca vale pelo outro. Por HTTP, só o login por senha (rota própria) e o que está em `PORTAL_AUTH_PATHS` (`src/api/portal.ts`); `/api/portal/auth/magic-link/verify` só aceita POST.
 - Rota privada usa `requireAuth` (sessão no banco; e-mail verificado só com `EMAIL_VERIFICATION_REQUIRED=true`); de plataforma, também `requirePlatform`.
 - Verificação de e-mail é opcional (padrão desligada). O cadastro nunca abre sessão (`autoSignIn: false`); desligada, o cliente entra com a mesma senha. O que depende de provar o e-mail (listar os convites do próprio e-mail) exige `emailVerified` nas duas posições.
 - Nenhum token é consumido em GET: a página renderiza e um botão faz a chamada. `/api/auth/verify-email` só aceita POST, atrás do `verificationGuard`.
@@ -26,6 +26,8 @@ alwaysApply: false
 - Sessões e usuários ficam no Postgres, via Drizzle.
 - Cadastro grava o aceite em `consent_log` pelo hook de criação do usuário (`withSignupConsent`); versão nova em `src/lib/legal/versions.ts` faz `/api/me` e `/api/portal/me` devolverem `consentRequired`. A sessão de suporte nunca aceita termos.
 - Senha nova segue `src/lib/auth/password-policy.ts` e é gravada normalizada (`normalizePassword`). A regra vale no Zod (`newPassword`) e no `passwordPolicyHook` das duas instâncias, que também normaliza a senha no login; o login nunca cobra complexidade. Código que grave hash fora do Better Auth (como `setPortalPassword`) normaliza e valida antes (`tech/08-auth.md`, "Política de senha").
+- Login tem bloqueio por tentativas (`throttledSignIn`, `src/api/login-throttle.ts`, variáveis `LOGIN_*`): rota nova que confira senha para abrir sessão passa por ele. A tentativa é reservada antes de conferir a senha, o 401 a mantém contada, e o bloqueado recebe o 429 do rate limit, igual para e-mail com e sem conta; o e-mail só entra em HMAC (`tech/08-auth.md`, "Bloqueio de login por tentativas").
+- O `sign-in/email` só aceita JSON, validado por `signInRequestSchema`, e o Better Auth recebe o JSON validado, nunca o corpo cru: o endpoint dele também aceita formulário, que escaparia de tudo o que o proxy lê do corpo (o bloqueio e o `barredSignIn` do portal).
 - Telefone é obrigatório em toda conta: o hook `user.create.before` das duas instâncias grava `phone_normalized` e `phone_key` a partir do contexto do cadastro e recusa sem telefone válido (`tech/28-crm-cadastro.md`).
 - Token de confirmação da exclusão do portal é de uso único, só em hash, consumido por POST; nenhum link da LGPD consome token em GET.
 

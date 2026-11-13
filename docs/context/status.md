@@ -30,8 +30,9 @@
   owner e da equipe (foto, nome, e-mail, telefone, senha), retenção de mensagens, texto legal
   com WhatsApp, avisos de exclusão, senha forte, bloqueio de login por tentativas, importação de
   clientes, complementos do atendimento (continuar por outro canal, emoji, filtro na URL) e de
-  planos (uso, exceção por tenant). Decisões de produto fechadas; próxima fase: S1 (senha
-  forte no schema e no servidor). Os blocos S, B, T, F, E, L e R seguram o deploy.
+  planos (uso, exceção por tenant). Decisões de produto fechadas. **Implementados:** bloco S
+  (senha forte: política no schema e no servidor, medidor nas telas) e bloco B (bloqueio de login
+  por tentativas, `login_throttle`, variáveis `LOGIN_*`). Próxima fase: T1. Os blocos S, B, T, F, E, L e R seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e

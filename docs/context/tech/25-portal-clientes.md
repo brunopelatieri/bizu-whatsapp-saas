@@ -40,9 +40,11 @@ cache. `tests/db/portal-isolation.test.ts` prova os dois casos, inclusive com co
 
 ## O que responde por HTTP
 
-`PORTAL_AUTH_PATHS` em `src/api/portal.ts` é uma lista fechada do Better Auth:
-`sign-in/email`, `sign-out`, `get-session`, `list-sessions`, `revoke-session` e
-`revoke-other-sessions`. O resto responde 404. Nada do plugin fala direto com a internet.
+`PORTAL_AUTH_PATHS` em `src/api/portal.ts` é uma lista fechada do Better Auth: `sign-out`,
+`get-session`, `list-sessions`, `revoke-session` e `revoke-other-sessions`. O login por senha
+(`sign-in/email`) tem rota própria: só aceita JSON validado e passa pelo bloqueio por tentativas
+(`throttledSignIn`, `tech/08-auth.md`). O resto responde 404. Nada do plugin fala direto com a
+internet.
 
 | Rota | Autorização | Observação |
 |---|---|---|

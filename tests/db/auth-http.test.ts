@@ -67,6 +67,7 @@ describe("autenticação sobre o servidor Node", () => {
     await new Promise((resolve) => server.close(resolve));
     await owner`delete from "user" where email like ${`%@${DOMAIN}`}`;
     await owner`delete from rate_limit where key like '10.21.%'`;
+    await owner`delete from login_throttle`;
     await owner.end();
     setEmailProviderForTests(undefined);
   });
@@ -136,5 +137,29 @@ describe("autenticação sobre o servidor Node", () => {
 
     expect(newAccount.status).toBe(401);
     expect(newAccount).toEqual(existing);
+  });
+
+  it("senhas erradas repetidas bloqueiam o login do e-mail, de qualquer IP", async () => {
+    const email = `${randomUUID()}@${DOMAIN}`;
+    const password = "Senha-forte-123";
+    await signUp(email, password, "10.21.2.1");
+    await waitForBackgroundTasks();
+    await owner`update "user" set email_verified = true where email = ${email}`;
+
+    // Padrão de LOGIN_MAX_ATTEMPTS (5), um IP por tentativa: o limite por IP não entra.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const wrong = await post(
+        "/api/auth/sign-in/email",
+        { email, password: "senha errada" },
+        `10.21.2.${attempt + 10}`,
+      );
+      expect(wrong.status).toBe(401);
+    }
+
+    const blocked = await post("/api/auth/sign-in/email", { email, password }, "10.21.2.99");
+
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get("Retry-After"))).toBeGreaterThan(0);
+    expect(blocked.headers.getSetCookie()).toEqual([]);
   });
 });

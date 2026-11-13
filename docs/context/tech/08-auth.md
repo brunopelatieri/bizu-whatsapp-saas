@@ -199,6 +199,64 @@ senha**, que é o que um cadastro nunca confirmado tem.
   `/api/auth/*` e `/api/auth-ext/*`; sem esse middleware, cadastro e login aceitariam
   envio de outro site.
 
+## Bloqueio de login por tentativas
+
+Além do limite por IP, o login conta as senhas erradas por e-mail e bloqueia por um tempo
+(`docs/specs/pre-producao/spec.md`, bloco B). Vale para a equipe e para o portal, com contadores
+separados (`realm` `team` e `portal`).
+
+| Variável | Padrão | O que faz |
+|---|---|---|
+| `LOGIN_LOCKOUT_SCOPE` | `email` | `email`: bloqueia o e-mail, de qualquer IP. `email_ip`: só o par e-mail e IP (o dono nunca fica trancado por outro IP). `off`: desliga |
+| `LOGIN_MAX_ATTEMPTS` | 5 | Falhas, dentro da janela, que abrem o bloqueio |
+| `LOGIN_ATTEMPT_WINDOW_MINUTES` | 15 | Janela em que as falhas se somam |
+| `LOGIN_LOCKOUT_MINUTES` | 15 | Duração do bloqueio |
+
+- **Onde:** `throttledSignIn` (`src/api/login-throttle.ts`) é a rota de `POST
+  /api/auth/sign-in/email` (`auth-ext.ts`) e do `sign-in/email` do portal (`portal.ts`, rota
+  própria, fora de `PORTAL_AUTH_PATHS`). A decisão é pura (`src/lib/auth/login-throttle.ts`); o
+  estado fica em `login_throttle`, por `login-throttle-store.ts`.
+- **Só JSON, e só o validado:** a rota exige `Content-Type: application/json` (415 fora disso),
+  valida com `signInRequestSchema` (400) e repassa ao Better Auth o JSON validado. O endpoint
+  dele também aceita `application/x-www-form-urlencoded`: com o corpo cru repassado, um
+  formulário entraria sem passar pelo bloqueio nem pelo `barredSignIn` do portal. Rota nova que
+  repasse corpo ao Better Auth segue a mesma regra.
+- **A tentativa é contada antes de conferir a senha** (`reserveLoginAttempt`, uma transação sob
+  trava por chave): tentativas simultâneas não passam todas pela leitura "ainda não bloqueado",
+  e no máximo `LOGIN_MAX_ATTEMPTS` chegam a conferir a senha por janela.
+- **O que fica contado:** a resposta 401 (senha errada, e-mail sem conta, conta não verificada;
+  no portal, também a conta em carência de exclusão: por fora são a mesma). 200 zera a chave.
+  Qualquer outra (429 do limite por IP, 400, 5xx, e o 403 `BANNED_USER` da equipe, que só sai com
+  a senha certa) devolve a tentativa.
+- **Bloqueado:** 429 com `Retry-After` e o corpo do rate limit, sem conferir a senha. E-mail sem
+  conta bloqueia igual: a resposta não diz se ele existe.
+- **Como sai:** o tempo passa, ou a pessoa redefine a senha (`onPasswordReset` zera todas as
+  chaves do e-mail, de qualquer IP; no portal, `setPortalPassword`, depois de entrar por magic
+  link).
+- **Limites conhecidos:**
+  - Com `email` (padrão, decisão do proprietário), quem sabe o e-mail de alguém consegue mantê-lo
+    bloqueado errando a senha. Redefinir a senha zera o contador, mas não abre sessão: contra
+    quem insiste, o atacante fecha de novo antes de o dono entrar. A saída de operação é
+    `LOGIN_LOCKOUT_SCOPE=email_ip`, que não segura ataque vindo de muitos IPs. Sessões já
+    abertas continuam valendo durante o bloqueio.
+  - O login certo zera o contador, então quem chega a N-1 falhas e espera consegue notar que
+    alguém entrou no intervalo (a próxima falha não bloqueia). Revela atividade de uma conta
+    que o atacante já tenta adivinhar; aceito.
+  - `email_ip` depende de `TRUSTED_PROXY_HOPS` certo: errado para mais, o cliente escolhe o IP;
+    zero atrás de proxy, todos dividem o IP do proxy e o escopo vira `email`.
+- **IP:** em `email_ip`, IPv6 conta pelo /64 e IPv4 mapeado vira IPv4 (`throttleIp`), como no
+  limite do Better Auth.
+- **Limite por IP da rota:** `signInRateLimit` (20 por minuto), na frente do bloqueio: o caminho
+  bloqueado não chega ao limite do Better Auth.
+- **Dados:** e-mail e IP só entram em HMAC com `AUDIT_SALT`. A falha que fecha o bloqueio é
+  auditada como `auth.login_locked`, sem ator e sem o hash do e-mail (a auditoria dura muito
+  mais que o contador). Linhas vencidas saem no `maintenance.prune`.
+- **Falha fechada:** sem conseguir reservar a tentativa, o login responde 503. Falha ao zerar ou
+  devolver depois da resposta deixa a tentativa contada.
+- **Testes:** `src/lib/auth/login-throttle.test.ts`, `tests/db/login-throttle.test.ts` (inclui
+  formulário, corpo inválido, concorrência e os dois escopos) e `tests/db/auth-http.test.ts`.
+  Não há teste para o 503 da falha de banco.
+
 ## Primeiro proprietário
 
 `npm run db:seed` cria `owner@bizu.local` (`platform_owner`) e `suporte@bizu.local`

@@ -29,6 +29,7 @@ import {
   tenantAccessControl,
   tenantRoles,
 } from "@/lib/auth/permissions";
+import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { passwordPolicyHook } from "@/lib/auth/password-hook";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { logError } from "@/api/log";
@@ -103,6 +104,8 @@ function createAuth() {
             .set({ emailVerified: true })
             .where(eq(schema.user.id, user.id));
         }
+        // Quem provou o e-mail pelo link volta a entrar, mesmo com o login bloqueado.
+        runInBackground(clearLoginThrottleForEmail("team", user.email));
         runInBackground(sendPasswordChangedNotice(user));
         runInBackground(
           audit("auth.password_reset", {

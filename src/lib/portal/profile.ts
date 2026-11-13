@@ -12,6 +12,7 @@ import {
   PASSWORD_POLICY_CODE,
   PASSWORD_POLICY_MESSAGE,
 } from "@/lib/auth/password-policy";
+import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
 import type { PortalCustomer } from "@/lib/portal/access";
@@ -154,6 +155,8 @@ export async function setPortalPassword(
       and(eq(portalSession.userId, user.id), ne(portalSession.id, session.id)),
     );
 
+  // A senha foi definida por quem tem sessão: o bloqueio de login daquele e-mail cai.
+  runInBackground(clearLoginThrottleForEmail("portal", user.email));
   runInBackground(sendPortalPasswordChanged(user));
   await audit("portal.password_set", {
     actor: { type: "portal_user", id: user.id },

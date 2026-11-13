@@ -47,6 +47,16 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Informe sua senha.").max(MAX_PASSWORD_LENGTH),
 });
 
+/**
+ * O corpo que o servidor repassa ao `sign-in/email` do Better Auth: só JSON e só estes campos.
+ * O endpoint dele também aceita formulário, e o que este schema não lê não pode decidir o login
+ * (`src/api/login-throttle.ts`).
+ */
+export const signInRequestSchema = loginSchema.extend({
+  callbackURL: z.string().max(2048).optional(),
+  rememberMe: z.boolean().optional(),
+});
+
 export const signupSchema = z.object({
   name: z.string().trim().min(1, "Informe seu nome.").max(120, "Nome muito longo."),
   email,

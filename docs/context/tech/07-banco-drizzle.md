@@ -30,6 +30,7 @@ portal_two_factor         o mesmo no portal, sem rotas abertas
 impersonation_grant       consentimento do owner: expires_at, revoked_at, used_by (RLS)
 tenant_payment_credential encrypted_secret bytea, key_version, sem tela (RLS)
 rate_limit_bucket         key em hash, window_start, count (RATE_LIMIT_STORE=postgres)
+login_throttle            falhas de login por e-mail (HMAC), janela e locked_until (LOGIN_*; sem RLS)
 session                   token unique, user_id, expires_at, impersonated_by,
                           impersonation_expires_at, active_organization_id
 account                   provider_id = credential guarda a senha
