@@ -6,6 +6,7 @@ import { checkLimit } from "@/lib/billing/limits";
 import { computeTrialEnd, DAY_MS } from "@/lib/billing/trial";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
 import { setEmailProviderForTests } from "@/lib/email/send";
+import { portalPhoneGatePasses, teamPhoneGatePasses } from "@/lib/phone/gate";
 import {
   call,
   cleanUp,
@@ -594,6 +595,26 @@ describe("seed", () => {
       select limits from plan where slug = 'free'
     `;
     expect(freePlan?.limits.organizations).toBe(1);
+  });
+
+  it("ninguém do seed fica trancado pelo portão de telefone (T3)", async () => {
+    await runSeed("Senha-do-seed-123");
+
+    for (const { email } of Object.values(SEED_USERS)) {
+      const [account] = await owner<{ id: string }[]>`select id from "user" where email = ${email}`;
+      const tenants = await owner<{ organization_id: string }[]>`
+        select organization_id from member where user_id = ${account?.id as string}
+      `;
+      for (const tenantId of [null, ...tenants.map(({ organization_id }) => organization_id)]) {
+        expect(await teamPhoneGatePasses(account?.id as string, tenantId), email).toBe(true);
+      }
+    }
+
+    for (const { email } of Object.values(SEED_CUSTOMERS)) {
+      const [person] = await owner<{ id: string }[]>`select id from portal_user where email = ${email}`;
+      if (!person) continue; // o lead só ganha conta no portal quando o owner convida
+      expect(await portalPhoneGatePasses(person.id, null), email).toBe(true);
+    }
   });
 
   it("não promove conta que outra pessoa cadastrou sem confirmar o e-mail", async () => {

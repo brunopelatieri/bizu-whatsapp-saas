@@ -6,6 +6,12 @@ import { AUTH_COOKIE_PREFIX } from "@/lib/auth/constants";
 import { getAuth } from "@/lib/auth/server";
 import { impersonationExpired } from "@/lib/auth/sessions";
 import { getEnv } from "@/lib/env";
+import { teamPhoneGatePasses } from "@/lib/phone/gate";
+import {
+  PHONE_UNVERIFIED,
+  phoneVerificationRequired,
+  teamPhonePendingAllowed,
+} from "@/api/phone-gate";
 import { type AuthUser, type PlatformRole, toAuthUser } from "@/lib/auth/types";
 
 export type AuthSession = { id: string; expiresAt: Date };
@@ -54,14 +60,30 @@ export const resolveSession: ResolveSession = async (headers) => {
 };
 
 /**
- * Exige sessão válida e, com `EMAIL_VERIFICATION_REQUIRED`, e-mail verificado. O gate do `ProtectedRoute` roda no cliente
- * e não protege dados: toda rota privada da API deve usar este middleware.
- * Falha fechada: se o Auth estiver indisponível, a rota não abre.
+ * O telefone da conta vale para esta sessão? `true` segue. Só é chamado com
+ * `PHONE_VERIFICATION_REQUIRED=true` e fora da lista do que passa (`src/api/phone-gate.ts`).
+ */
+export type PhoneGate = (user: AuthUser, activeOrganizationId: string | null) => Promise<boolean>;
+
+/** O padrão: desligado pela variável, ou o predicado da T3 (`src/lib/phone/gate.ts`). */
+export const defaultPhoneGate: PhoneGate = async (user, activeOrganizationId) =>
+  !phoneVerificationRequired() || teamPhoneGatePasses(user.id, activeOrganizationId);
+
+/**
+ * Exige sessão válida e, com `EMAIL_VERIFICATION_REQUIRED`, e-mail verificado; depois, com
+ * `PHONE_VERIFICATION_REQUIRED`, telefone que vale na organização ativa. O gate do `ProtectedRoute`
+ * roda no cliente e não protege dados: toda rota privada da API deve usar este middleware.
+ *
+ * Ordem das recusas: 401 sem cookie; 503 com o Auth fora; 401 sessão inválida; 403
+ * `EMAIL_NOT_VERIFIED`; 403 `PHONE_UNVERIFIED`. O e-mail vem antes: quem não provou o e-mail não
+ * chega a saber nada do telefone, e nem as rotas que confirmam o telefone abrem sem ele.
+ * Falha fechada: se o Auth ou o banco estiverem indisponíveis, a rota não abre.
  */
 export function createRequireAuth(
   resolve: ResolveSession,
   /** `EMAIL_VERIFICATION_REQUIRED`, lido a cada requisição (os testes trocam). */
   verificationRequired: () => boolean = () => getEnv().EMAIL_VERIFICATION_REQUIRED,
+  phoneGate: PhoneGate = defaultPhoneGate,
 ) {
   return createMiddleware<AuthEnv>(async (c, next) => {
     const { headers } = c.req.raw;
@@ -91,9 +113,26 @@ export function createRequireAuth(
       );
     }
 
+    const activeOrganizationId = resolved.activeOrganizationId ?? null;
+
+    // A sessão personificada responde pelo telefone da conta personificada: o suporte vê a mesma
+    // tela que ela, e não confirma nem reenvia nada (`blockWhileImpersonating`).
+    if (!teamPhonePendingAllowed(c)) {
+      let passes: boolean;
+
+      try {
+        passes = await phoneGate(resolved.user, activeOrganizationId);
+      } catch (error) {
+        logError("Falha ao conferir o telefone da conta", error);
+        return c.json({ error: "Autenticação indisponível." }, 503);
+      }
+
+      if (!passes) return c.json(PHONE_UNVERIFIED, 403);
+    }
+
     c.set("user", resolved.user);
     c.set("session", resolved.session);
-    c.set("activeOrganizationId", resolved.activeOrganizationId ?? null);
+    c.set("activeOrganizationId", activeOrganizationId);
 
     const { impersonatedBy } = resolved.user;
 

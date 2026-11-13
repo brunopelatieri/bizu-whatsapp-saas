@@ -151,6 +151,13 @@ grava na requisição leva `impersonator_id`, sem cada rota lembrar disso.
 `POST /api/admin/stop-impersonating` fica fora de `adminRoutes`: quem sai está na sessão da pessoa
 personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota quando há personificação.
 
+**Telefone pendente (T3):** com `PHONE_VERIFICATION_REQUIRED=true`, a sessão personificada responde pelo
+telefone da conta personificada: se ele não vale na organização do consentimento, o suporte recebe 403
+`PHONE_UNVERIFIED` como ela e vê "Confirme seu WhatsApp", sem poder confirmar nem reenviar
+(`blockWhileImpersonating`). `stop-impersonating` está na lista do que passa (`src/api/phone-gate.ts`):
+sem isso, o suporte ficaria preso na sessão. Isentar a personificação abriria dados da organização sob
+uma conta que ela ainda não liberou (decisão T3-4 da SPEC `pre-producao`, a confirmar).
+
 ## Caixa de entrada
 
 - **Visibilidade por pessoa** (o RLS isola tenant, não pessoa): `visibleConversation`

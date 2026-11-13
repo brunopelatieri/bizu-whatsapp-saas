@@ -159,6 +159,10 @@ export const envSchema = z
       z.coerce.number().int().min(1).max(1440).default(15),
     ),
 
+    // Ligada (padrão, D-2), a conta com telefone pendente só vê "Confirme seu WhatsApp": a API
+    // responde 403 `PHONE_UNVERIFIED` a tudo, menos ao que confirma o número (`src/api/phone-gate.ts`).
+    // Desligada, a pessoa entra com um aviso, e o vínculo automático da conversa espera a confirmação.
+    PHONE_VERIFICATION_REQUIRED: booleanString(true),
     // Minutos de validade do link de verificação de telefone (`src/lib/phone/requests.ts`).
     PHONE_VERIFICATION_TTL_MINUTES: z.preprocess(
       emptyToUndefined,

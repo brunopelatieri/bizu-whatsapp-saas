@@ -21,6 +21,7 @@ import {
 } from "@/lib/constants/admin-nav";
 import { ConsentGate } from "@/components/app/consent-gate";
 import { InboxEvents } from "@/components/inbox/use-inbox-events";
+import { TeamPhonePendingBanner } from "@/components/phone/phone-verification-panel";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -95,6 +96,7 @@ export function AdminLayout() {
           title={adminTitleFromPath(pathname)}
           subtitle="Administração da plataforma"
         />
+        <TeamPhonePendingBanner />
         {/* O atendimento ocupa a altura toda e rola por dentro; as demais telas rolam aqui. */}
         <main
           className={cn(

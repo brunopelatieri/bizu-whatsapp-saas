@@ -55,7 +55,10 @@ Autenticacao:
 - `requireAuth` (`src/api/auth.ts`) le o cookie de sessao do Better Auth, consulta a
   sessao no banco e coloca `user`, `session` e `activeOrganizationId` no contexto.
 - Sem cookie ou com sessao invalida: 401. E-mail nao verificado: 403
-  `EMAIL_NOT_VERIFIED`. Auth indisponivel: 503.
+  `EMAIL_NOT_VERIFIED`. Auth indisponivel: 503. Depois do e-mail, com
+  `PHONE_VERIFICATION_REQUIRED=true`, telefone que nao vale na organizacao ativa: 403
+  `PHONE_UNVERIFIED`, menos na lista fechada de `src/api/phone-gate.ts` (`requirePortalAuth` faz o
+  mesmo com a ficha de cliente). Rota nova fica bloqueada sem marcacao (`tech/08-auth.md`).
 - `requirePlatform()` vem depois de `requireAuth` e recusa com 403 `PLATFORM_FORBIDDEN` quem nao e da plataforma; `requirePlatform(["platform_owner"])` restringe as escritas de `/api/admin/*`. Em producao, sem 2FA responde 403 `PLATFORM_2FA_REQUIRED`.
 - Rota de tenant: `requireAuth` + `requireTenant` + `requirePermission(recurso, acao)`
   (`src/api/permissions.ts`). Regras e tabela de rotas em `tech/21-tenant-rbac.md`.

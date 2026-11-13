@@ -204,7 +204,7 @@ function PasswordForm({ org, next }: { org: string | null; next: string }) {
 }
 
 export function PortalLoginPage() {
-  const { user, loading } = usePortalAuth();
+  const { user, loading, phoneBlocked } = usePortalAuth();
   const [searchParams] = useSearchParams();
   const [usePassword, setUsePassword] = useState(false);
   // Só depois de montar: no servidor não há `localStorage`.
@@ -229,7 +229,8 @@ export function PortalLoginPage() {
   });
 
   if (loading) return <AuthSpinner />;
-  if (user) return <Navigate to={next} replace />;
+  // Com o telefone pendente há sessão, mas `/api/portal/me` responde 403: segue igual.
+  if (user || phoneBlocked) return <Navigate to={next} replace />;
 
   const known = tenant.data?.tenant;
   const showPassword = usePassword || !org;

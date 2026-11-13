@@ -72,6 +72,8 @@ import {
   portalTokenSubject,
 } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import { portalPhoneGatePasses } from "@/lib/phone/gate";
+import { phoneVerificationRequired } from "@/api/phone-gate";
 
 /**
  * O que o portal expõe do Better Auth, além do login por senha (`sign-in/email`, com rota
@@ -324,6 +326,9 @@ portalRoutes.get("/api/portal/me", authRateLimit, requirePortalAuth, async (c) =
       available,
     })),
     active: active && { id: active.id, slug: active.slug, name: active.name },
+    // Só chega `true` com `PHONE_VERIFICATION_REQUIRED=false` (ligada, é 403 antes): o aviso.
+    phonePending:
+      !phoneVerificationRequired() && !(await portalPhoneGatePasses(id, active?.id ?? null)),
   });
 });
 
@@ -396,7 +401,7 @@ portalRoutes.get(
       pending: first
         ? { status: first.view.status, phoneHint: first.phoneHint }
         : null,
-      responsibles: records.map(({ view, phoneHint }) => ({ ...view, phoneHint })),
+      responsibles: records.map(({ view, phoneHint, enterable }) => ({ ...view, phoneHint, enterable })),
     });
   },
 );

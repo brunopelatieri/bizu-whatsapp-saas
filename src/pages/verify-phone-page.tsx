@@ -148,7 +148,7 @@ export function VerifyPhonePage() {
 
 /** `/portal/verificar-telefone`: a ficha de cliente, na sessão do portal (lead ou cliente). */
 export function PortalVerifyPhonePage() {
-  const { user, loading, signOut } = usePortalAuth();
+  const { user, loading, signOut, phoneBlocked } = usePortalAuth();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
 
@@ -157,7 +157,8 @@ export function PortalVerifyPhonePage() {
   }
   if (loading) return <AuthSpinner />;
   const loginPath = `/portal/login?next=${encodeURIComponent(withToken(PORTAL_PATH, token))}`;
-  if (!user) return <Navigate to={loginPath} replace />;
+  // Com o telefone pendente, `/api/portal/me` responde 403 e `user` fica vazio, mas a sessão existe.
+  if (!user && !phoneBlocked) return <Navigate to={loginPath} replace />;
 
   return (
     <ConfirmPhone

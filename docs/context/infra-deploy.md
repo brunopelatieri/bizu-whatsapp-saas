@@ -68,6 +68,9 @@ Somente listados; nenhum foi resolvido aqui.
 - **CSP:** `CSP_REPORT_ONLY=true` só relata. Valide nas telas reais e mude para `false`.
 - **Verificação de e-mail:** `EMAIL_VERIFICATION_REQUIRED=false` (padrão) deixa o cadastro entrar
   direto; ligue com `true` se o produto precisar provar a posse do e-mail (`tech/08-auth.md`).
+- **Verificação de telefone:** `PHONE_VERIFICATION_REQUIRED=true` (padrão) deixa a conta com o
+  WhatsApp pendente só na tela de confirmação. Promova o primeiro proprietário com o telefone
+  confirmado (`tech/08-auth.md`, "Primeiro proprietário").
 - **Dependências:** alertas moderados restantes; veja RISK-004 no mesmo arquivo.
 - **Autenticação:** Better Auth com sessão em cookie. Em produção, `APP_URL` com HTTPS, `BETTER_AUTH_SECRET` gerado e `TRUSTED_PROXY_HOPS=1`; sem isso, os limites por IP contam o proxy.
 - **Migrations:** o runtime não inclui `drizzle-kit` nem `drizzle/`; o serviço `migrate` do compose usa o

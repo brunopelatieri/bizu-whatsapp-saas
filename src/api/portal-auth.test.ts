@@ -5,6 +5,7 @@ import {
   createRequirePortalAuth,
   type PortalAuthEnv,
   type PortalBarrier,
+  type PortalPhoneGate,
   type ResolvedPortalSession,
   type ResolvePortalSession,
 } from "@/api/portal-auth";
@@ -34,7 +35,7 @@ function resolved(emailVerified = true): ResolvedPortalSession {
 function get(resolve: ResolvePortalSession, cookie?: string, barred?: PortalBarrier) {
   const app = new Hono<PortalAuthEnv>();
 
-  app.get("/private", createRequirePortalAuth(resolve, barred), (c) =>
+  app.get("/private", createRequirePortalAuth(resolve, barred, async () => true), (c) =>
     c.json({ id: c.get("portalUser").id }),
   );
 
@@ -105,6 +106,50 @@ describe("requirePortalAuth: exclusão pela plataforma", () => {
     });
 
     expect((await get(resolve, PORTAL_COOKIE, barred)).status).toBe(503);
+  });
+});
+
+describe("requirePortalAuth: telefone pendente (T3)", () => {
+  function app(gate: PortalPhoneGate, emailVerified = true) {
+    const routes = new Hono<PortalAuthEnv>();
+    const guard = createRequirePortalAuth(async () => resolved(emailVerified), undefined, gate);
+    routes.get("/api/portal/customer", guard, (c) => c.json({ ok: true }));
+    routes.get("/api/portal/me/phone-verification", guard, (c) => c.json({ ok: true }));
+    routes.patch("/api/portal/me", guard, (c) => c.json({ ok: true }));
+    return routes;
+  }
+
+  const call = (routes: Hono<PortalAuthEnv>, path: string, method = "GET") =>
+    routes.request(path, { method, headers: { Cookie: PORTAL_COOKIE } });
+
+  it("ficha pendente: 403 PHONE_UNVERIFIED, menos no que confirma ou corrige o número", async () => {
+    const gate = vi.fn<PortalPhoneGate>(async () => false);
+    const routes = app(gate);
+    const blocked = await call(routes, "/api/portal/customer");
+
+    expect(blocked.status).toBe(403);
+    expect(await blocked.json()).toMatchObject({ code: "PHONE_UNVERIFIED" });
+    expect((await call(routes, "/api/portal/me/phone-verification")).status).toBe(200);
+    expect((await call(routes, "/api/portal/me", "PATCH")).status).toBe(200);
+    expect(gate).toHaveBeenCalledOnce();
+  });
+
+  it("o e-mail vem antes do telefone", async () => {
+    const gate = vi.fn<PortalPhoneGate>(async () => false);
+    const response = await call(app(gate, false), "/api/portal/customer");
+
+    expect(await response.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
+    expect(gate).not.toHaveBeenCalled();
+  });
+
+  it("falha ao conferir o telefone é fechada (503)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const routes = app(async () => {
+      throw new Error("banco fora do ar");
+    });
+
+    expect((await call(routes, "/api/portal/customer")).status).toBe(503);
+    spy.mockRestore();
   });
 });
 

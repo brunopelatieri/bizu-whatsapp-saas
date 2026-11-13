@@ -27,6 +27,10 @@ export default defineConfig({
       // Os testes de auth cobrem o fluxo com verificação; `auth-no-verification.test.ts`
       // troca para o padrão do template (desligada).
       EMAIL_VERIFICATION_REQUIRED: "true",
+      // O contrário do padrão (D-2, `true`): os outros arquivos criam contas com o telefone
+      // pendente para conferir outras regras (pedidos, envio, unicidade, vínculo). O portão é
+      // conferido em `tests/db/phone-gate.test.ts`, que liga a variável e percorre todas as rotas.
+      PHONE_VERIFICATION_REQUIRED: "false",
     },
     // Testes compartilham um banco: nada de paralelismo entre arquivos.
     fileParallelism: false,

@@ -253,8 +253,12 @@ cadastro, reenvio e reset nunca revelam se um e-mail existe.
 Sem o seed, promova sua conta a proprietário da plataforma:
 
 ```sql
-update "user" set role = 'platform_owner' where email = 'voce@empresa.com';
+update "user" set role = 'platform_owner', phone_verified_at = now(), phone_verified_via = 'manual'
+where email = 'voce@empresa.com';
 ```
+
+O telefone vai confirmado junto: com `PHONE_VERIFICATION_REQUIRED=true` (padrão), a conta com o
+WhatsApp pendente só vê a tela "Confirme seu WhatsApp".
 
 ---
 
@@ -403,10 +407,11 @@ portas 80 e 443 livres):
    confirme o e-mail e promova a conta:
 
    ```bash
-   bizu exec postgres psql -U postgres -d bizu -c "update \"user\" set role = 'platform_owner' where email = 'voce@empresa.com';"
+   bizu exec postgres psql -U postgres -d bizu -c "update \"user\" set role = 'platform_owner', phone_verified_at = now(), phone_verified_via = 'manual' where email = 'voce@empresa.com';"
    ```
 
-   Entre, ative o 2FA e abra `/admin`.
+   O comando também confirma o telefone da conta: sem isso, com `PHONE_VERIFICATION_REQUIRED=true`
+   (padrão), ninguém liberaria o primeiro proprietário. Entre, ative o 2FA e abra `/admin`.
 
 **Operação:**
 
@@ -449,6 +454,7 @@ Variáveis, topologia e riscos: [`docs/context/infra-deploy.md`](docs/context/in
 | `TRUSTED_PROXY_HOPS` | Proxies na frente do app; `1` atrás do Caddy |
 | `RATE_LIMIT_STORE` | `memory` em dev; `postgres` é obrigatório em produção |
 | `LOGIN_LOCKOUT_SCOPE`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_ATTEMPT_WINDOW_MINUTES`, `LOGIN_LOCKOUT_MINUTES` | Bloqueio de login por tentativas: escopo (`email`, `email_ip` ou `off`), falhas até bloquear, janela e duração em minutos |
+| `PHONE_VERIFICATION_REQUIRED` | `true` (padrão): a conta com WhatsApp pendente só vê "Confirme seu WhatsApp" (403 `PHONE_UNVERIFIED` na API); `false`: entra com um aviso |
 | `PHONE_VERIFICATION_TTL_MINUTES` | Validade, em minutos, do link de verificação de telefone (padrão 30) |
 | `PHONE_VERIFICATION_CHANNELS` | Ordem dos tipos de canal que enviam o link de verificação (`whatsapp_cloud,whatsapp_qr`); vazio: todo pedido espera a liberação à mão |
 | `CSP_REPORT_ONLY` | `true` só relata violações; `false` bloqueia |

@@ -9,7 +9,8 @@ import {
   sameOrigin,
   validationError,
 } from "@/api/guards";
-import { resolveSession } from "@/api/auth";
+import { defaultPhoneGate, resolveSession } from "@/api/auth";
+import { PHONE_UNVERIFIED } from "@/api/phone-gate";
 import { refuseImpersonated } from "@/api/impersonation";
 import { logError } from "@/api/log";
 import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
@@ -148,7 +149,33 @@ const closedWhileImpersonating = createMiddleware(async (c, next) => {
   });
 });
 
+/**
+ * As leituras do plugin admin (`list-users`, `get-user`, `list-user-sessions`) servem dados de
+ * outras pessoas à equipe da plataforma e não passam por `requireAuth`: o portão de telefone (T3)
+ * vale aqui também. O resto de `/api/auth/*` é a própria conta (sessão, senha, e-mail, 2FA, sair) e
+ * fica aberto: é por aí que a pessoa pendente sai ou cuida da própria segurança.
+ */
+const phoneGateOnAdminReads = createMiddleware(async (c, next) => {
+  if (!c.req.raw.headers.has("Cookie")) return next();
+
+  try {
+    const resolved = await resolveSession(c.req.raw.headers);
+    if (
+      resolved &&
+      !(await defaultPhoneGate(resolved.user, resolved.activeOrganizationId ?? null))
+    ) {
+      return c.json(PHONE_UNVERIFIED, 403);
+    }
+  } catch (error) {
+    logError("Falha ao validar sessão", error);
+    return c.json({ error: "Autenticação indisponível." }, 503);
+  }
+
+  return next();
+});
+
 authRoutes.use("/api/auth/*", jsonBodyLimit, sameOrigin, closedWhileImpersonating);
+authRoutes.use("/api/auth/admin/*", phoneGateOnAdminReads);
 authRoutes.use("/api/auth-ext/*", jsonBodyLimit, sameOrigin);
 
 authRoutes.post(

@@ -1,6 +1,6 @@
 import { isNotNull, or, type SQL, sql } from "drizzle-orm";
 import type { Scope } from "@/db/rls";
-import { user } from "@/db/schema";
+import { customer, user } from "@/db/schema";
 
 /**
  * "O telefone desta conta está confirmado?" depende de quem pergunta.
@@ -34,6 +34,13 @@ export const userPhoneVouchedBy = (tenantId: string): SQL =>
 /** Confirmado para esta organização: no sistema inteiro, ou liberado pelo owner dela. */
 export const userPhoneConfirmedIn = (tenantId: string): SQL =>
   or(userPhoneConfirmedGlobally, userPhoneVouchedBy(tenantId)) as SQL;
+
+/**
+ * A ficha de cliente está confirmada, de qualquer forma (`whatsapp`, `manual`, `team`, `inbound`).
+ * É a pergunta do portão do portal (T3): a ficha já é da organização, e o que ela aceitou vale
+ * para ela. Quem atrai conversa é outra pergunta (`AUTO_LINK_CUSTOMER_VIAS`, sem `manual`).
+ */
+export const customerPhoneConfirmed: SQL = isNotNull(customer.phoneVerifiedAt);
 
 /** O predicado do escopo: a organização, ou a plataforma (só o que vale no sistema inteiro). */
 export const userPhoneConfirmed = (scope: Scope): SQL =>

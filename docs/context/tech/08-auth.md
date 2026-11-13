@@ -33,6 +33,7 @@ pelo outro. 2FA, sessões e personificação estão em `tech/26-seguranca.md`. A
 | `POST /api/auth-ext/resend-verification` | `auth-ext.ts` | `{ ok: true }`; 3 por 15 min por IP, 3 por hora por e-mail |
 | `POST /api/auth-ext/forgot-password` | `auth-ext.ts` | `{ ok: true }`; 3 por 15 min por IP |
 | `/api/auth/organization/*` | `auth-ext.ts` | 404: as regras de tenant ficam nas rotas próprias; use `auth.api.*` |
+| `/api/auth/admin/*` (leituras) | Better Auth + `phoneGateOnAdminReads` | dados de outras pessoas: com `PHONE_VERIFICATION_REQUIRED`, 403 `PHONE_UNVERIFIED` como em `requireAuth` |
 | `/api/auth/two-factor/*` | Better Auth | `enable`, `disable`, `get-totp-uri`, `verify-totp`, `verify-backup-code`, `generate-backup-codes` |
 | demais `/api/auth/*` | Better Auth | `sign-in/email`, `sign-out`, `reset-password`, `change-email`, `get-session`, leituras de `admin/*` |
 
@@ -168,7 +169,10 @@ senha**, que é o que um cadastro nunca confirmado tem.
 - Cookies `bizu.session_token` e `bizu.session_data`: `HttpOnly`, `SameSite=Lax`, e
   `Secure` com prefixo `__Secure-` em produção.
 - `requireAuth` responde 401 sem cookie, sem consultar nada; 401 com sessão inválida; 503
-  se o Auth falhar; 403 sem e-mail verificado, com `EMAIL_VERIFICATION_REQUIRED=true`.
+  se o Auth falhar; 403 sem e-mail verificado, com `EMAIL_VERIFICATION_REQUIRED=true`; e, por
+  último, 403 `PHONE_UNVERIFIED` com `PHONE_VERIFICATION_REQUIRED=true` e o telefone sem valer na
+  organização ativa (seção "Telefone da conta"). O e-mail vem antes, inclusive nas rotas que
+  confirmam o telefone. Falha ao conferir o telefone: 503.
 - `requireAuth` lê a sessão com `disableCookieCache`: sessão revogada cai na hora. O cache
   de 5 min do cookie vale só para `/get-session`, que alimenta a interface.
 - `apiFetch`, ao receber 401 em `/app`, encerra a sessão antes de ir ao login. Sem isso o
@@ -217,6 +221,17 @@ Os hooks de cadastro e de aceite de convite, depois de abrir o pedido, só **enf
 (`src/lib/phone/dispatch.ts`): o módulo não importa canal nenhum, para o registro de canais não
 entrar no ciclo de imports da autenticação. Envio e reenvio: "Envio do link e página de
 confirmação" em `tech/28-crm-cadastro.md`.
+
+**Bloqueio enquanto pendente (T3, `PHONE_VERIFICATION_REQUIRED`, padrão `true`):** a sessão existe
+(reenviar e confirmar exigem saber quem é), mas `requireAuth` responde 403 `PHONE_UNVERIFIED` a tudo,
+menos à lista fechada de `src/api/phone-gate.ts`: ler o próprio estado, reenviar, confirmar, trocar a
+organização ativa, aceitar convite e encerrar a personificação. Sair (`/api/auth/sign-out`) é do
+Better Auth e não passa por `requireAuth`. O predicado (`src/lib/phone/gate.ts`) é o da T2a: a conta
+confirmada no sistema passa em tudo; o membro comum passa também na organização **ativa** que o
+liberou; owner e equipe da plataforma só com a confirmação do sistema. A sessão personificada
+responde pelo telefone da conta personificada. `ProtectedRoute` mostra só "Confirme seu WhatsApp".
+Desligada, `/api/me` traz `phonePending` e as áreas mostram um aviso. Detalhe, decisões a confirmar e
+limites: `tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".
 
 ## Bloqueio de login por tentativas
 
@@ -279,16 +294,27 @@ separados (`realm` `team` e `portal`).
 ## Primeiro proprietário
 
 `npm run db:seed` cria `owner@bizu.local` (`platform_owner`) e `suporte@bizu.local`
-(`platform_support`), com a senha de `SEED_PASSWORD`. Sem o seed (ou em produção), cadastre-se em
-`/cadastro`, confirme e promova pelo banco:
+(`platform_support`), com a senha de `SEED_PASSWORD` e o telefone já confirmado. Sem o seed (ou em
+produção), cadastre-se em `/cadastro`, confirme e promova pelo banco, **confirmando o telefone junto**:
+com `PHONE_VERIFICATION_REQUIRED=true`, o primeiro proprietário não teria quem o liberasse nem canal
+da plataforma configurado, e ficaria na tela "Confirme seu WhatsApp".
 
 ```sql
-update "user" set role = 'platform_owner' where email = 'voce@empresa.com';
+update "user" set role = 'platform_owner', phone_verified_at = now(), phone_verified_via = 'manual'
+where email = 'voce@empresa.com';
 ```
+
+Quem roda o comando tem o banco; a confirmação é dele. O pedido aberto do cadastro é encerrado pelo
+`maintenance.prune`.
 
 ## Regras
 
 - `ProtectedRoute` faz o gate no cliente e não protege dados.
+- Telefone pendente (`PHONE_VERIFICATION_REQUIRED`): o portão é de `requireAuth` e
+  `requirePortalAuth`; rota nova fica bloqueada sem marcação. Pôr rota em
+  `TEAM_PHONE_PENDING_ALLOWED` ou `PORTAL_PHONE_PENDING_ALLOWED` (`src/api/phone-gate.ts`) só para
+  confirmar o telefone ou sair, com motivo; rota pública nova entra na lista `PUBLIC` de
+  `tests/db/phone-gate.test.ts`.
 - Toda rota privada usa `authRateLimit` e `requireAuth`.
 - Falha fechada: Auth indisponível não abre rota.
 - Respostas de cadastro, login sem verificação, reenvio, reset e troca de e-mail não revelam se o e-mail existe.

@@ -56,6 +56,22 @@ async function leaveExpiredSession() {
   );
 }
 
+/**
+ * O servidor recusou a sessão pelo telefone (403 `PHONE_UNVERIFIED`, T3): os providers relêem
+ * `/api/me` (ou `/api/portal/me`) e a área autenticada passa a mostrar só "Confirme seu WhatsApp".
+ * O bloqueio é do servidor; o evento só faz a tela acompanhar.
+ */
+export const PHONE_UNVERIFIED_EVENT = "bizu:phone-unverified";
+
+function announcePhoneUnverified(path: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(PHONE_UNVERIFIED_EVENT, {
+      detail: { area: path.startsWith("/api/portal/") ? "portal" : "team" },
+    }),
+  );
+}
+
 /** O corpo do erro sem `error` e `code`: o que a regra de negócio anexou. */
 function extraDetails(body: unknown): Record<string, unknown> {
   if (!body || typeof body !== "object") return {};
@@ -80,6 +96,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     if (response.status === 401) await leaveExpiredSession();
+    if (response.status === 403 && body?.code === "PHONE_UNVERIFIED") announcePhoneUnverified(path);
 
     throw new ApiError(
       body?.error ?? "Não foi possível concluir a solicitação.",

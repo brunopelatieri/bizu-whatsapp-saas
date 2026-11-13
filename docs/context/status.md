@@ -42,7 +42,12 @@
   página `/verificar-telefone`, confirmação do lead do portal, e-mails ao responsável e a quem
   perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficaram de fora da T2b
   e estão pendentes: a troca de telefone com pedido (`…/phone-change`) e o `claim` do portal (D-1).
-  Próxima fase: T3 (bloqueio de acesso com telefone pendente). Os blocos S, B, T, F, E, L e R
+  **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
+  `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
+  tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
+  promoção do primeiro proprietário com o telefone confirmado), com as decisões T3-1 a T3-9 a
+  confirmar pelo proprietário (SPEC, "T3: o que foi feito"). Próxima fase: T4 (telas das filas e
+  do modelo). Os blocos S, B, T, F, E, L e R
   seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09

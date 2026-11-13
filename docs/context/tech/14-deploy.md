@@ -81,9 +81,10 @@ login e cadastro quebrados. Banco à frente do build é normal (as migrations v�
 fora do ar ou sem permissão não encerra nada: o erro vai para o log e `/api/ready` responde 503 com
 `schema: false`.
 
-Um primeiro proprietário nasce por cadastro e
-`update "user" set role = 'platform_owner'` (o seed é recusado em produção); o 2FA dele é obrigatório,
-senão `/admin` responde 403.
+Um primeiro proprietário nasce por cadastro e pelo comando de `tech/08-auth.md` ("Primeiro
+proprietário"), que dá o papel **e confirma o telefone** (o seed é recusado em produção). Sem o
+telefone confirmado, com `PHONE_VERIFICATION_REQUIRED=true` (padrão), ele só veria "Confirme seu
+WhatsApp" e não haveria quem o liberasse. O 2FA dele é obrigatório, senão `/admin` responde 403.
 
 **Portainer:** Stacks > Add stack > **Repository** (o build precisa do repositório; o Web editor não
 serve), "Compose path" `docker/compose.prod.yml`, variáveis em "Environment variables" (perfis por
@@ -145,7 +146,9 @@ Runtime (a lista completa está em `.env.example`; a validação, em `src/lib/en
 - `EMAIL_VERIFICATION_REQUIRED`: `false` (padrão) o cadastro entra direto; `true` exige o link
 - `LOG_LEVEL` (`info`), `SENTRY_DSN` (opcional), `STORAGE_PROVIDER` (`local` ou `s3`),
   `STORAGE_LOCAL_DIR`, `S3_*`, `MAX_UPLOAD_MB`, `PAYMENT_PROVIDERS` (vazio = sem cobrança)
-- Verificação de telefone: `PHONE_VERIFICATION_TTL_MINUTES` (opcional, padrão 30: validade do link) e `PHONE_VERIFICATION_CHANNELS` (ordem dos tipos de canal que enviam o link, ex.: `whatsapp_cloud,whatsapp_qr`; vazio = todo pedido espera a liberação à mão). O job `phone.verify` precisa de um consumidor da fila (`JOBS_MODE=inline` ou o worker)
+- Verificação de telefone: `PHONE_VERIFICATION_REQUIRED` (opcional, padrão `true`: a conta com
+  WhatsApp pendente só vê "Confirme seu WhatsApp"; `false` deixa entrar com um aviso),
+  `PHONE_VERIFICATION_TTL_MINUTES` (opcional, padrão 30: validade do link) e `PHONE_VERIFICATION_CHANNELS` (ordem dos tipos de canal que enviam o link, ex.: `whatsapp_cloud,whatsapp_qr`; vazio = todo pedido espera a liberação à mão). O job `phone.verify` precisa de um consumidor da fila (`JOBS_MODE=inline` ou o worker)
 - Canais de mensagem: `CHANNEL_PROVIDERS` (vazio = sem WhatsApp), `CHANNEL_EVENT_RETENTION_DAYS` (opcional, padrão 30: dias que o aviso de canal tratado, com telefone e texto, fica guardado) e, com `whatsapp_qr`, `EVOLUTION_API_URL` e `EVOLUTION_GLOBAL_API_KEY` (obrigatórias; a chave de exemplo `change-me*` é recusada em produção), mais `EVOLUTION_WEBHOOK_PUBLIC_URL` (também é a base do endereço de 5 min do anexo de saída, `GET /api/inbox/media-out/:token`: o servidor Evolution precisa alcançá-lo), `EVOLUTION_INSTANCE_PREFIX`, `EVOLUTION_MAX_INSTANCES_TOTAL`, `EVOLUTION_MEDIA_ORIGINS` e os dois timeouts. A Cloud API não tem variável (credenciais por canal)
 - Pagamentos: só `STRIPE_*` (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`), obrigatórias com `stripe` em `PAYMENT_PROVIDERS`. Variáveis de outros provedores entram junto com o módulo em `src/lib/payments/providers/<id>/`
 

@@ -2,7 +2,7 @@
 
 - **Escopo:** Clientes e leads do tenant: `customer`, instância `portalAuth`, magic link, `/app/clientes` e `/portal/**`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-auth.md`, `spec-dados.md`, `spec-tenant-rbac.md`, `spec-rotas-api.md`, `spec-seguranca.md`
-- **Paths do código:** `src/lib/auth/portal.ts`, `src/lib/auth/portal-client.ts`, `src/lib/auth/portal-emails.ts`, `src/lib/portal/`, `src/lib/tenant/customers.ts`, `src/lib/tenant/customer-constants.ts`, `src/lib/schemas/{customer,portal}.ts`, `src/api/{portal,portal-auth,customers}.ts`, `src/db/schema/{portal-auth,customer}.ts`, `src/providers/portal-auth-provider.tsx`, `src/components/portal/`, `src/components/app/customers/`, `src/pages/portal/`, `src/pages/customer*-page.tsx`, `src/routes/portal/`, `src/lib/constants/portal-nav.ts`, `tests/db/{portal-auth,portal-isolation,customers}.test.ts`
+- **Paths do código:** `src/lib/auth/portal.ts`, `src/lib/auth/portal-client.ts`, `src/lib/auth/portal-emails.ts`, `src/lib/portal/`, `src/lib/tenant/customers.ts`, `src/lib/tenant/customer-constants.ts`, `src/lib/schemas/{customer,portal}.ts`, `src/api/{portal,portal-auth,customers}.ts`, `src/db/schema/{portal-auth,customer}.ts`, `src/providers/portal-auth-provider.tsx`, `src/components/portal/`, `src/components/phone/`, `src/components/app/customers/`, `src/pages/portal/`, `src/pages/customer*-page.tsx`, `src/routes/portal/`, `src/lib/constants/portal-nav.ts`, `tests/db/{portal-auth,portal-isolation,customers}.test.ts`
 
 ## Modelo
 
@@ -55,11 +55,22 @@ internet.
 | `POST /api/portal/auth-ext/magic-link` | pública | `{ ok: true }` sempre; 3/15 min por IP, 3/h por e-mail |
 | `POST /api/portal/auth-ext/sign-up` | pública | `{ ok: true }` sempre; mesmos limites |
 | `POST /api/portal/auth-ext/set-password` | `requirePortalAuth` | define ou troca; derruba as outras sessões |
-| `GET /api/portal/me` | `requirePortalAuth` | `{ user, tenants, active }` |
-| `POST /api/portal/active-tenant` | `requirePortalAuth` | só tenant disponível; o resto é 404 |
-| `PATCH /api/portal/me` | `requirePortalTenant` | atualiza a pessoa e o `customer` do tenant ativo |
+| `GET /api/portal/me` | `requirePortalAuth` | `{ user, tenants, active, consentRequired, phonePending }` |
+| `POST /api/portal/active-tenant` | `requirePortalAuth` | só tenant disponível; o resto é 404. Passa pelo portão de telefone |
+| `PATCH /api/portal/me` | `requirePortalTenant` | atualiza a pessoa e o `customer` do tenant ativo. Passa pelo portão de telefone (corrigir o número) |
 | `GET /api/portal/customer` | `requirePortalTenant` | dados do cliente, sem `notes`, etiquetas (`customer_tag`) nem campos adicionais (`custom_fields`) |
 | `/api/customers/*` | `requireTenant` + `customer:*` | ver `tech/06-hono-api.md` |
+
+**Telefone pendente (T3, `PHONE_VERIFICATION_REQUIRED=true`):** `requirePortalAuth` responde 403
+`PHONE_UNVERIFIED`, depois do `EMAIL_NOT_VERIFIED`, quando a ficha de cliente da organização em uso
+não está confirmada (`portalPhoneGatePasses`, `src/lib/phone/gate.ts`). Sem organização em uso, passa
+se alguma ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa. A
+conta (`portal_user`) nunca é avaliada: nenhuma organização a confirma. Passam pelo portão só
+`GET`/`POST …/me/phone-verification[/resend|/confirm]`, `PATCH /api/portal/me` e
+`POST /api/portal/active-tenant` (`src/api/phone-gate.ts`); sair é do Better Auth. `PortalLayout`
+mostra só "Confirme seu WhatsApp" (`PortalPhoneGate`), e o login, a escolha de organização e
+`/portal/verificar-telefone` lidam com a sessão sem `/api/portal/me`. Detalhe e decisões em
+`tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".
 
 ## Magic link
 

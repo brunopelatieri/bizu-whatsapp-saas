@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B e as fases T1, T2a e T2b do bloco T
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B e as fases T1, T2a, T2b e T3 do bloco T (a T3 com as decisões T3-1 a T3-9 a confirmar)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -347,6 +347,77 @@ antiga (D-1). Seguem também a T3 (bloqueio) e a T4 (telas, inclusive a do model
 do reenvio). O formato do modelo na Meta (botão de URL dinâmica e `index`) só foi testado com
 provedor falso: conferir no smoke com conta real antes de fechar a T2.
 
+### T3: o que foi feito (2026-11-13)
+
+Implementado como em "Bloqueio de acesso enquanto pendente (D-2)", com o detalhe em
+`docs/context/tech/28-crm-cadastro.md` ("Bloqueio de acesso com telefone pendente").
+
+- **`PHONE_VERIFICATION_REQUIRED`**, padrão `true` (o da SPEC), em `src/lib/env.ts`, `.env.example`,
+  `docker/.env.prod.example` e `docker/compose.prod.yml`. Lida a cada requisição.
+- **Portão no servidor:** `requireAuth` e `requirePortalAuth` respondem 403
+  `{ error, code: "PHONE_UNVERIFIED" }` depois da sessão e do e-mail. **Ordem das recusas:** 401 sem
+  cookie, 503 com o Auth fora, 401 sessão inválida, 403 `EMAIL_NOT_VERIFIED`, 403 `PHONE_UNVERIFIED`.
+  O e-mail vem antes também nas rotas que confirmam o telefone. Falha do banco ao conferir: 503.
+- **O que passa (lista fechada, `src/api/phone-gate.ts`, casada pelo método e pelo caminho da
+  requisição):** na equipe, `GET /api/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
+  `POST /api/tenant/active`, `POST /api/invitations/:id/accept` e `POST /api/admin/stop-impersonating`;
+  no portal, `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
+  `PATCH /api/portal/me` e `POST /api/portal/active-tenant`. Sair é `POST /api/auth/sign-out` e
+  `/api/portal/auth/sign-out`, do Better Auth, que não passa pelos middlewares.
+- **Fora dos dois middlewares:** as leituras do plugin admin do Better Auth (`/api/auth/admin/*`,
+  dados de outras pessoas) ganharam o mesmo portão; o resto de `/api/auth/*` (sessão, senha, e-mail,
+  2FA, sair) é da própria conta e fica aberto. SSE, arquivos, mídia e `/api/admin/*` já passam por
+  `requireAuth`. Rotas públicas (webhooks assinados, `media-out` por token, login e cadastro) não têm
+  sessão.
+- **Predicado** (`src/lib/phone/gate.ts`, sobre `confirmed.ts`): equipe passa com
+  `userPhoneConfirmedGlobally`, ou com `userPhoneConfirmedIn(organização ativa)` se é membro dela e
+  não é owner de organização nenhuma nem da equipe da plataforma. Portal: a ficha da organização em
+  uso (`customerPhoneConfirmed`, predicado novo em `confirmed.ts`), entre as fichas `lead` ou
+  `active` de organização ativa.
+- **Com `false`:** `/api/me` e `/api/portal/me` devolvem `phonePending` (o mesmo predicado), e as três
+  áreas mostram um aviso que abre o painel de confirmação. O vínculo automático continua exigindo o
+  telefone confirmado no escopo (já era assim; agora com teste). O link sai nos dois modos.
+- **Tela "Confirme seu WhatsApp"** (`src/components/phone/phone-verification-panel.tsx`): quando
+  `/api/me` (ou `/api/portal/me`) responde `PHONE_UNVERIFIED`, `ProtectedRoute` (`/app`, `/admin` e
+  o onboarding) e `PortalLayout` mostram só ela, com a situação por responsável de
+  `GET …/phone-verification`, "Reenviar o link" por responsável, "Usar esta organização" onde o número
+  já vale, a correção do número (portal), "Já confirmei" e "Sair". Qualquer chamada recusada com
+  `PHONE_UNVERIFIED` no meio da sessão faz os providers relerem a conta (`apiFetch` emite o evento).
+  Sem `loader`.
+- **Primeiro proprietário:** o seed já cria todos confirmados (`manual`); o comando de promoção pelo
+  banco (`tech/08-auth.md`, README, `tech/14-deploy.md`) passa a confirmar o telefone junto com o papel,
+  e o `maintenance.prune` encerra pedido aberto de conta já confirmada no sistema. Contas anteriores ao
+  bloco T foram marcadas `manual` pela `0035`.
+- **Testes:** `tests/db/phone-gate.test.ts` percorre `api.routes` (rota nova entra na conferência
+  sozinha; rota pública precisa ser classificada no teste) com uma conta da equipe e uma do portal
+  pendentes, confere que cada entrada da lista existe, o predicado, a personificação, o modo `false`
+  com o vínculo, a combinação com `EMAIL_VERIFICATION_REQUIRED` e o primeiro proprietário; o seed, em
+  `tests/db/billing.test.ts`. O resto do `test:db` roda com `PHONE_VERIFICATION_REQUIRED=false`
+  (`vitest.db.config.ts`): os outros arquivos criam contas pendentes para conferir outras regras.
+
+**Decisões da T3 a confirmar pelo proprietário** (escolhidas para não trancar ninguém sem saída e não
+abrir dado):
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| T3-1 | Aceitar convite com telefone pendente | **Passa:** é o aceite que torna a organização responsável pelo telefone (pedido dela, link pelos canais dela, liberação pelo owner). A resposta não traz dado da organização | Bloquear: o convidado só teria a fila da plataforma, que pela D-12 não libera membro comum |
+| T3-2 | Rota sem organização ativa (onboarding, criar organização) | Só vale a confirmação do sistema. Criar organização fica bloqueado: quem cria vira owner, e owner só passa com a confirmação do sistema (P16) | Deixar criar e trancar logo depois |
+| T3-3 | Membro de várias organizações, liberado em uma e pendente em outra | O portão é pela **organização ativa**; trocar de organização passa, e a tela oferece "Usar esta organização" onde o número já vale | Exigir todas, ou passar com qualquer uma |
+| T3-4 | Sessão personificada sobre conta pendente | O portão avalia a **conta personificada**: o suporte vê a mesma tela, não confirma nem reenvia (`blockWhileImpersonating`) e sai por `stop-impersonating`, que passa | Isentar a personificação (abriria dados da organização sob uma conta que ela ainda não liberou) |
+| T3-5 | Lead do portal sem ficha ativa | Sem organização em uso (ou sem ficha nela): passa se **alguma** ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa (nada a confirmar; `requirePortalTenant` segura os dados) | Trancar: o lead que já confirmou continuaria preso até virar cliente ativo |
+| T3-6 | Corrigir o número | Portal: `PATCH /api/portal/me`, a rota que já existe (exige ficha ativa: o lead não corrige sozinho). **Equipe: não há rota para a própria conta**; a tela manda falar com a plataforma, e o proprietário corrige em `/admin/usuarios/:id`. A troca pela própria pessoa é a de `…/phone-change` (fase própria) | Criar agora uma rota de troca da conta (é o contrato `phone-change`, fora do escopo) |
+| T3-7 | O que fica bloqueado com telefone pendente | Além dos dados: `GET /api/me`, sessões (`/api/me/sessions`), consentimento, exportação e exclusão de dados da conta (LGPD), `GET /api/me/invitations` e o `set-password` do portal. Fica aberto o Better Auth da própria conta (senha, 2FA, e-mail, sessão, sair) | Abrir a exclusão e a exportação da conta (direito do titular) sem o telefone |
+| T3-8 | Leituras do plugin admin do Better Auth | Ganham o portão (servem dados de outras pessoas e não passam por `requireAuth`) | Deixar como estão |
+| T3-9 | Contas sem telefone (anteriores ao A1, só em desenvolvimento) | Ficam na tela de confirmação até o proprietário cadastrar o número em `/admin` | Isentar quem não tem número |
+
+**Limites conhecidos da T3:** o fluxo SSE já aberto não é derrubado quando a confirmação cai no meio
+da sessão (o número muda de dono): segue até a vida máxima de 15 min, como na troca de papel; a
+reconexão passa pelo portão. O login do portal com o telefone pendente não escolhe a organização do
+`?org=` (o mapeamento slug → organização vem de `/api/portal/me`, bloqueado): a tela de confirmação
+troca de organização. A sessão que ficou numa organização de que a pessoa saiu não é levada à
+preferida (quem faz isso é `/api/me`, que está atrás do portão): a tela oferece "Usar esta
+organização". A tela não foi conferida num navegador nesta fase.
+
 ### Pedido de verificação: `phone_verification`
 
 `scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
@@ -459,7 +530,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | T1 (**implementada**; a tabela de pedidos e o modelo de verificação do canal Cloud passaram para a T2, que é quem os usa) | Migration (colunas), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
 | T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
 | T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
-| T3 | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
+| T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | T4 | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 
 ---
@@ -836,8 +907,9 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 
 ## Decisões
 
-Todas as decisões de produto (P1 a P18 e D-1 a D-11) estão na tabela "Decisões do
-proprietário". Não há pergunta de produto em aberto.
+Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
+proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
+que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

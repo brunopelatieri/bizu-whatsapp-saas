@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
 import { type Scope, scopeTenantId, type Tx, withPlatformScope, withScope } from "@/db/rls";
 import {
@@ -14,7 +14,7 @@ import { auditInTransaction } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
 import { notifyPhoneClaimed } from "@/lib/phone/notify";
-import { userPhoneConfirmed } from "@/lib/phone/confirmed";
+import { userPhoneConfirmed, userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
 import {
   accountPhoneConflicts,
   accountPhoneInUse,
@@ -81,6 +81,16 @@ const ofSubject = ({ type, id }: VerificationSubject) =>
 
 /** Pedido aberto: com link a caminho ou na fila de liberação. */
 export const isOpen = inArray(phoneVerification.status, [...OPEN]);
+
+/**
+ * A ficha de cliente que confirma o número no portal: `lead` ou `active`, de organização ativa (a
+ * consulta faz o `join` com `organization`). A bloqueada e a de organização suspensa ficam de fora,
+ * como no `requirePortalTenant`. Vale para o link, o reenvio e o portão da T3 (`gate.ts`).
+ */
+export const confirmableRecord = and(
+  inArray(customer.status, ["lead", "active"]),
+  eq(organization.status, "active"),
+) as SQL;
 
 /** O pedido é do escopo de quem pergunta: a organização, ou a plataforma (`tenant_id` nulo). */
 const inScope = (scope: Scope) =>
@@ -532,6 +542,8 @@ export function portalPhoneOverview(portalUserId: string) {
         name: organization.name,
         phoneNormalized: customer.phoneNormalized,
         verifiedAt: customer.phoneVerifiedAt,
+        // Dá para entrar nela agora (`POST /api/portal/active-tenant`): ficha ativa, organização ativa.
+        enterable: sql<boolean>`(${customer.status} = 'active' and ${organization.status} = 'active')`,
         request: sql<string | null>`(select pv.status from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') limit 1)`,
       })
       .from(customer)
@@ -551,6 +563,7 @@ export function portalPhoneOverview(portalUserId: string) {
       return {
         customerId: record.id,
         view,
+        enterable: Boolean(record.enterable),
         phoneHint: record.phoneNormalized ? phoneHint(record.phoneNormalized) : null,
       };
     });
@@ -576,8 +589,7 @@ export function portalTokenSubject(token: string, portalUserId: string) {
           eq(phoneVerification.tokenHash, hashToken(token)),
           eq(phoneVerification.subjectType, "customer"),
           eq(customer.portalUserId, portalUserId),
-          inArray(customer.status, ["lead", "active"]),
-          eq(organization.status, "active"),
+          confirmableRecord,
         ),
       );
 
@@ -641,8 +653,7 @@ export function portalResendTarget(portalUserId: string, tenantId: string) {
         and(
           eq(customer.portalUserId, portalUserId),
           eq(customer.tenantId, tenantId),
-          inArray(customer.status, ["lead", "active"]),
-          eq(organization.status, "active"),
+          confirmableRecord,
         ),
       );
     if (!record) return null;
@@ -1135,6 +1146,19 @@ export async function prunePhoneVerifications(now = new Date()) {
           eq(phoneVerification.subjectType, "user"),
           isOpen,
           sql`${phoneVerification.tenantId} is not null and not exists (select 1 from member where member.user_id = ${phoneVerification.subjectId} and member.organization_id = ${phoneVerification.tenantId})`,
+        ),
+      );
+
+    // Conta já confirmada para o sistema inteiro por um caminho que não encerrou os pedidos (a
+    // promoção do primeiro proprietário pelo banco, T3): o pedido aberto só ocuparia a fila.
+    await tx
+      .update(phoneVerification)
+      .set(CLOSED)
+      .where(
+        and(
+          eq(phoneVerification.subjectType, "user"),
+          isOpen,
+          sql`exists (select 1 from "user" where "user"."id" = ${phoneVerification.subjectId} and ${userPhoneConfirmedGlobally})`,
         ),
       );
 

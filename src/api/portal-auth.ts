@@ -2,9 +2,15 @@ import { getSessionCookie } from "better-auth/cookies";
 import { createMiddleware } from "hono/factory";
 import { logError } from "@/api/log";
 import { refusal } from "@/api/permissions";
+import {
+  PHONE_UNVERIFIED,
+  phoneVerificationRequired,
+  portalPhonePendingAllowed,
+} from "@/api/phone-gate";
 import { PORTAL_COOKIE_PREFIX } from "@/lib/auth/constants";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { portalAccessBarred } from "@/lib/lgpd/deletion";
+import { portalPhoneGatePasses } from "@/lib/phone/gate";
 import { findPortalCustomer, type PortalCustomer } from "@/lib/portal/access";
 
 export type PortalUserContext = {
@@ -76,13 +82,30 @@ const resolvePortalSession: ResolvePortalSession = async (headers) => {
 };
 
 /**
+ * A ficha de cliente da organização em uso vale para esta sessão? Só é chamado com
+ * `PHONE_VERIFICATION_REQUIRED=true` e fora da lista do que passa (`src/api/phone-gate.ts`).
+ */
+export type PortalPhoneGate = (
+  user: PortalUserContext,
+  session: PortalSessionContext,
+) => Promise<boolean>;
+
+export const defaultPortalPhoneGate: PortalPhoneGate = async (user, session) =>
+  !phoneVerificationRequired() || portalPhoneGatePasses(user.id, session.activeTenantId);
+
+/**
  * `requireAuth` do portal. Olha só o cookie `bizu_portal`, assinado com outro segredo:
  * um nunca vale pelo outro. Falha fechada: Auth indisponível não abre a rota. Na carência de
  * uma exclusão pedida pela plataforma (`barred`), a sessão vale como inexistente (401).
+ *
+ * Ordem das recusas, como na equipe: 401, 503, 401, 403 `EMAIL_NOT_VERIFIED` e, com
+ * `PHONE_VERIFICATION_REQUIRED`, 403 `PHONE_UNVERIFIED` quando a ficha de cliente da organização em
+ * uso não está confirmada (`portalPhoneGatePasses`).
  */
 export function createRequirePortalAuth(
   resolve: ResolvePortalSession,
   barred: PortalBarrier = async () => false,
+  phoneGate: PortalPhoneGate = defaultPortalPhoneGate,
 ) {
   return createMiddleware<PortalAuthEnv>(async (c, next) => {
     const { headers } = c.req.raw;
@@ -112,6 +135,19 @@ export function createRequirePortalAuth(
       );
     }
 
+    if (!portalPhonePendingAllowed(c)) {
+      let passes: boolean;
+
+      try {
+        passes = await phoneGate(resolved.user, resolved.session);
+      } catch (error) {
+        logError("Falha ao conferir o telefone do cliente", error);
+        return c.json({ error: "Autenticação indisponível." }, 503);
+      }
+
+      if (!passes) return c.json(PHONE_UNVERIFIED, 403);
+    }
+
     c.set("portalUser", resolved.user);
     c.set("portalSession", resolved.session);
     await next();
@@ -121,6 +157,7 @@ export function createRequirePortalAuth(
 export const requirePortalAuth = createRequirePortalAuth(
   resolvePortalSession,
   portalAccessBarred,
+  defaultPortalPhoneGate,
 );
 
 /**

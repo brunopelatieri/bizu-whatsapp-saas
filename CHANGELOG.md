@@ -39,8 +39,16 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     `/verificar-telefone` (e `/portal/verificar-telefone`): o botão confirma na sessão do próprio cadastro. A confirmação
     do portal deixa de exigir organização ativa (o lead do autocadastro confirma). E-mails novos:
     `phone-verification-manual` (ao responsável) e `phone-number-claimed` (à conta que perdeu a confirmação). O envio não
-    entra na caixa de entrada. **Ainda sem tela** para o modelo, o reenvio e as filas (T4), e nada bloqueia o acesso de
-    quem está pendente (T3).
+    entra na caixa de entrada. **Ainda sem tela** para o modelo e as filas (T4).
+  - **Bloqueio com telefone pendente (T3):** com `PHONE_VERIFICATION_REQUIRED=true` (padrão), a conta cujo WhatsApp
+    não vale recebe 403 `PHONE_UNVERIFIED` em toda rota privada da equipe, da plataforma e do portal, menos na lista
+    fechada do que confirma o número ou sai (`src/api/phone-gate.ts`): ler o estado, reenviar, confirmar, trocar a
+    organização em uso, aceitar convite, encerrar a personificação e, no portal, corrigir o número. O membro comum
+    passa na organização ativa que o liberou; owner e equipe da plataforma, só com a confirmação da plataforma; o
+    portal avalia a ficha de cliente da organização em uso. As leituras de `/api/auth/admin/*` ganham o mesmo portão.
+    A área autenticada mostra só "Confirme seu WhatsApp" (situação por responsável, reenviar, trocar de
+    organização, sair). Com `false`, a pessoa entra e vê um aviso; `/api/me` e `/api/portal/me` trazem
+    `phonePending`. Decisões a confirmar: T3-1 a T3-9 da SPEC.
   - **Migração:** migrations `0034` (tabela `login_throttle`), `0035` (colunas de verificação e `customer.user_id`) e
     `0036` (as duas tabelas da T2a e o `CHECK` que só aceita `whatsapp` e `manual` nas contas; conta com outra forma
     volta a pendente; as fichas de cliente que a `0035` marcou `manual` passam a `team`, para continuarem atraindo as
@@ -59,6 +67,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     precisa enviar JSON; (5) a ordem do vínculo automático mudou: com cliente e membro no mesmo número, a conversa vai
     para o cliente; (6) a conta do portal criada por convite nasce com o telefone pendente, e a ficha de cliente liberada
     à mão pelo owner não atrai conversas sozinha (a equipe vincula no painel).
+  - **Migração da T3:** nenhuma migration. Variável nova `PHONE_VERIFICATION_REQUIRED`, padrão **`true`**: quem tem o
+    telefone pendente deixa de usar o sistema até confirmar. Antes de atualizar um projeto derivado, (1) promova o
+    primeiro proprietário com o telefone confirmado (o comando de `tech/08-auth.md` mudou: `phone_verified_at` e
+    `phone_verified_via` junto com o papel); (2) configure um número da plataforma para o link (ou libere à mão em
+    `/admin`); (3) contas sem telefone (anteriores ao A1) ficam na tela de confirmação até o proprietário cadastrar o
+    número. Para manter o comportamento anterior, defina `PHONE_VERIFICATION_REQUIRED=false`. Os testes de banco
+    rodam com `false` (`vitest.db.config.ts`), menos `tests/db/phone-gate.test.ts`.
 
 - **Caixa de entrada, fase C7 (LGPD e fechamento)**: excluir um cliente (`DELETE /api/customers/:id`) ou anonimizar a
   pessoa do portal apaga os contatos de WhatsApp vinculados a ele, com conversas, mensagens, arquivos e objetos do

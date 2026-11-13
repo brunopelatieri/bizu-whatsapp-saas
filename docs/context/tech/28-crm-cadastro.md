@@ -10,7 +10,8 @@
   `src/lib/lgpd/consent.ts`, `src/lib/portal/`, `src/lib/admin/people.ts`, `src/lib/crm/`,
   `src/api/{tags,custom-fields}.ts`, `src/components/crm/`, `src/components/app/crm/`,
   `src/lib/crm/organization-profile.ts`, `src/api/admin.ts` (bloco `/api/admin/crm/*`),
-  `src/components/admin/tenant-annotation-card.tsx`, `src/routes/admin/crm-{tags,fields}.tsx`
+  `src/components/admin/tenant-annotation-card.tsx`, `src/routes/admin/crm-{tags,fields}.tsx`,
+  `src/api/phone-gate.ts`, `src/components/phone/` (portão e tela da T3)
 
 ## Estado por fase
 
@@ -195,12 +196,12 @@ platform`. **Regra central: o owner e a equipe do tenant nunca veem a anotação
   (as duas tabelas e `tag`/`custom_field` nos modos), `admin.test.ts` (matriz de acesso),
   `lgpd-export`/`lgpd-deletion`.
 
-## Telefone verificado e único (pré-produção, T1, T2a e T2b)
+## Telefone verificado e único (pré-produção, T1, T2a, T2b e T3)
 
 SPEC: `docs/specs/pre-producao/spec.md`, bloco T. A T1 entrega o estado e a unicidade; a T2a, o
 pedido de verificação, a confirmação pelo link e a liberação manual; a T2b, o **envio** do link
-pelos canais e a página `/verificar-telefone` (seções seguintes). O bloqueio de acesso é da T3; as
-telas das filas e do modelo, da T4.
+pelos canais e a página `/verificar-telefone`; a T3, o bloqueio de acesso com telefone pendente
+(seções seguintes). As telas das filas e do modelo são da T4.
 
 - **Estado de verificação:** `phone_verified_at` e `phone_verified_via` em `customer`, `user` e
   `portal_user` (`src/lib/phone/verification.ts`). Nulos = número só **declarado**. Formas:
@@ -258,10 +259,10 @@ telas das filas e do modelo, da T4.
   quem é da equipe.
 - **Permissão `phone:confirm`:** reservada ao owner (`tech/21`); é a das rotas de liberação
   manual da organização (seção seguinte).
-- **Ainda não existe (T3, T4, troca com pedido, `claim` e bloco E):** a troca de telefone que
+- **Ainda não existe (T4, troca com pedido, `claim` e bloco E):** a troca de telefone que
   mantém o número antigo até a confirmação (`POST …/phone-change`; hoje a equipe troca direto e o
-  cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), o
-  bloqueio de acesso com telefone pendente, as telas das filas e do modelo de verificação, o selo
+  cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), as
+  telas das filas e do modelo de verificação, o selo
   e o filtro na tela, ligar e desligar a ficha à mão, e apagar a ficha ligada quando a pessoa sai
   da equipe (D-11).
 - **Testes:** `tests/db/phone-verified.test.ts`, `tests/db/phone-requests.test.ts`,
@@ -351,8 +352,8 @@ nada fora dela. Só o canal e o proprietário da **plataforma** valem para todos
   usado em `autoLinkContact` e em `linkExistingCustomer`).
 - **Auditoria:** `phone.verified` (`via`: `whatsapp`, `manual` ou `tenant`; `demoted`) e
   `phone.unverified` (`reason`: `claimed` ou `left_tenant`). Só ids e enums, nunca o número.
-- **Limites conhecidos, para a T3 e a T4:** a conta do portal não tem pedido próprio (o portal
-  avalia a ficha); a fila não tem busca. Os da T2b estão na seção seguinte.
+- **Limites conhecidos, para a T4:** a conta do portal não tem pedido próprio (o portal avalia a
+  ficha, inclusive no portão da T3); a fila não tem busca. Os da T2b estão na seção seguinte.
 
 ## Envio do link e página de confirmação (pré-produção, T2b)
 
@@ -440,7 +441,66 @@ Código: `src/lib/phone/delivery.ts` (cascata e aviso de falha), `src/lib/phone/
   da fila `singleton`; o eco do QR Code é reconhecido pelo texto (`/verificar-telefone?token=`),
   então uma mensagem com esse texto mandada à mão pelo celular do canal também fica fora da caixa;
   o modelo Cloud precisa do smoke com conta real da Meta (formato do botão e do `index`) antes de
-  fechar a T2; não há tela para escolher o modelo nem para reenviar (T4).
+  fechar a T2; não há tela para escolher o modelo nem as filas (T4). O reenvio aparece na tela
+  "Confirme seu WhatsApp" da T3.
+
+## Bloqueio de acesso com telefone pendente (pré-produção, T3)
+
+Código: `src/lib/phone/gate.ts` (predicado), `src/api/phone-gate.ts` (o que passa),
+`src/api/auth.ts` e `src/api/portal-auth.ts` (onde o portão roda),
+`src/components/phone/phone-verification-panel.tsx` (tela e aviso). Decisões a confirmar: T3-1 a
+T3-9 na SPEC ("T3: o que foi feito").
+
+- **`PHONE_VERIFICATION_REQUIRED`** (padrão `true`, D-2). Ligada, a sessão cujo telefone não vale
+  recebe 403 `{ error, code: "PHONE_UNVERIFIED" }` de `requireAuth` e `requirePortalAuth` em tudo,
+  menos na lista do que passa. Desligada, a pessoa entra: `/api/me` e `/api/portal/me` devolvem
+  `phonePending` e a área mostra um aviso. O link sai nos dois modos, e o vínculo automático da
+  conversa só usa telefone confirmado no escopo, nos dois modos.
+- **Ordem das recusas:** 401 sem cookie, 503 Auth fora, 401 sessão inválida, 403
+  `EMAIL_NOT_VERIFIED` (com `EMAIL_VERIFICATION_REQUIRED`; no portal, sempre), 403
+  `PHONE_UNVERIFIED`. Falha do banco ao conferir o telefone: 503 (falha fechada).
+- **Predicado:**
+
+  | Quem | Passa com |
+  |---|---|
+  | Membro comum de organização | Conta confirmada no sistema, **ou** liberada pela organização **ativa** da sessão (`userPhoneConfirmedIn`) e ainda membro dela |
+  | Owner de qualquer organização, equipe da plataforma | Só a confirmação do sistema (`userPhoneConfirmedGlobally`) |
+  | Sem organização ativa | Só a confirmação do sistema |
+  | Portal | A ficha de cliente da organização em uso (`customerPhoneConfirmed`), entre as `lead`/`active` de organização ativa; sem ficha na organização em uso, alguma confirmada; sem ficha que possa confirmar, passa |
+  | Sessão personificada | O mesmo da conta personificada |
+
+- **O que passa (`TEAM_PHONE_PENDING_ALLOWED` e `PORTAL_PHONE_PENDING_ALLOWED`):** casado pelo
+  método e pelo caminho **da requisição** (barra a mais não casa). Equipe: `GET /api/me/phone-verification`,
+  `POST /api/me/phone-verification/resend`, `POST /api/me/phone-verification/confirm`,
+  `POST /api/tenant/active`, `POST /api/invitations/:id/accept`, `POST /api/admin/stop-impersonating`.
+  Portal: `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
+  `PATCH /api/portal/me` (corrigir o número), `POST /api/portal/active-tenant`. Sair é do Better Auth.
+  Rota nova entra bloqueada; pôr uma rota na lista exige motivo (campo `why`) e o teste confere que
+  ela existe.
+- **Better Auth:** `/api/auth/*` não passa por `requireAuth`. As leituras do plugin admin
+  (`/api/auth/admin/*`) têm o portão (`phoneGateOnAdminReads`, `auth-ext.ts`); o resto é da própria
+  conta (sessão, senha, e-mail, 2FA, sair) e fica aberto.
+- **Tela "Confirme seu WhatsApp":** `ProtectedRoute` (cobre `/app`, `/admin` e `/app/onboarding`) e
+  `PortalLayout` mostram só ela quando `/api/me` ou `/api/portal/me` responde `PHONE_UNVERIFIED`
+  (`phoneBlocked` em `useAuth` e `usePortalAuth`). Mostra cada responsável de
+  `GET …/phone-verification` (link enviado, aguardando liberação de quem, nenhum link), reenviar por
+  responsável, "Usar esta organização" onde o número já vale, a correção do número no portal, "Já
+  confirmei" e "Sair". A conta da equipe não tem rota para corrigir o próprio número (é o
+  `…/phone-change`, pendente): a tela manda à plataforma, que corrige em `/admin/usuarios/:id`.
+  Qualquer 403 `PHONE_UNVERIFIED` no meio da sessão faz `apiFetch` emitir `bizu:phone-unverified`, e
+  o provider relê a conta. As páginas de login e de escolha do portal e `/portal/verificar-telefone`
+  tratam a sessão sem `/api/portal/me`.
+- **Primeiro proprietário:** o seed cria as contas `manual`. A promoção pelo banco confirma o
+  telefone junto (`tech/08-auth.md`, "Primeiro proprietário"); sem isso, o primeiro
+  `platform_owner` ficaria na tela de confirmação sem ninguém para liberá-lo nem canal da plataforma
+  configurado. O `maintenance.prune` encerra pedido aberto de conta já confirmada no sistema.
+- **Testes:** `tests/db/phone-gate.test.ts` (percorre `api.routes` com contas pendentes da equipe e do
+  portal; a lista de rotas públicas fica no teste), `tests/db/billing.test.ts` (seed), unitários em
+  `src/api/auth.test.ts` e `src/api/portal-auth.test.ts` (ordem e falha fechada). O resto do
+  `test:db` roda com a variável desligada (`vitest.db.config.ts`).
+- **Limites conhecidos:** o SSE já aberto segue até 15 min depois que a confirmação cai; o login do
+  portal pendente não escolhe a organização do `?org=`; a correção do número no portal exige ficha
+  ativa (o lead não corrige sozinho).
 
 ## O que a SPEC pede e ainda não existe
 
