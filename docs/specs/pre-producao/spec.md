@@ -44,6 +44,8 @@
 | D-7 | Padrões de retenção | Valores baixos, para proteger o servidor |
 | D-10 | Bloqueio de login | Padrão `LOGIN_LOCKOUT_SCOPE=email` |
 | D-11 | Conversa de quem é equipe e cliente | Fica na ficha de cliente. Apagada a pessoa da equipe (ou o owner), a ficha ligada e o conteúdo dela são apagados, e só nesse caso |
+| D-12 | Quem recebe o link da plataforma | Só owners, a equipe da plataforma e quem não é de organização nenhuma. O membro comum recebe o link da organização e **pede** o da plataforma quando quiser a confirmação que vale em todo lugar |
+| D-13 | Quem administra o canal da organização confirma o próprio número pelo link dela | Aceito: o efeito fica dentro da organização (`phone_tenant_vouch`) |
 | D-9 | Equipe que também é cliente | Owner, admins e membros **podem ser clientes da própria organização**: dois cadastros separados (`user` e `customer`) que compartilham telefone e e-mail; o cliente aparece marcado com o papel da pessoa na equipe |
 
 ## Onde entra
@@ -295,15 +297,17 @@ Job `phone.verify`, para o escopo responsável da tabela acima:
   (`issueVerificationToken` não confere escopo, quem chama confere); (f) quem controla o canal
   da organização (`channel:manage`, não só o owner) lê o link que ela envia, então consegue
   liberar o próprio número **naquela organização** pelo link, e `SELF_CONFIRMATION` não cobre
-  esse caminho: o efeito fica dentro dela, e a T2b decide se o aceita ou se o link de organização
-  só vale para quem não administra o canal; (g) `GET /api/me/phone-verification` precisa dizer a
+  esse caminho: **aceito pelo proprietário (D-13)**, porque o efeito fica dentro dela e o owner já
+  confia o canal a essa pessoa; (g) `GET /api/me/phone-verification` precisa dizer a
   situação por responsável (hoje devolve "pendente" enquanto houver qualquer pedido aberto), para
   a tela e para o portão da T3.
-- **Decisão de custo em aberto para a T2b:** todo membro comum tem o pedido da plataforma aberto.
-  Enviar esse link a todos significa o número da plataforma escrevendo a toda a equipe de toda
-  organização (custo de modelo na Cloud, risco de bloqueio no QR Code). Alternativa: a plataforma
-  só envia a quem responde a ela (owners e quem não tem organização), e o membro pede o link da
-  plataforma quando quiser a confirmação que vale em todo lugar.
+- **Para quem a plataforma envia o link (D-12, decidido em 2026-11-13):** só a quem responde a
+  ela, isto é, owners, a equipe da plataforma e quem não é de organização nenhuma. Todo membro
+  comum tem o pedido da plataforma aberto, mas ele **não dispara envio sozinho**: o membro recebe
+  o link da organização em que entrou e **pede** o da plataforma quando quiser a confirmação que
+  vale em todo lugar ("Reenviar" escolhendo a plataforma). Enviar a todos seria o número da
+  plataforma escrevendo a toda a equipe de toda organização (custo de modelo na Cloud, risco de
+  bloqueio no QR Code).
 
 ### Pedido de verificação: `phone_verification`
 
