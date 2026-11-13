@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizePhone, PHONE_MAX_INPUT, phoneErrorMessage } from "@/lib/phone/br";
+import { canWhatsApp, normalizePhone, PHONE_MAX_INPUT, phoneErrorMessage } from "@/lib/phone/br";
 
 /**
  * Telefone obrigatório de qualquer cadastro de pessoa. Valida o texto digitado e o devolve
@@ -16,3 +16,17 @@ export const phoneSchema = z
     const result = normalizePhone(value);
     if (!result.ok) ctx.addIssue({ code: "custom", message: phoneErrorMessage(result.reason) });
   });
+
+export const WHATSAPP_PHONE_REQUIRED = "Informe um celular com WhatsApp.";
+
+/**
+ * Telefone de quem tem conta na equipe (owner, admins, membros e a equipe da plataforma): só
+ * número que recebe WhatsApp, porque é por ele que a conta é verificada. Fixo e celular antigo de
+ * 8 dígitos, aceitos no cliente, são recusados aqui.
+ */
+export const whatsappPhoneSchema = phoneSchema.superRefine((value, ctx) => {
+  const result = normalizePhone(value);
+  if (result.ok && !canWhatsApp(result.kind)) {
+    ctx.addIssue({ code: "custom", message: WHATSAPP_PHONE_REQUIRED });
+  }
+});

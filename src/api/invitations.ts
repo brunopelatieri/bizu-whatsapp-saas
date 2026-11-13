@@ -4,6 +4,7 @@ import { jsonBodyLimit, MINUTE, sameOrigin, validId } from "@/api/guards";
 import { blockWhileImpersonating } from "@/api/impersonation";
 import type { TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
+import { logError } from "@/api/log";
 import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
@@ -12,6 +13,7 @@ import { assertWithinLimit } from "@/lib/billing/limits";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 import { activateTenant, findMembership } from "@/lib/tenant/membership";
 import { findOpenInvitation } from "@/lib/tenant/team";
+import { linkMemberCustomer } from "@/lib/tenant/team-customer";
 
 const INVALID_INVITATION = "Convite inválido ou expirado.";
 
@@ -80,6 +82,11 @@ invitationRoutes.post(
     });
 
     await activateTenant(c.get("session").id, user.id, invitation.tenantId);
+    // Quem já era cliente da organização segue com a ficha, agora ligada à conta da equipe.
+    // Falha aqui não desfaz a entrada: a equipe liga a ficha depois.
+    await linkMemberCustomer(invitation.tenantId, user.id).catch((error: unknown) =>
+      logError("Falha ao ligar a ficha de cliente do membro", error),
+    );
     await audit("member.joined", {
       actor: { id: user.id },
       tenantId: invitation.tenantId,

@@ -81,9 +81,12 @@ canais); `undefined` volta à ingestão real. Retorno `false` = aviso `ignored`.
 2. **Contato** (`contacts.ts`): `providerPhone` normaliza com `+` (a regra do Brasil só vale com DDI
    55; número que o normalizador recusa fica com os próprios dígitos). `upsertContact` acha ou cria pela
    `phone_key` em um comando (`xmax = 0` diz se nasceu). Só o recém-criado ganha vínculo automático
-   (`autoLinkContact`), cada um **só com correspondência única**: membro do tenant (não banido), depois
-   cliente do tenant; na plataforma, usuário, e nunca `customer` de tenant. `linkCandidates` é a mesma
-   consulta que o painel (C2) usa para os candidatos. `wa_name` atualiza a cada mensagem recebida (no
+   (`autoLinkContact`), **só com correspondência única e só com telefone confirmado**
+   (`phone_verified_at`, `tech/28`): cliente do tenant, depois membro do tenant (não banido); na
+   plataforma, usuário, e nunca `customer` de tenant. O cliente vem antes porque quem é da equipe e
+   também é cliente tem os dois cadastros com o mesmo número, e a conversa fica na ficha de cliente.
+   `linkCandidates` é a mesma consulta que o painel (C2) usa para os candidatos, ali sem o filtro de
+   confirmado: quem decide é a equipe. `wa_name` atualiza a cada mensagem recebida (no
    eco, não: o `PushName` é o do dono do número). LID que chega com telefone é gravado.
 3. **Conversa** (`INSERT ... ON CONFLICT DO UPDATE`, um comando, dentro de um savepoint): prévia e
    `last_message_at` só se a mensagem for a mais nova, `unread_count + 1`, `last_inbound_at =
@@ -497,11 +500,10 @@ cascata com o arquivo órfão.
   Quem se cadastra com o número de outra pessoa é vinculado sozinho à conversa dela com a plataforma (ou, se for membro, à
   conversa do tenant). Por isso a exportação da equipe não traz conversas e a anonimização de `user` só desfaz o vínculo:
   usar o vínculo entregaria a conversa de terceiros ao atacante, ou a apagaria a pedido dele. Para o **cliente**, a SPEC
-  exige exportar e apagar pelo vínculo, e o mesmo risco existe em escala menor: a pessoa do portal pode trocar o próprio
-  telefone (`/portal/conta` grava também `customer.phone`) para o de alguém que ainda não escreveu ao tenant; a primeira
-  mensagem dessa pessoa vira contato vinculado ao cadastro do atacante (a equipe vê o nome dele na conversa). Limite
-  conhecido; a correção é verificar o telefone ou registrar a origem do vínculo (`auto` × confirmado pela equipe) e só
-  exportar o confirmado (decisão do proprietário).
+  exige exportar e apagar pelo vínculo. O risco equivalente (a pessoa do portal trocar o próprio telefone para o de um
+  terceiro e receber a conversa dele) foi **fechado na pré-produção (T1)**: o vínculo automático só usa telefone
+  confirmado, e o número que a pessoa troca em `/portal/conta`, ou declara no cadastro, fica pendente até ser confirmado
+  (`tech/28`, "Telefone verificado e único"). A regra de não exportar nem apagar pelo vínculo com `user` continua.
 - **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
   `maintenance.prune`. Conversas e mensagens não têm prazo automático (o PRD deixa a retenção automática fora do
   escopo): ficam enquanto o owner as mantiver, e saem com o cliente, a pessoa ou a organização. **Decisão pendente do
@@ -576,7 +578,7 @@ Reunidos aqui; o detalhe de cada um está na seção da fase.
 | C7 | Excluir a organização não remove os **canais** (credenciais cifradas e a instância Evolution ou o número na Meta continuam; os avisos novos são `ignored` e saem pela retenção). Desconectar no provedor é ação do owner antes de excluir |
 | C7 | Depois de excluído o cliente, o `channel_event` que trouxe as mensagens dele ainda guarda o `raw` (telefone e texto) até o fim da retenção (padrão 30 dias). O `/admin` só reprocessa aviso `failed` ou `ignored`, então o que já foi gravado não volta; um aviso falho do mesmo número reprocessado depois recria o contato, como uma mensagem nova |
 | C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
-| C7 | O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
+| C7 | **Fechado na pré-produção (T1):** o vínculo automático só usa telefone confirmado. Texto original: O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
 | C7 | Backup anterior à exclusão ainda contém as conversas: restaurar exige reaplicar as exclusões (`tech/14-deploy.md`) |
 
 ## Desvios da SPEC (C7)

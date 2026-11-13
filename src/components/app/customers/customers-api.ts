@@ -21,6 +21,10 @@ export type Customer = {
   invitedAt: string | null;
   lastLoginAt: string | null;
   hasPortalAccess: boolean;
+  /** O telefone atual foi confirmado (pela equipe, por link ou por quem escreveu). */
+  phoneVerified: boolean;
+  /** A pessoa da equipe que também é este cliente, com o papel atual dela. */
+  team: { userId: string; role: string } | null;
   createdAt: string;
 };
 

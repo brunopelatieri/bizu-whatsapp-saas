@@ -195,6 +195,70 @@ platform`. **Regra central: o owner e a equipe do tenant nunca veem a anotação
   (as duas tabelas e `tag`/`custom_field` nos modos), `admin.test.ts` (matriz de acesso),
   `lgpd-export`/`lgpd-deletion`.
 
+## Telefone verificado e único (pré-produção, T1)
+
+SPEC: `docs/specs/pre-producao/spec.md`, bloco T. A T1 entrega a base; o link de verificação por
+WhatsApp, a fila de liberação e o bloqueio de acesso são das fases T2 a T4.
+
+- **Estado de verificação:** `phone_verified_at` e `phone_verified_via` em `customer`, `user` e
+  `portal_user` (`src/lib/phone/verification.ts`). Nulos = número só **declarado**. Formas:
+  `whatsapp` (clique no link, T2), `manual` (liberado pelo responsável), `team` (telefone de
+  cliente informado pela equipe) e `inbound` (cliente salvo de um contato que escreveu). O `CHECK`
+  `*_phone_verified_consistent` (`src/db/phone-check.ts`) exige as duas colunas juntas, a forma
+  conhecida e que exista número.
+- **Quem grava o quê:**
+
+  | Onde | Estado |
+  |---|---|
+  | Cliente criado ou com telefone trocado pela equipe (`customers.ts`) | `team` |
+  | "Salvar como cliente" no atendimento, com o número de um contato que escreveu | `inbound` (`team` se o atendente corrigiu o número, ou se o contato foi aberto pela própria equipe) |
+  | Cadastro da equipe (`/cadastro`, convite) | pendente |
+  | Autocadastro do portal e a ficha que nasce dele (`confirmPortalSignup`) | pendente |
+  | Conta do portal criada pelo convite da equipe (`ensurePortalUser`) | o estado da **ficha**, copiado (pendente se ela está pendente); nunca um valor fixo, porque a conta é global |
+  | Cliente troca o próprio telefone em `/portal/conta` | **volta a pendente**, decidido **por linha**: a conta quando o número dela muda, a ficha quando o dela muda (as duas podem ter números diferentes, e a confirmação de uma nunca serve à outra) |
+  | Edição de pessoa em `/admin` | `manual` |
+  | Seed e cadastros anteriores à migration `0035` | `manual` |
+  | Anonimização (LGPD) | nulos, junto com o número |
+
+- **Para que serve já na T1:** o vínculo da conversa só usa telefone confirmado, tanto o
+  automático da ingestão (`autoLinkContact`) quanto o de "Conversar" pela ficha ou pelo membro
+  (`destinationPhone`; com telefone pendente a conversa abre sem vínculo e a equipe decide no
+  painel, onde cada candidato traz `phoneVerified`). A unicidade das contas só conta número
+  confirmado.
+- **Unicidade por grupo** (`src/lib/phone/uniqueness.ts`): owners no SaaS inteiro; equipe por
+  organização (owner incluído); clientes por organização (índice único, como antes); equipe da
+  plataforma entre si. **Cliente e equipe da mesma organização podem ter o mesmo número.** `user` é
+  global e o papel fica em `member`, então nas contas não há índice: quem confirma um número chama
+  `lockPhoneKey` e `accountPhoneConflicts` na mesma transação. Na T1, o único ponto que confirma
+  número de conta é a edição pelo `/admin`, que recusa com 409 `PHONE_IN_USE` quando outra conta
+  do mesmo grupo já tem o número confirmado. Número só declarado não reserva nada. **Limite da
+  T1:** aceite de convite, criação de organização e transferência de posse ainda não conferem a
+  unicidade, e o backfill marcou como confirmados os números que já existiam; duas contas do
+  mesmo grupo podem estar com o mesmo número confirmado. O efeito é seguro (com dois candidatos
+  nada é vinculado nem ligado), e a regra passa a valer em todo ponto de confirmação na T2.
+- **Conta da equipe só com WhatsApp:** `whatsappPhoneSchema` (`src/lib/schemas/phone.ts`) recusa
+  fixo e celular antigo de 8 dígitos no `/cadastro`, no convite e na edição de `user` pelo
+  `/admin`; `signupPhoneValues("user")` repete a regra no hook do Better Auth. Cliente e conta do
+  portal continuam aceitando fixo.
+- **Equipe que também é cliente** (`src/lib/tenant/team-customer.ts`): `customer.user_id` liga a
+  ficha à conta da pessoa na mesma organização (uma ficha por pessoa, índice único parcial). São
+  dois cadastros separados, que podem ter o mesmo telefone e e-mail. A ligação automática é **só
+  pelo telefone confirmado** da conta (no aceite do convite, confirmado dos dois lados), ao criar
+  o cliente (`matchingTeamMember`) e no aceite (`linkMemberCustomer`), e é auditada
+  (`customer.team_linked`). O e-mail nunca liga sozinho: é texto de quem cadastra, e a ficha
+  ligada será apagada quando a pessoa sair da equipe (D-11). A exclusão da conta desfaz a ligação
+  (`anonymizeUser`). A API do cliente devolve `team: { userId, role } | null`, com o papel
+  lido de `member` na hora, e `phoneVerified`; `GET /api/customers?team=true` filtra as fichas de
+  quem é da equipe.
+- **Permissão `phone:confirm`:** reservada ao owner (`tech/21`). Ainda sem rota: é a da
+  liberação manual, na T2.
+- **Ainda não existe (T2 a T4 e bloco E):** o pedido de verificação e o link, a troca de telefone
+  com verificação (hoje a equipe troca direto e o cliente do portal volta a pendente), o bloqueio
+  de acesso com telefone pendente, o selo e o filtro na tela, ligar e desligar a ficha à mão, e
+  apagar a ficha ligada quando a pessoa sai da equipe (D-11).
+- **Testes:** `tests/db/phone-verified.test.ts`, `tests/db/inbox-ingest.test.ts` (vínculo),
+  `tests/db/phone-accounts.test.ts` e `src/lib/schemas/phone.test.ts`.
+
 ## O que a SPEC pede e ainda não existe
 
 Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe: o telefone

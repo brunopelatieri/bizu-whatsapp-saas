@@ -67,6 +67,9 @@ do plugin em `tests/db/rbac.test.ts`.
 personalizado) valem para os números de WhatsApp (`docs/specs/whatsapp-canais/spec.md`); as rotas
 `/api/channels/*` entram com a etapa B1 e a matriz `tests/db/rbac.test.ts` as cobre então.
 
+`phone:confirm` (liberar à mão o telefone de membros e clientes, `tech/28`) é **reservada**: só o
+owner tem, e não entra em papel personalizado. Ainda sem rota (pré-produção, T2).
+
 `inbox:read`, `inbox:reply`, `inbox:assign` e `inbox:supervise` são da caixa de entrada
 (`docs/specs/caixa-de-entrada/spec.md`, `tech/30-caixa-de-entrada.md`): owner e admin têm as quatro,
 membro `read` e `reply`; todas atribuíveis a papel personalizado; `supervise` sem `read` não tem

@@ -9,6 +9,7 @@ import {
   PASSWORD_POLICY_MESSAGE,
 } from "@/lib/auth/password-policy";
 import { phoneValues } from "@/lib/phone/columns";
+import { verifiedPhone } from "@/lib/phone/verification";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 
 /**
@@ -118,6 +119,9 @@ export const SEED_CUSTOMERS = {
 
 /** O valor de `.env.example`: público, serve só para desenvolvimento. */
 const EXAMPLE_PASSWORD = "Bizu-seed-2026!";
+
+/** O telefone do seed nasce confirmado: sem isso, ninguém do seed entra nem é vinculado. */
+const seedPhone = (phone: string) => ({ ...phoneValues(phone), ...verifiedPhone("manual") });
 
 export function assertSeedAllowed(env: Record<string, string | undefined>) {
   if (env.NODE_ENV === "production" && env.SEED_ALLOW_PRODUCTION !== "1") {
@@ -249,7 +253,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
     const [created] = await db
       .insert(user)
-      .values({ name, email, role, emailVerified: true, ...phoneValues(phone) })
+      .values({ name, email, role, emailVerified: true, ...seedPhone(phone) })
       .returning({ id: user.id });
     if (!created) throw new Error(`usuário ${email} não foi criado`);
 
@@ -437,7 +441,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
   await db
     .insert(portalUser)
-    .values({ ...julia, ...phoneValues(julia.phone), emailVerified: true })
+    .values({ ...julia, ...seedPhone(julia.phone), emailVerified: true })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [juliaUser] = await db
@@ -469,13 +473,13 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   for (const tenantId of [acme.id, beta.id]) {
     await seedCustomer(tenantId, {
       ...julia,
-      ...phoneValues(julia.phone),
+      ...seedPhone(julia.phone),
       tenantId,
       portalUserId: juliaUser.id,
       status: "active",
     });
   }
-  await seedCustomer(acme.id, { ...lead, ...phoneValues(lead.phone), tenantId: acme.id });
+  await seedCustomer(acme.id, { ...lead, ...seedPhone(lead.phone), tenantId: acme.id });
 
   // Campos adicionais de exemplo do tenant acme (SPEC crm-cadastro, A3): um de lista, um de
   // data e um de lista múltipla. Idempotente pelo índice único `(tenant_id, entity, key)`.

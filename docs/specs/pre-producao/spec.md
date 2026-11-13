@@ -113,11 +113,15 @@ telefone e e-mail. Nenhum deles substitui o outro.
 - **Ligação por id:** coluna nova `customer.user_id` (FK para `user`, `set null`), com índice
   único parcial em `(tenant_id, user_id)`: uma ficha de cliente por pessoa da equipe, por
   organização. Só é aceita se a pessoa tem `member` ativo naquela organização.
-- **Como nasce:** ao criar ou importar um cliente cujo telefone (`phone_key`) ou e-mail é o de
-  um membro da organização, a ficha é criada e ligada a ele, e a tela avisa ("este número é de
-  Fulano, admin; a ficha ficará marcada"). Na direção inversa, quando alguém entra na equipe
-  (aceite de convite) e já existe um cliente com o mesmo telefone confirmado ou e-mail, a
-  ficha é ligada. A equipe com `customer:update` pode desfazer ou criar a ligação à mão.
+- **Como nasce:** ao criar ou importar um cliente cujo telefone (`phone_key`) é o telefone
+  **confirmado** de um membro da organização, a ficha é criada e ligada a ele, e a tela avisa
+  ("este número é de Fulano, admin; a ficha ficará marcada"). Na direção inversa, quando alguém
+  entra na equipe (aceite de convite) e já existe um cliente com o mesmo telefone, confirmado dos
+  dois lados, a ficha é ligada. **O e-mail nunca liga sozinho** (ajuste da revisão de segurança
+  da T1): o e-mail da ficha é texto de quem cadastra, e um colaborador salvaria o contato de um
+  cliente com o próprio e-mail para virar "dono" da ficha dele. Ligar por e-mail, ou em qualquer
+  outro caso, é ação explícita da equipe com `customer:update`, que também desfaz a ligação
+  (T4). Toda ligação é auditada (`customer.team_linked`).
 - **O "status" é derivado, não gravado:** a ficha mostra o selo com o papel atual da pessoa
   (`Owner`, `Admin`, `Membro` ou o papel personalizado), lido de `member` no momento da
   consulta. Aparece na lista e no detalhe de `/app/clientes` e no painel do contato no
@@ -131,6 +135,11 @@ telefone e e-mail. Nenhum deles substitui o outro.
   ligadas em **todas** as organizações. É a única situação em que apagar alguém da equipe apaga
   cliente: fichas de outros clientes nunca são tocadas (P7). Quem quer manter a ficha desfaz a
   ligação antes. Trocar o papel da pessoa não apaga nada.
+  **Restrições para implementar a D-11** (revisão de segurança da T1): (a) a rota de desfazer a
+  ligação entra antes; (b) quem tem `customer:update` consegue vincular à mão o contato de
+  outra pessoa à própria ficha (`linkContact`), então a exclusão por D-11 só apaga os contatos
+  cuja `phone_key` é a do telefone confirmado da pessoa, e os demais apenas perdem o vínculo;
+  (c) até lá, a T1 só desfaz a ligação quando a conta é excluída.
 - **Atendimento:** `chat_contact` continua com um vínculo só (`chat_contact_single_link`). No
   escopo da organização, o vínculo automático passa a tentar **o cliente primeiro** e o membro
   depois (hoje é o contrário, `contacts.ts:176-181`): a conversa de quem é os dois fica na
@@ -319,7 +328,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 
 | Fase | Entrega | Verificação | LLM |
 |---|---|---|---|
-| T1 | Migration (colunas, tabela, modelo de verificação no canal Cloud), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
+| T1 (**implementada**; a tabela de pedidos e o modelo de verificação do canal Cloud passaram para a T2, que é quem os usa) | Migration (colunas), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
 | T2 | Pedido, job `phone.verify` com a cascata, status de falha pelo webhook, página e confirmação, `claim` do portal, liberação manual e e-mail ao responsável | `tests/db`: token de uso único, vencido, GET não consome; Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; "quem provou fica com o número"; liberação manual recusada com número em uso | Fable 5.2 ou Opus 5.5 + `/security-review` |
 | T3 | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | T4 | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |

@@ -216,6 +216,10 @@ export async function saveContactAsCustomer(
     },
     { userId: actor.userId, ip: actor.ip, canRead: readsCustomers(actor) },
     {
+      // `inbound` só quando o número é o de um contato que escreveu pelo WhatsApp. Corrigido
+      // pelo atendente, ou de um contato que a própria equipe abriu digitando o número, é dado
+      // da equipe.
+      phoneVerifiedVia: !input.phone && contact.createdVia === "inbound" ? "inbound" : "team",
       // Na transação do cadastro: perdeu a corrida (outro vínculo, ou a conversa saiu do
       // alcance do ator), o cliente também não é criado.
       afterCreate: async (tx, customerId) => {
@@ -255,29 +259,34 @@ export async function saveContactAsCustomer(
 export const phoneRequired = () =>
   new TenantRuleError(400, "PHONE_REQUIRED", "Cadastre um telefone para conversar pelo WhatsApp.");
 
-/** O telefone do destino: do cliente, do membro ou o digitado. */
+/**
+ * O telefone do destino: do cliente, do membro ou o digitado. O contato só é ligado ao cadastro
+ * escolhido (`link`) quando o telefone dele está **confirmado**: com um número só declarado, a
+ * conversa é de quem tiver o número, e ligá-la aqui daria a esse cadastro o histórico de outra
+ * pessoa. Nesse caso a conversa abre sem vínculo e a equipe decide no painel.
+ */
 async function destinationPhone(tx: Tx, tenantId: string, input: StartConversationInput) {
   let raw: string;
   let link: { customerId?: string; userId?: string } = {};
 
   if (input.customerId) {
     const [row] = await tx
-      .select({ phone: customer.phoneNormalized })
+      .select({ phone: customer.phoneNormalized, verifiedAt: customer.phoneVerifiedAt })
       .from(customer)
       .where(and(eq(customer.id, input.customerId), eq(customer.tenantId, tenantId)));
     if (!row) throw notFound("Cliente não encontrado.");
     if (!row.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    link = { customerId: input.customerId };
+    if (row.verifiedAt) link = { customerId: input.customerId };
   } else if (input.userId) {
     if (!(await isActiveMember(tx, tenantId, input.userId))) throw notFound("Membro não encontrado.");
     const [row] = await tx
-      .select({ phone: user.phoneNormalized })
+      .select({ phone: user.phoneNormalized, verifiedAt: user.phoneVerifiedAt })
       .from(user)
       .where(eq(user.id, input.userId));
     if (!row?.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    link = { userId: input.userId };
+    if (row.verifiedAt) link = { userId: input.userId };
   } else {
     raw = input.phone ?? "";
   }

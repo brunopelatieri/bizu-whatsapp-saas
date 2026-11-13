@@ -31,7 +31,14 @@ import { purgeCustomerContacts } from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { type PhoneVerifiedVia, verifiedPhone } from "@/lib/phone/verification";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
+import {
+  isTeamCustomer,
+  matchingTeamMember,
+  type TeamLink,
+  teamRolesOf,
+} from "@/lib/tenant/team-customer";
 
 /** Quem age e de onde, para a auditoria. */
 export type CustomerActor = {
@@ -51,6 +58,14 @@ const EMAIL_TAKEN = new TenantRuleError(
 );
 
 const PHONE_INDEX = "customer_tenant_phone_key_idx";
+const TEAM_INDEX = "customer_tenant_user_idx";
+
+/** Duas fichas nascendo ao mesmo tempo para a mesma pessoa da equipe: a segunda tenta de novo. */
+const TEAM_LINK_RACE = new TenantRuleError(
+  409,
+  "CUSTOMER_CONFLICT",
+  "Outro cadastro foi criado ao mesmo tempo. Tente de novo.",
+);
 
 /** Colunas de telefone calculadas no servidor; número recusado vira 400 `INVALID_PHONE`. */
 function phoneOf(raw: string) {
@@ -96,19 +111,33 @@ async function assertPhoneFree(
 /** O índice único é a rede de segurança da corrida: o 23505 vira o mesmo 409, sem detalhes. */
 function translateUnique(error: unknown): never {
   if (isUniqueViolation(error)) {
-    throw violatedConstraint(error) === PHONE_INDEX ? phoneInUse() : EMAIL_TAKEN;
+    const constraint = violatedConstraint(error);
+    if (constraint === TEAM_INDEX) throw TEAM_LINK_RACE;
+    throw constraint === PHONE_INDEX ? phoneInUse() : EMAIL_TAKEN;
   }
   throw error;
 }
 
-/** `emailVerified` e os demais dados de `portal_user` são globais e não saem daqui. */
-function toCustomer({
-  portalUserId,
-  tenantId: _tenantId,
-  phoneKey: _phoneKey,
-  ...row
-}: CustomerRow, tags: CustomerTagView[] = []) {
-  return { ...row, tags, hasPortalAccess: portalUserId !== null };
+/**
+ * `emailVerified` e os demais dados de `portal_user` são globais e não saem daqui. `team` é a
+ * pessoa da equipe que também é este cliente, com o papel atual dela (`null` se não é, ou se
+ * já saiu da equipe).
+ */
+function toCustomer(
+  { portalUserId, tenantId: _tenantId, phoneKey: _phoneKey, userId, ...row }: CustomerRow,
+  tags: CustomerTagView[] = [],
+  roles: Map<string, string> = new Map(),
+) {
+  const role = userId ? roles.get(userId) : undefined;
+  const team: TeamLink | null = userId && role ? { userId, role } : null;
+
+  return {
+    ...row,
+    tags,
+    team,
+    phoneVerified: row.phoneVerifiedAt !== null,
+    hasPortalAccess: portalUserId !== null,
+  };
 }
 
 function byId(tenantId: string, customerId: string) {
@@ -139,6 +168,8 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
     );
   }
 
+  if (query.team) filters.push(isTeamCustomer);
+
   const where = and(...filters);
 
   return withTenant(tenantId, async (tx) => {
@@ -152,9 +183,10 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
       .offset((query.page - 1) * CUSTOMER_PAGE_SIZE);
 
     const tags = await tagsOfCustomers(tx, rows.map(({ id }) => id));
+    const roles = await teamRolesOf(tx, tenantId, rows.map(({ userId }) => userId));
 
     return {
-      items: rows.map((row) => toCustomer(row, tags.get(row.id))),
+      items: rows.map((row) => toCustomer(row, tags.get(row.id), roles)),
       total: total?.total ?? 0,
       pageSize: CUSTOMER_PAGE_SIZE,
     };
@@ -166,12 +198,16 @@ export async function getCustomer(tenantId: string, customerId: string) {
     const [row] = await tx.select().from(customer).where(byId(tenantId, customerId));
     if (!row) return null;
 
-    return { row, tags: await tagsOfCustomers(tx, [row.id]) };
+    return {
+      row,
+      tags: await tagsOfCustomers(tx, [row.id]),
+      roles: await teamRolesOf(tx, tenantId, [row.userId]),
+    };
   });
 
   if (!found) throw notFound(NOT_FOUND);
 
-  return toCustomer(found.row, found.tags.get(found.row.id));
+  return toCustomer(found.row, found.tags.get(found.row.id), found.roles);
 }
 
 /**
@@ -182,7 +218,14 @@ export async function createCustomer(
   tenantId: string,
   input: CustomerInput,
   actor: CustomerActor,
-  options: { afterCreate?: (tx: Tx, customerId: string) => Promise<void> } = {},
+  options: {
+    afterCreate?: (tx: Tx, customerId: string) => Promise<void>;
+    /**
+     * Como o telefone foi confirmado. Padrão `team`: quem cadastra é a equipe, e o número que
+     * ela informa vale. `inbound`: o cliente nasceu de um contato que escreveu por esse número.
+     */
+    phoneVerifiedVia?: Extract<PhoneVerifiedVia, "team" | "inbound">;
+  } = {},
 ) {
   await assertWithinLimit(tenantId, "customers");
   const phone = phoneOf(input.phone);
@@ -200,9 +243,21 @@ export async function createCustomer(
         assertRequiredFilled(resolved.defs, values);
       }
 
+      // Quem é da equipe também pode ser cliente da organização: a ficha nasce ligada à conta
+      // dele quando o número é o telefone confirmado do membro (`team-customer.ts`). O e-mail
+      // da ficha é texto de quem cadastra e nunca liga sozinho.
+      const userId = await matchingTeamMember(tx, tenantId, phone.phoneKey);
+
       const [created] = await tx
         .insert(customer)
-        .values({ ...fields, ...phone, tenantId, customFields: values })
+        .values({
+          ...fields,
+          ...phone,
+          ...verifiedPhone(options.phoneVerifiedVia ?? "team"),
+          userId,
+          tenantId,
+          customFields: values,
+        })
         .returning();
       if (!created) throw new Error("cliente não criado");
 
@@ -216,10 +271,20 @@ export async function createCustomer(
         metadata: { status: created.status },
         ip: actor.ip,
       });
+      if (userId) {
+        await auditInTransaction(tx, "customer.team_linked", {
+          actor: { id: actor.userId },
+          tenantId,
+          target: { type: "customer", id: created.id },
+          metadata: { userId, via: "created" },
+          ip: actor.ip,
+        });
+      }
 
       return toCustomer(
         created,
         (await tagsOfCustomers(tx, [created.id])).get(created.id),
+        await teamRolesOf(tx, tenantId, [created.userId]),
       );
     });
   } catch (error) {
@@ -287,6 +352,8 @@ export async function updateCustomer(
         .set({
           ...fields,
           ...(phone ?? {}),
+          // A equipe informou outro número: vale como o do cadastro (a troca com link é a T2).
+          ...(phone && phone.phoneKey !== current.phoneKey ? verifiedPhone("team") : {}),
           ...customFieldsSet,
           status,
           ...(emailChanged
@@ -312,7 +379,11 @@ export async function updateCustomer(
         ip: actor.ip,
       });
 
-      return toCustomer(row, (await tagsOfCustomers(tx, [row.id])).get(row.id));
+      return toCustomer(
+        row,
+        (await tagsOfCustomers(tx, [row.id])).get(row.id),
+        await teamRolesOf(tx, tenantId, [row.userId]),
+      );
     });
 
     if (unlinkedUserId) await dropOrphanPortalUser(unlinkedUserId);
@@ -409,7 +480,7 @@ export async function inviteCustomer(
 
   const portalUserId =
     current.portalUserId ??
-    (await ensurePortalUser(current.email, current.name, current.phone));
+    (await ensurePortalUser(current.email, current.name, current.phone, current));
 
   await withTenant(tenant.id, async (tx) => {
     await tx

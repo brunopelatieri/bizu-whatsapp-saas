@@ -174,11 +174,14 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
     return seeded;
   }
 
-  /** Usuário (da plataforma ou de tenant) com um telefone conhecido, para vincular e iniciar conversa. */
-  async function userWithPhone(phone = uniquePhone()) {
+  /**
+   * Usuário (da plataforma ou de tenant) com um telefone conhecido, para vincular e iniciar
+   * conversa. Confirmado por padrão; `verified: false` é o número só declarado no cadastro.
+   */
+  async function userWithPhone(phone = uniquePhone(), verified = true) {
     const user = await createUser(owner);
     const values = phoneValues(phone);
-    await owner`update "user" set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized}, phone_key = ${values.phoneKey} where id = ${user.id}`;
+    await owner`update "user" set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized}, phone_key = ${values.phoneKey}, phone_verified_at = ${verified ? new Date() : null}, phone_verified_via = ${verified ? "manual" : null} where id = ${user.id}`;
     createdUsers.push(user.id);
     phoneKeys.push(values.phoneKey);
     return { user, ...values, normalized: values.phoneNormalized };
@@ -491,6 +494,12 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
       const again = await call("POST", `${BASE}/conversations`, { cookie: as("platformOwner"), body: { channelId: cloudId, userId: user.id } });
       expect(again.status).toBe(200);
       expect(((await bodyOf(again)).conversation as Item).id).toBe(created.id);
+
+      // Usuário com o telefone só declarado no cadastro: a conversa abre, sem vínculo.
+      const declared = await userWithPhone(uniquePhone(), false);
+      const pending = await call("POST", `${BASE}/conversations`, { cookie: as("support"), body: { channelId: qrId, userId: declared.user.id } });
+      expect(pending.status).toBe(201);
+      expect(((await bodyOf(pending)).conversation as Item).contact.identified).toBe(false);
 
       const typed = uniquePhone();
       phoneKeys.push(phoneValues(typed).phoneKey);

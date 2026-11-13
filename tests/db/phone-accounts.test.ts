@@ -85,19 +85,32 @@ describe("cadastro de conta (/api/auth/sign-up/email)", () => {
     });
   });
 
-  it("fixo e celular antigo são aceitos; estrangeiro também", async () => {
-    for (const [phone, normalized] of [
-      ["(11) 3456-7890", "551134567890"],
-      ["(11) 9876-5432", "551198765432"],
-      ["+1 415 555 2671", "14155552671"],
-    ] as const) {
+  it("a conta da equipe só aceita número que recebe WhatsApp: fixo e celular antigo são recusados", async () => {
+    for (const phone of ["(11) 3456-7890", "(11) 9876-5432"]) {
       const email = newEmail();
-      expect((await signUp({ email, phone })).status).toBe(200);
-      expect((await phoneOfUser(email))?.phone_normalized).toBe(normalized);
+      const response = await signUp({ email, phone });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Informe um celular com WhatsApp." });
+      expect(await phoneOfUser(email)).toBeUndefined();
     }
+
+    const email = newEmail();
+    expect((await signUp({ email, phone: "+1 415 555 2671" })).status).toBe(200);
+    expect((await phoneOfUser(email))?.phone_normalized).toBe("14155552671");
   });
 
-  it("o telefone da conta não precisa ser único: dois membros dividem o número", async () => {
+  it("o telefone do cadastro nasce só declarado, sem confirmação", async () => {
+    const email = newEmail();
+    expect((await signUp({ email, phone: ACCOUNT_PHONE })).status).toBe(200);
+
+    const [row] = await owner<{ at: Date | null; via: string | null }[]>`
+      select phone_verified_at as at, phone_verified_via as via from "user" where email = ${email}
+    `;
+    expect(row).toEqual({ at: null, via: null });
+  });
+
+  it("dois cadastros podem declarar o mesmo número: só o confirmado conta na unicidade", async () => {
     const [a, b] = [newEmail(), newEmail()];
     expect((await signUp({ email: a, phone: ACCOUNT_PHONE })).status).toBe(200);
     expect((await signUp({ email: b, phone: ACCOUNT_PHONE })).status).toBe(200);

@@ -36,6 +36,7 @@ import type {
   DeletionSubjectType,
 } from "@/db/schema/lgpd";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
+import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { appLink } from "@/lib/auth/links";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { cancelSubscriptionForDeletion } from "@/lib/billing/checkout";
@@ -752,6 +753,7 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
       phone: null,
       phoneNormalized: null,
       phoneKey: null,
+      ...UNVERIFIED_PHONE,
       locale: null,
       emailVerified: false,
       twoFactorEnabled: false,
@@ -771,6 +773,9 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await releaseAssignments(tx, id);
   // Caixa de entrada: mensagens e anexos sem autor; contatos ligados a ela só perdem o vínculo.
   await detachUserFromInbox(tx, id);
+  // A linha de `user` fica (anonimizada), então o `set null` da FK não dispara: a ficha de
+  // cliente que a pessoa tinha em cada organização deixa de apontar para ela aqui.
+  await tx.update(customer).set({ userId: null }).where(eq(customer.userId, id));
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
 
@@ -784,6 +789,8 @@ const anonymizedCustomer = {
   // Libera o número para outro cadastro; o `CHECK` aceita porque o e-mail vira `deleted+...`.
   phoneNormalized: null,
   phoneKey: null,
+  ...UNVERIFIED_PHONE,
+  userId: null,
   document: null,
   notes: null,
   // Valor de campo adicional é dado pessoal em potencial.
@@ -820,6 +827,7 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
       phone: null,
       phoneNormalized: null,
       phoneKey: null,
+      ...UNVERIFIED_PHONE,
       locale: null,
       emailVerified: false,
       twoFactorEnabled: false,

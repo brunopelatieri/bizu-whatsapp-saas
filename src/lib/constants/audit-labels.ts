@@ -31,6 +31,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "customer.updated": "Cliente alterado",
   "customer.deleted": "Cliente excluído",
   "customer.invited": "Cliente convidado ao portal",
+  "customer.team_linked": "Ficha de cliente ligada a uma pessoa da equipe",
   "billing.checkout_started": "Pagamento iniciado",
   "billing.subscription_changed": "Assinatura alterada",
   "billing.profile_updated": "Dados de cobrança alterados",

@@ -22,11 +22,19 @@ import { appLink } from "@/lib/auth/links";
 import { getAuth } from "@/lib/auth/server";
 import { billingState } from "@/lib/billing/state";
 import { maskEmail } from "@/lib/email/address";
-import { phoneValues } from "@/lib/phone/columns";
+import { canWhatsApp } from "@/lib/phone/br";
+import { phoneColumns, phoneValues } from "@/lib/phone/columns";
+import {
+  accountPhoneConflicts,
+  accountPhoneInUse,
+  lockPhoneKey,
+} from "@/lib/phone/uniqueness";
+import { verifiedPhone } from "@/lib/phone/verification";
 import { sendEmail } from "@/lib/email/send";
 import { emailChangedTemplate } from "@/lib/email/templates/email-changed";
 import { hasPortalPassword } from "@/lib/portal/profile";
 import type { UpdatePersonInput } from "@/lib/schemas/admin";
+import { WHATSAPP_PHONE_REQUIRED } from "@/lib/schemas/phone";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 import { findPendingDeletion } from "@/lib/lgpd/deletion";
 
@@ -153,6 +161,15 @@ export async function getUserDetail(userId: string) {
   };
 }
 
+/** Conta da equipe só com número que recebe WhatsApp, também para quem não passou pelo Zod. */
+function whatsappPhoneValues(raw: string) {
+  const { kind, ...values } = phoneColumns(raw);
+  if (!canWhatsApp(kind)) {
+    throw new TenantRuleError(400, "INVALID_PHONE", WHATSAPP_PHONE_REQUIRED);
+  }
+  return values;
+}
+
 /**
  * `PATCH /api/admin/users/:id`. Trocar o e-mail desverifica a conta, encerra as sessões,
  * avisa o endereço antigo (`email-changed`) e manda ao novo o link de definir senha (reset do
@@ -177,12 +194,23 @@ export async function updateUserByAdmin(
     if (other) throw EMAIL_TAKEN();
   }
 
+  const phone = input.phone === undefined ? null : whatsappPhoneValues(input.phone);
+
   const updated = await withPlatformScope("admin: edita usuário", async (tx) => {
+    if (phone) {
+      // Liberação manual não prova a posse do número: com outra conta do mesmo grupo (owners,
+      // a equipe de uma organização, a equipe da plataforma) já confirmada nele, é recusada.
+      await lockPhoneKey(tx, phone.phoneKey);
+      const holders = await accountPhoneConflicts(tx, target.id, phone.phoneKey);
+      if (holders.length > 0) throw accountPhoneInUse();
+    }
+
     const [row] = await tx
       .update(user)
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
+        // Quem edita é o proprietário da plataforma: o número que ele informa vale (`manual`).
+        ...(phone ? { ...phone, ...verifiedPhone("manual") } : {}),
         ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
       })
       .where(eq(user.id, target.id))
@@ -377,7 +405,9 @@ export async function updatePortalUserByAdmin(
       .update(portalUser)
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
+        ...(input.phone !== undefined
+          ? { ...phoneValues(input.phone), ...verifiedPhone("manual") }
+          : {}),
         ...(emailChanged ? { email: newEmail } : {}),
       })
       .where(eq(portalUser.id, person.id))

@@ -32,7 +32,9 @@
   clientes, complementos do atendimento (continuar por outro canal, emoji, filtro na URL) e de
   planos (uso, exceção por tenant). Decisões de produto fechadas. **Implementados:** bloco S
   (senha forte: política no schema e no servidor, medidor nas telas) e bloco B (bloqueio de login
-  por tentativas, `login_throttle`, variáveis `LOGIN_*`). Próxima fase: T1. Os blocos S, B, T, F, E, L e R seguram o deploy.
+  por tentativas, `login_throttle`, variáveis `LOGIN_*`) e a fase **T1** (estado de verificação do
+  telefone, unicidade por grupo, equipe que também é cliente, vínculo automático só com telefone
+  confirmado; `tech/28-crm-cadastro.md`). Próxima fase: T2. Os blocos S, B, T, F, E, L e R seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e

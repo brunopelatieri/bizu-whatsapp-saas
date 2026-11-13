@@ -7,7 +7,7 @@ import {
   PASSWORD_MIN_LENGTH,
   PASSWORD_POLICY_MESSAGE,
 } from "@/lib/auth/password-policy";
-import { phoneSchema } from "@/lib/schemas/phone";
+import { whatsappPhoneSchema } from "@/lib/schemas/phone";
 
 export const MIN_PASSWORD_LENGTH = PASSWORD_MIN_LENGTH;
 const MAX_PASSWORD_LENGTH = PASSWORD_MAX_LENGTH;
@@ -61,7 +61,8 @@ export const signupSchema = z.object({
   name: z.string().trim().min(1, "Informe seu nome.").max(120, "Nome muito longo."),
   email,
   /** Obrigatório em toda conta: o WhatsApp é o canal da base (`docs/specs/crm-cadastro`). */
-  phone: phoneSchema,
+  // Conta da equipe: só WhatsApp (`whatsappPhoneSchema`). O portal troca pelo do cliente.
+  phone: whatsappPhoneSchema,
   password: newPassword,
   acceptTerms: z.literal(true, {
     error: "Aceite os termos de uso e a política de privacidade.",

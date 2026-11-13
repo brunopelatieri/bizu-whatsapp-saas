@@ -55,6 +55,8 @@ export const customersQuerySchema = z.object({
   status: z.enum(customerStatuses).optional(),
   /** `tags=<id>,<id>`: clientes com qualquer uma delas. */
   tags: tagFilterSchema.optional(),
+  /** `team=true`: só as fichas de quem também é da equipe da organização. */
+  team: z.enum(["true"]).optional(),
   page: z.coerce.number().int().min(1).max(100_000).default(1),
 });
 export type CustomersQuery = z.infer<typeof customersQuerySchema>;

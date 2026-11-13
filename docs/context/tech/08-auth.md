@@ -199,6 +199,13 @@ senha**, que é o que um cadastro nunca confirmado tem.
   `/api/auth/*` e `/api/auth-ext/*`; sem esse middleware, cadastro e login aceitariam
   envio de outro site.
 
+## Telefone da conta
+
+A conta da equipe só aceita número que recebe WhatsApp (`whatsappPhoneSchema`), e o telefone do
+cadastro nasce **pendente** (`phone_verified_at` nulo): não conta na unicidade nem atrai o vínculo
+automático das conversas até ser confirmado. Detalhe em `tech/28-crm-cadastro.md`, "Telefone
+verificado e único".
+
 ## Bloqueio de login por tentativas
 
 Além do limite por IP, o login conta as senhas erradas por e-mail e bloqueia por um tempo

@@ -246,6 +246,13 @@
       "when": 1794495390098,
       "tag": "0034_bloqueio_login",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794576614816,
+      "tag": "0035_telefone_verificado",
+      "breakpoints": true
     }
   ]
 }

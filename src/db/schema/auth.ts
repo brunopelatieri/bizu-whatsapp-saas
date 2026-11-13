@@ -11,7 +11,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { phoneRequired } from "../phone-check";
+import { phoneVerifiedVia } from "../../lib/phone/verification";
+import { phoneRequired, phoneVerifiedConsistent } from "../phone-check";
 import { organization } from "./tenant";
 
 /**
@@ -49,6 +50,9 @@ export const user = pgTable("user", {
   phone: text("phone"),
   phoneNormalized: text("phone_normalized"),
   phoneKey: text("phone_key"),
+  // Quando e como o número atual foi confirmado; nulos = só declarado (`phone/verification.ts`).
+  phoneVerifiedAt: timestamptz("phone_verified_at"),
+  phoneVerifiedVia: text("phone_verified_via", { enum: phoneVerifiedVia }),
   locale: text("locale"),
   // Sessão nova abre neste tenant, se a pessoa ainda for membro. Não passa pelo Better Auth.
   lastTenantId: uuid("last_tenant_id").references(() => organization.id, {
@@ -56,9 +60,11 @@ export const user = pgTable("user", {
   }),
   ...timestamps,
 }, (table) => [
-  // Não único: dois membros podem dividir o número da empresa.
+  // Sem índice único: a conta é global e a unicidade é por grupo (owners no SaaS, equipe por
+  // organização), entre números confirmados (`src/lib/phone/uniqueness.ts`).
   index("user_phone_key_idx").on(table.phoneKey),
   check("user_phone_required", phoneRequired),
+  check("user_phone_verified_consistent", phoneVerifiedConsistent),
 ]);
 
 export const session = pgTable(

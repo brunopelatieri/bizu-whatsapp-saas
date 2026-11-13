@@ -10,7 +10,7 @@ import {
 } from "@/lib/billing/constants";
 import { billingStates } from "@/lib/billing/state";
 import { tagFilterSchema } from "@/lib/schemas/crm";
-import { phoneSchema } from "@/lib/schemas/phone";
+import { phoneSchema, whatsappPhoneSchema } from "@/lib/schemas/phone";
 import {
   slugSchema,
   updateTenantSchema as ownerUpdateTenantSchema,
@@ -269,7 +269,7 @@ export const deleteUserSchema = deleteSchema.extend({
 });
 export type DeleteUserInput = z.infer<typeof deleteUserSchema>;
 
-const personFields = {
+const personFields = (phone: typeof phoneSchema) => ({
   name: z.string().trim().min(2, "Informe o nome.").max(120, "Nome muito longo."),
   email: z
     .string()
@@ -277,14 +277,20 @@ const personFields = {
     .toLowerCase()
     .max(254, "E-mail muito longo.")
     .email("Informe um e-mail válido."),
-  phone: phoneSchema,
-};
+  phone,
+});
 
-/** Papéis não se editam por aqui. O telefone se troca, mas nunca se apaga. */
-export const updateUserSchema = z
-  .object(personFields)
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, "Nada para alterar.");
+const personPatch = (phone: typeof phoneSchema) =>
+  z
+    .object(personFields(phone))
+    .partial()
+    .refine((value) => Object.keys(value).length > 0, "Nada para alterar.");
+
+/**
+ * Papéis não se editam por aqui. O telefone se troca, mas nunca se apaga; o da conta da equipe
+ * precisa receber WhatsApp.
+ */
+export const updateUserSchema = personPatch(whatsappPhoneSchema);
 export type UpdatePersonInput = z.infer<typeof updateUserSchema>;
 
-export const updatePortalUserSchema = updateUserSchema;
+export const updatePortalUserSchema = personPatch(phoneSchema);

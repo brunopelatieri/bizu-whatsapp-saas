@@ -13,8 +13,10 @@ import {
   type CustomerStatus,
   customerStatuses,
 } from "../../lib/tenant/customer-constants";
-import { phoneRequired } from "../phone-check";
+import { phoneVerifiedVia } from "../../lib/phone/verification";
+import { phoneRequired, phoneVerifiedConsistent } from "../phone-check";
 import { tenantPolicy } from "../tenant-policy";
+import { user } from "./auth";
 import { portalUser } from "./portal-auth";
 import { organization } from "./tenant";
 
@@ -43,6 +45,15 @@ export const customer = pgTable(
     phone: text("phone"),
     phoneNormalized: text("phone_normalized"),
     phoneKey: text("phone_key"),
+    // Quando e como o número atual foi confirmado; nulos = só declarado (`phone/verification.ts`).
+    phoneVerifiedAt: timestamptz("phone_verified_at"),
+    phoneVerifiedVia: text("phone_verified_via", { enum: phoneVerifiedVia }),
+    /**
+     * A pessoa da equipe desta organização que também é cliente dela: dois cadastros
+     * separados, ligados por id (`src/lib/tenant/team-customer.ts`). O papel mostrado na
+     * ficha é lido de `member`, não gravado aqui.
+     */
+    userId: uuid("user_id").references(() => user.id, { onDelete: "set null" }),
     document: text("document"),
     status: text("status", { enum: customerStatuses })
       .notNull()
@@ -68,7 +79,12 @@ export const customer = pgTable(
     uniqueIndex("customer_tenant_phone_key_idx")
       .on(table.tenantId, table.phoneKey)
       .where(sql`${table.phoneKey} IS NOT NULL`),
+    // Uma ficha de cliente por pessoa da equipe, por organização.
+    uniqueIndex("customer_tenant_user_idx")
+      .on(table.tenantId, table.userId)
+      .where(sql`${table.userId} IS NOT NULL`),
     check("customer_phone_required", phoneRequired),
+    check("customer_phone_verified_consistent", phoneVerifiedConsistent),
     check("customer_custom_fields_object", sql`jsonb_typeof(${table.customFields}) = 'object'`),
     tenantPolicy(),
   ],

@@ -40,6 +40,8 @@ export type AuditAction =
   | "customer.updated"
   | "customer.deleted"
   | "customer.invited"
+  // A ficha de cliente ligada à pessoa da equipe (`customer.user_id`); `metadata.userId`.
+  | "customer.team_linked"
   | "portal.signed_up"
   | "portal.profile_updated"
   | "portal.password_set"

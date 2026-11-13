@@ -192,12 +192,18 @@ describe("ingestão da caixa de entrada", () => {
   const messagesOf = (channelId: string) =>
     read((tx) => tx.select().from(message).where(eq(message.channelId, channelId)).orderBy(message.createdAt));
 
-  async function createUser(phone: string, options: { memberOf?: string } = {}) {
+  /** `verified: false` é o número só declarado, como sai do cadastro. */
+  async function createUser(
+    phone: string,
+    options: { memberOf?: string; verified?: boolean } = {},
+  ) {
     const id = randomUUID();
     const values = phoneValues(phone);
+    const at = options.verified === false ? null : new Date();
+    const via = at ? "manual" : null;
     await owner.begin(async (tx) => {
       await tx`select set_config('app.bypass_tenant', 'on', true)`;
-      await tx`insert into "user" (id, name, email, email_verified, phone, phone_normalized, phone_key) values (${id}, ${`Membro ${id.slice(0, 4)}`}, ${`inbox-${id}@tenant-test.bizu.local`}, true, ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey})`;
+      await tx`insert into "user" (id, name, email, email_verified, phone, phone_normalized, phone_key, phone_verified_at, phone_verified_via) values (${id}, ${`Membro ${id.slice(0, 4)}`}, ${`inbox-${id}@tenant-test.bizu.local`}, true, ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey}, ${at}, ${via})`;
       if (options.memberOf) {
         await tx`insert into member (organization_id, user_id, role) values (${options.memberOf}, ${id}, 'member')`;
       }
@@ -206,12 +212,18 @@ describe("ingestão da caixa de entrada", () => {
     return id;
   }
 
-  async function createCustomer(tenantId: string, phone: string) {
+  async function createCustomer(
+    tenantId: string,
+    phone: string,
+    options: { verified?: boolean } = {},
+  ) {
     const id = randomUUID();
     const values = phoneValues(phone);
+    const at = options.verified === false ? null : new Date();
+    const via = at ? "team" : null;
     await owner.begin(async (tx) => {
       await tx`select set_config('app.bypass_tenant', 'on', true)`;
-      await tx`insert into customer (id, tenant_id, name, phone, phone_normalized, phone_key) values (${id}, ${tenantId}, 'Cliente', ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey})`;
+      await tx`insert into customer (id, tenant_id, name, phone, phone_normalized, phone_key, phone_verified_at, phone_verified_via) values (${id}, ${tenantId}, 'Cliente', ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey}, ${at}, ${via})`;
     });
     return id;
   }
@@ -367,11 +379,57 @@ describe("ingestão da caixa de entrada", () => {
       expect(contact).toMatchObject({ customerId, userId: null, phone: delivered });
     });
 
-    it("membro da equipe reconhecido (com e sem o 9º dígito); o membro vem antes do cliente", async () => {
+    it("quem é da equipe e também é cliente: a conversa fica na ficha de cliente", async () => {
+      const ch = await seedCloudChannel(tenantScope(tenantA));
+      const phone = uniquePhone();
+      await createUser(phone, { memberOf: tenantA });
+      const customerId = await createCustomer(tenantA, phone);
+
+      await deliver(ch, [inbound({ fromPhone: phoneValues(phone).phoneNormalized })]);
+
+      const [contact] = await contactsOf(tenantScope(tenantA));
+      expect(contact).toMatchObject({ customerId, userId: null });
+    });
+
+    it("telefone só declarado não atrai a conversa: nem do cliente, nem do membro", async () => {
+      const ch = await seedCloudChannel(tenantScope(tenantA));
+      const declaredByCustomer = uniquePhone();
+      const declaredByMember = uniquePhone();
+      const customerId = await createCustomer(tenantA, declaredByCustomer, { verified: false });
+      const userId = await createUser(declaredByMember, { memberOf: tenantA, verified: false });
+
+      await deliver(ch, [inbound({ fromPhone: phoneValues(declaredByCustomer).phoneNormalized })]);
+      await deliver(ch, [inbound({ fromPhone: phoneValues(declaredByMember).phoneNormalized })]);
+
+      for (const contact of await contactsOf(tenantScope(tenantA))) {
+        expect(contact).toMatchObject({ customerId: null, userId: null });
+      }
+
+      // No painel, a equipe ainda vê os dois como candidatos e decide.
+      const candidates = await withScope(tenantScope(tenantA), async (tx) => ({
+        customer: await linkCandidates(tx, tenantScope(tenantA), phoneValues(declaredByCustomer).phoneKey),
+        member: await linkCandidates(tx, tenantScope(tenantA), phoneValues(declaredByMember).phoneKey),
+      }));
+      expect(candidates.customer.customers.map(({ id }) => id)).toEqual([customerId]);
+      expect(candidates.member.users.map(({ id }) => id)).toEqual([userId]);
+    });
+
+    it("membro confirmado e cliente só declarado com o mesmo número: vale o membro", async () => {
       const ch = await seedCloudChannel(tenantScope(tenantA));
       const phone = uniquePhone();
       const userId = await createUser(phone, { memberOf: tenantA });
-      await createCustomer(tenantA, phone);
+      await createCustomer(tenantA, phone, { verified: false });
+
+      await deliver(ch, [inbound({ fromPhone: phoneValues(phone).phoneNormalized })]);
+
+      const [contact] = await contactsOf(tenantScope(tenantA));
+      expect(contact).toMatchObject({ userId, customerId: null });
+    });
+
+    it("membro da equipe reconhecido, com e sem o 9º dígito", async () => {
+      const ch = await seedCloudChannel(tenantScope(tenantA));
+      const phone = uniquePhone();
+      const userId = await createUser(phone, { memberOf: tenantA });
 
       await deliver(ch, [inbound({ fromPhone: phoneValues(phone).phoneNormalized })]);
 
@@ -468,6 +526,14 @@ describe("ingestão da caixa de entrada", () => {
       expect(thread).toMatchObject({ tenantId: null, assignedUserId: null });
       const candidates = await withScope(platformScope, (tx) => linkCandidates(tx, platformScope, key));
       expect(candidates.customers).toEqual([]);
+
+      // Usuário com o número só declarado: sem vínculo.
+      const declared = uniquePhone();
+      platformKeys.push(phoneValues(declared).phoneKey);
+      await createUser(declared, { verified: false });
+      await deliver(ch, [inbound({ fromPhone: phoneValues(declared).phoneNormalized })]);
+      const pending = (await contactsOf(platformScope)).find((row) => row.phoneKey === phoneValues(declared).phoneKey);
+      expect(pending).toMatchObject({ userId: null, customerId: null });
 
       // Dois usuários com o número: sem vínculo.
       const shared = uniquePhone();

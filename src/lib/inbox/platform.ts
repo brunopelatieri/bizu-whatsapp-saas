@@ -102,13 +102,14 @@ async function destinationOf(tx: Tx, input: PlatformStartConversationInput) {
 
   if (input.userId) {
     const [row] = await tx
-      .select({ phone: user.phoneNormalized })
+      .select({ phone: user.phoneNormalized, verifiedAt: user.phoneVerifiedAt })
       .from(user)
       .where(and(eq(user.id, input.userId), eq(user.banned, false)));
     if (!row) throw notFound("Usuário não encontrado.");
     if (!row.phone) throw phoneRequired();
     raw = `+${row.phone}`;
-    link = { userId: input.userId };
+    // Só telefone confirmado liga o contato ao usuário (como no tenant, `destinationPhone`).
+    if (row.verifiedAt) link = { userId: input.userId };
   } else {
     raw = input.phone ?? "";
   }

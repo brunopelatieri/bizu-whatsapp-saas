@@ -77,6 +77,8 @@ export async function requestPortalLogin(email: string, org: string) {
         id: customer.id,
         name: customer.name,
         phone: customer.phone,
+        phoneVerifiedAt: customer.phoneVerifiedAt,
+        phoneVerifiedVia: customer.phoneVerifiedVia,
         status: customer.status,
         portalUserId: customer.portalUserId,
       })
@@ -89,7 +91,7 @@ export async function requestPortalLogin(email: string, org: string) {
   // Ativado por `status`, sem convite: ainda não tem identidade no portal.
   if (!current.portalUserId) {
     if (!current.phone) return;
-    const portalUserId = await ensurePortalUser(email, current.name, current.phone);
+    const portalUserId = await ensurePortalUser(email, current.name, current.phone, current);
 
     await withTenant(tenant.id, (tx) =>
       tx
@@ -185,6 +187,10 @@ export async function confirmPortalSignup(email: string, org: string) {
         phone: person.phone,
         phoneNormalized: person.phoneNormalized,
         phoneKey: person.phoneKey,
+        // O número do autocadastro é só declarado até a pessoa confirmá-lo: a ficha herda o
+        // estado da conta, e o vínculo automático da conversa espera a confirmação.
+        phoneVerifiedAt: person.phoneVerifiedAt,
+        phoneVerifiedVia: person.phoneVerifiedVia,
       })
       .onConflictDoUpdate({
         target: [customer.tenantId, customer.email],

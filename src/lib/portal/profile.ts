@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth/password-policy";
 import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { getPortalAuth } from "@/lib/auth/portal";
+import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
 import type { PortalCustomer } from "@/lib/portal/access";
 import type {
@@ -51,12 +52,35 @@ export function updatePortalProfile(
 ) {
   const tenantId = current.tenant.id;
   // Duas formas do mesmo número casam em `phone_key`; o índice único do tenant barra a repetida.
-  const values = { name: input.name, ...phoneValues(input.phone) };
+  const phone = phoneValues(input.phone);
+  const base = { name: input.name, ...phone };
+
+  /**
+   * Número novo declarado pela própria pessoa deixa de valer como confirmado: é o que impede a
+   * conversa de outro dono do número de ser vinculada a este cadastro (`autoLinkContact` só usa
+   * telefone confirmado). A decisão é **por linha**. A conta é global e a ficha é do tenant
+   * ativo: as duas podem ter números diferentes (a pessoa já trocou o número em outra
+   * organização, ou o /admin editou a conta), e a confirmação de uma nunca serve à outra. A
+   * troca com link de verificação é a T2.
+   */
+  const valuesFor = (currentKey: string | null | undefined) =>
+    currentKey === phone.phoneKey ? base : { ...base, ...UNVERIFIED_PHONE };
 
   return withTenant(tenantId, async (tx) => {
+    const [account] = await tx
+      .select({ phoneKey: portalUser.phoneKey })
+      .from(portalUser)
+      .where(eq(portalUser.id, portalUserId))
+      .for("update");
+    const [record] = await tx
+      .select({ phoneKey: customer.phoneKey })
+      .from(customer)
+      .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)))
+      .for("update");
+
     const [person] = await tx
       .update(portalUser)
-      .set(values)
+      .set(valuesFor(account?.phoneKey))
       .where(eq(portalUser.id, portalUserId))
       .returning({
         id: portalUser.id,
@@ -68,7 +92,7 @@ export function updatePortalProfile(
 
     await tx
       .update(customer)
-      .set(values)
+      .set(valuesFor(record?.phoneKey))
       .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)));
     await auditInTransaction(tx, "portal.profile_updated", {
       actor: { type: "portal_user", id: portalUserId },

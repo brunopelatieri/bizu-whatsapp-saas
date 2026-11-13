@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { type Scope, scopeTenantId, type Tx } from "@/db/rls";
 import { chatContact, chatContactIdentity, customer, member, user } from "@/db/schema";
 import type { ChatContactOrigin } from "@/lib/inbox/constants";
@@ -129,12 +129,26 @@ export async function upsertContact(
  * Quem tem a mesma `phone_key` no escopo: membros ativos do tenant (ou usuários, na plataforma) e
  * clientes do tenant. Base do vínculo automático e da lista de candidatos do painel (C2). A
  * plataforma nunca consulta `customer` de tenant (decisão do proprietário).
+ *
+ * `verifiedOnly` deixa só quem tem o telefone **confirmado** (`phone_verified_at`): é o filtro do
+ * vínculo automático. O painel mostra todos, porque ali quem decide é a equipe.
  */
-export async function linkCandidates(tx: Tx, scope: Scope, phoneKey: string, limit = 20) {
+export async function linkCandidates(
+  tx: Tx,
+  scope: Scope,
+  phoneKey: string,
+  limit = 20,
+  { verifiedOnly = false }: { verifiedOnly?: boolean } = {},
+) {
+  // No painel, a equipe vê quem tem o número só declarado e decide sabendo disso.
+  const userIsVerified = sql<boolean>`${user.phoneVerifiedAt} is not null`;
+  const userVerified = verifiedOnly ? isNotNull(user.phoneVerifiedAt) : undefined;
+  const customerVerified = verifiedOnly ? isNotNull(customer.phoneVerifiedAt) : undefined;
+
   const users =
     scope.kind === "tenant"
       ? await tx
-          .select({ id: user.id, name: user.name })
+          .select({ id: user.id, name: user.name, phoneVerified: userIsVerified })
           .from(member)
           .innerJoin(user, eq(user.id, member.userId))
           .where(
@@ -142,23 +156,35 @@ export async function linkCandidates(tx: Tx, scope: Scope, phoneKey: string, lim
               eq(member.organizationId, scope.tenantId),
               eq(user.phoneKey, phoneKey),
               eq(user.banned, false),
+              userVerified,
             ),
           )
           .orderBy(user.name)
           .limit(limit)
       : await tx
-          .select({ id: user.id, name: user.name })
+          .select({ id: user.id, name: user.name, phoneVerified: userIsVerified })
           .from(user)
-          .where(and(eq(user.phoneKey, phoneKey), eq(user.banned, false)))
+          .where(and(eq(user.phoneKey, phoneKey), eq(user.banned, false), userVerified))
           .orderBy(user.name)
           .limit(limit);
 
   const customers =
     scope.kind === "tenant"
       ? await tx
-          .select({ id: customer.id, name: customer.name, phone: customer.phoneNormalized })
+          .select({
+            id: customer.id,
+            name: customer.name,
+            phone: customer.phoneNormalized,
+            phoneVerified: sql<boolean>`${customer.phoneVerifiedAt} is not null`,
+          })
           .from(customer)
-          .where(and(eq(customer.tenantId, scope.tenantId), eq(customer.phoneKey, phoneKey)))
+          .where(
+            and(
+              eq(customer.tenantId, scope.tenantId),
+              eq(customer.phoneKey, phoneKey),
+              customerVerified,
+            ),
+          )
           .limit(limit)
       : [];
 
@@ -166,18 +192,23 @@ export async function linkCandidates(tx: Tx, scope: Scope, phoneKey: string, lim
 }
 
 /**
- * Vínculo automático do contato recém-criado, nesta ordem e só com correspondência única: membro
- * ativo da equipe (no tenant) ou usuário (na plataforma); depois cliente do tenant. Dois membros
- * com o mesmo número (o da empresa) deixam o contato sem `user` e o painel mostra os candidatos.
+ * Vínculo automático do contato recém-criado, só com correspondência única e só com telefone
+ * **confirmado** (um número apenas declarado não pode atrair a conversa do verdadeiro dono dele).
+ *
+ * No tenant, o cliente vem antes do membro: quem é da equipe e também é cliente da organização
+ * tem os dois cadastros com o mesmo número, e a conversa fica na ficha de cliente (o painel
+ * mostra o selo da equipe). Sem cliente, vale o membro. Na plataforma, só o usuário.
  */
 export async function autoLinkContact(tx: Tx, scope: Scope, contactId: string, phoneKey: string) {
-  const { users, customers } = await linkCandidates(tx, scope, phoneKey, 2);
+  const { users, customers } = await linkCandidates(tx, scope, phoneKey, 2, {
+    verifiedOnly: true,
+  });
 
   const link =
-    users.length === 1 && users[0]
-      ? { userId: users[0].id }
-      : customers.length === 1 && customers[0]
-        ? { customerId: customers[0].id }
+    customers.length === 1 && customers[0]
+      ? { customerId: customers[0].id }
+      : users.length === 1 && users[0]
+        ? { userId: users[0].id }
         : null;
   if (!link) return null;
 

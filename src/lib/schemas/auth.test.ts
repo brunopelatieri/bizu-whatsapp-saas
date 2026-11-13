@@ -62,9 +62,20 @@ describe("signupSchema", () => {
     expect(message("(11) 98765-4321 ramal 2")).toBe("Use só números e + ( ) - .");
   });
 
-  it("aceita celular, fixo, celular antigo, +55 e estrangeiro", () => {
-    for (const phone of ["+55 (11) 98765-4321", "(11) 3456-7890", "(11) 9876-5432", "+1 415 555 2671"]) {
+  it("aceita celular com WhatsApp: nacional, +55 e estrangeiro", () => {
+    for (const phone of ["(11) 98765-4321", "+55 (11) 98765-4321", "+1 415 555 2671"]) {
       expect(signupSchema.safeParse({ ...signup, phone }).success).toBe(true);
+    }
+  });
+
+  it("a conta da equipe recusa fixo e celular antigo: é por WhatsApp que ela é verificada", () => {
+    for (const phone of ["(11) 3456-7890", "(11) 9876-5432"]) {
+      const result = signupSchema.safeParse({ ...signup, phone });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.issues.map(({ message }) => message)).toEqual([
+        "Informe um celular com WhatsApp.",
+      ]);
     }
   });
 });

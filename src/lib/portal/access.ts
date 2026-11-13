@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import type { TenantAccessMode, TenantStatus } from "@/db/schema/tenant";
 import { phoneValues } from "@/lib/phone/columns";
+import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 
 /**
@@ -191,11 +192,24 @@ export function leavePortalTenant(
  * Identidade do e-mail, criada sem senha e sem verificação se ainda não existir. O telefone é
  * o do cliente convidado e só entra na criação: quem já tem conta (mesmo e-mail em outro
  * tenant) mantém o dele. Este `INSERT` direto não passa pelo hook do Better Auth.
+ *
+ * O estado do telefone é o da ficha, copiado: confirmado se a ficha o tem confirmado, pendente se
+ * não. Nunca um valor fixo: a conta é global, e uma organização qualquer criaria uma identidade
+ * com o número de outra pessoa já "confirmado", ou lavaria o número pendente de uma ficha.
  */
-export async function ensurePortalUser(email: string, name: string, phone: string) {
+export async function ensurePortalUser(
+  email: string,
+  name: string,
+  phone: string,
+  verification: Pick<typeof portalUser.$inferInsert, "phoneVerifiedAt" | "phoneVerifiedVia">,
+) {
+  const state = verification.phoneVerifiedAt
+    ? { phoneVerifiedAt: verification.phoneVerifiedAt, phoneVerifiedVia: verification.phoneVerifiedVia }
+    : UNVERIFIED_PHONE;
+
   await getDb()
     .insert(portalUser)
-    .values({ email, name, ...phoneValues(phone) })
+    .values({ email, name, ...phoneValues(phone), ...state })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [row] = await getDb()
