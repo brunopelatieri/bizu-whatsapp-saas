@@ -808,6 +808,28 @@ telefone, hoje obrigatório.
 - **Verificação:** `src/lib/legal/legal.test.ts`; teste novo exige que os dois textos contenham
   "WhatsApp". **LLM:** Sonnet 5.5 no texto; revisão jurídica é humana.
 
+### L: o que foi feito (2026-11-13)
+
+- `privacidade.md` (agora com 9 seções) e `termos.md` (11) citam telefone e WhatsApp. Cada afirmação foi conferida no
+  código e em `lgpd.md`: dados do atendimento (contato, nome do perfil, mensagens, mídia, aviso de canal), operadores
+  (Meta na Cloud API; servidor Evolution da plataforma no QR Code; armazenamento), a confirmação do telefone por link
+  (canal do responsável, quem vê a mensagem no QR Code, liberação à mão), prazos (aviso de canal 30 dias,
+  pedido de telefone encerrado 30 dias, backup 14 dias) e o que cada exclusão apaga.
+- **Só o que vale hoje:** conversas e mensagens aparecem como **sem prazo automático** (o bloco R não existe ainda; quando
+  existir, a seção 6 do texto muda com ele). O efeito de D-11 (ficha de cliente de quem é da equipe) entra no texto no
+  bloco E, junto com o código que o faz valer.
+- `LEGAL_VERSIONS` já estava em `2026-11` (de `66893fa`): o bloco L mantém `2026-11` para as duas, como a SPEC pede
+  para o mês do deploy; **por isso nenhum aceite existente é invalidado**. Se algum banco já tem aceite de `2026-11` e
+  o re-aceite importa, suba para o mês do deploy real.
+- Teste novo em `legal.test.ts`: os dois textos contêm "WhatsApp" e "telefone"; os termos citam "não oficial" e a
+  remoção dos números; a privacidade cita Meta, Evolution e a exclusão de cliente.
+- **Para o olhar de um advogado:** responsabilidade do owner pelos números e pelas políticas da Meta e limite de
+  responsabilidade (termos, seções 4 e 9); o canal por QR Code como conexão não oficial e o risco de banimento (4);
+  o papel de controlador × operador nas conversas de WhatsApp (privacidade, 1); as bases legais do atendimento e da
+  confirmação do telefone (3); o compartilhamento com Meta e Evolution (4); a ausência de prazo de retenção das conversas
+  (6); a frase de que o dono do número por QR Code vê o link de confirmação (5); o que a exclusão não apaga (7: faturas,
+  consentimento, auditoria, backups); o controlador e o encarregado continuam entre colchetes.
+
 ---
 
 ## Bloco E: exclusões (P6, P7)

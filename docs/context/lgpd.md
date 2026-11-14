@@ -36,7 +36,7 @@ Observações:
 
 - **Backup e exclusão:** um backup antigo ainda contém quem foi anonimizado depois. É aceitável porque o prazo é curto, o arquivo é cifrado e quem restaura precisa **reaplicar as exclusões** executadas desde o backup (consulte `deletion_request` com `status = 'executed'` e rode `executeDeletion` ou o job). Documentado em `tech/14-deploy.md`.
 - **Logs:** nenhuma linha leva cookie, e-mail, documento, senha nem token (`src/lib/logger.ts`). O prazo de retenção dos logs é da infraestrutura (rotação do Docker ou do coletor).
-- **Texto legal desatualizado (pendente do proprietário):** `src/lib/legal/privacidade.md` ainda não cita o atendimento por WhatsApp (conversas, mídia e o aviso de canal com prazo de 30 dias). Incluir muda o sentido do texto e pede subir `LEGAL_VERSIONS` (novo aceite de todos); a C7 não mexeu nele para não forçar o re-aceite sem decisão.
+- **Texto legal (bloco L da pré-produção):** `privacidade.md` e `termos.md` citam o telefone e o atendimento por WhatsApp (dados, operadores Meta e Evolution, verificação por link, retenção dos avisos e dos pedidos de telefone, o que cada exclusão apaga) e dizem que conversas e mensagens **não têm prazo automático**. Quando o bloco R (retenção de mensagens) existir, a seção 6 do texto muda junto com esta tabela e `LEGAL_VERSIONS` sobe. A revisão jurídica segue pendente (os textos são modelos).
 - Mudar um prazo é mudar o código ou a configuração **e esta tabela**, no mesmo trabalho. O texto de `src/lib/legal/privacidade.md` repete os prazos para o titular: mantenha os dois iguais e suba `LEGAL_VERSIONS` se o texto mudar de sentido.
 
 ## Direitos do titular e canais

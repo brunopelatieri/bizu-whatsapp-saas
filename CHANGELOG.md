@@ -107,6 +107,11 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     número. Para manter o comportamento anterior, defina `PHONE_VERIFICATION_REQUIRED=false`. Os testes de banco
     rodam com `false` (`vitest.db.config.ts`), menos `tests/db/phone-gate.test.ts`.
 
+- **Texto legal com o WhatsApp (bloco L de `docs/specs/pre-producao/spec.md`)**: `/legal/privacidade` e `/legal/termos`
+  passam a citar o telefone, o atendimento por WhatsApp (dados, operadores Meta e servidor Evolution, retenção, a
+  confirmação do telefone por link, o que cada exclusão apaga), a responsabilidade do owner pelos números e pelas
+  políticas da Meta, o canal por QR Code como conexão não oficial e a remoção dos números antes de excluir a
+  organização. Revisão jurídica ainda pendente (os textos são modelos).
 - **Caixa de entrada, fase C7 (LGPD e fechamento)**: excluir um cliente (`DELETE /api/customers/:id`) ou anonimizar a
   pessoa do portal apaga os contatos de WhatsApp vinculados a ele, com conversas, mensagens, arquivos e objetos do
   armazenamento; excluir a organização apaga toda a caixa de entrada do tenant e os avisos de canal (`channel_event`, com a
