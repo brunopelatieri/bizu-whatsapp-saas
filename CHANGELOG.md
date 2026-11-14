@@ -38,6 +38,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Atendimento: seletor de emoji no composer (bloco X de `docs/specs/pre-producao/spec.md`, fase X3)**.
+  - Botão de emoji ao lado do clipe, nos dois escopos: painel com busca em português, categorias, **recentes** (os 16 últimos) e **tom de pele**, que fica aberto para inserir vários e devolve o foco ao
+    campo ao fechar (Escape, clique fora). Entra na posição do cursor ou sobre a seleção, nunca parte um emoji e respeita o limite de caracteres; mesma regra de bloqueio do campo.
+  - Dependências novas, versões fixadas: `frimousse` `0.4.0` e, só de desenvolvimento, `emojibase-data` `18.0.0` (com o peer `emojibase`). O painel é um `React.lazy` carregado na primeira abertura.
+  - **Nada sai do servidor**: os dados ficam em `public/emojibase/pt/` (copiados por `npm run emoji:sync`, versionados), a CSP segue com `connect-src 'self'`. Novo `src/components/ui/popover.tsx`.
+  - Recentes e tom de pele ficam no `localStorage` do navegador, por usuário (`bizu:emoji:*`).
+  - **Migração:** projeto derivado roda `npm install`; nenhuma mudança de banco nem de variável.
+
 - **Atendimento: filtro de número na URL e "Também neste contato" (bloco X de `docs/specs/pre-producao/spec.md`, fase X1)**.
   - A lista de conversas (`/app/atendimento` e `/admin/atendimento`) guarda o número escolhido na URL como `?canal=<id do canal>`: sobrevive a recarregar e a voltar, e a URL leva só o id do
     canal. Id inválido, de canal que não existe ou de outro escopo cai em "todos", sem erro, e sai da URL. Abrir conversa, voltar à lista e iniciar conversa mantêm o filtro.

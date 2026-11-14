@@ -45,6 +45,12 @@ só então mude para `false`.
 - `src/lib/zod-config.ts`: sem `jitless`, o Zod testa `new Function("")` e gera uma violação de
   `eval` em toda página com formulário. Precisa ser o primeiro import de `src/root.tsx`.
 
+- Seletor de emoji (X3): **nenhuma origem nova**. A biblioteca `frimousse` busca `${emojibaseUrl}/<idioma>/data.json` e `messages.json`; a tela passa
+  `emojibaseUrl="/emojibase"` (arquivos de `public/emojibase/`, copiados por `scripts/sync-emojibase.mjs`), então tudo é da mesma origem e `connect-src` segue `'self'`.
+  O padrão da biblioteca é um CDN (`cdn.jsdelivr.net`): nunca o use. Esses arquivos saem do servidor de estáticos do `react-router-hono-server`
+  com `Cache-Control: public, max-age=3600` (o cabeçalho de todo arquivo de `public/` fora de `/assets/`; não é `immutable`, porque o nome não tem hash e o conteúdo muda
+  ao atualizar o pacote). A biblioteca guarda a cópia dos dados em `localStorage` (`frimousse/data/...`, dado público, sem nada da pessoa).
+
 **Liberar uma origem:** acrescente-a à diretiva certa em `cspDirectives`, nunca em `default-src`
 nem como `https:` em `script-src`. Um SDK que carrega script próprio (Stripe.js, por exemplo) pede
 `script-src` e, em geral, `frame-src` e `connect-src`. Atualize o teste de cabeçalhos e registre aqui

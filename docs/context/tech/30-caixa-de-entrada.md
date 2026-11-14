@@ -24,6 +24,7 @@
   `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
   `tests/db/inbox-media-send.test.ts` (C5),
   `src/lib/channels/providers/*/inbox.db.test.ts`,
+  da X3: `src/components/inbox/emoji-button.tsx`, `emoji-panel.tsx`, `src/components/ui/popover.tsx`, `src/lib/emoji/` (`insert-at-cursor.ts`, `recents.ts`, `preferences.ts`, `storage.ts`), `scripts/sync-emojibase.mjs`, `public/emojibase/`,
   da X1: `src/components/inbox/channel-filter.ts` (e o teste), `use-inbox-path.ts`, `related-conversations.tsx`, `listRelatedConversations` em `conversations.ts`,
   `tests/db/inbox-related.test.ts`,
   da C7: `tests/db/inbox-lgpd.test.ts` e os ganchos em `src/lib/lgpd/deletion.ts`, `src/lib/lgpd/export.ts`,
@@ -339,6 +340,14 @@ por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
   cheia na bolha da favorita (`MessageView.isFavorite`, para quem lê) e botão de estrela ao lado do "Responder" (só com `inbox:reply`; `PUT .../favorite` pela
   API do escopo e releitura). Thread vazia com `last_message_at` mostra o aviso da conversa esvaziada (`emptiedByRetention`).
 - **Composer (C5):** além do texto, **anexo** (clipe e colar imagem; prévia, nome e tamanho, legenda no mesmo campo, sem legenda em áudio, 16 MB conferidos antes de subir), **citação** ("Responder" na bolha põe o chip "Respondendo ao contato / a você" acima do campo, com X; some ao enviar com sucesso e ao trocar de conversa) e **modelo** (`template-dialog.tsx`: aprovados do WABA, campos das variáveis, prévia pela mesma função do servidor, erro da API dentro do diálogo; botão no composer só em canal com `templates` e, com a janela fechada, o "Enviar modelo" da faixa). Anexo que falha volta ao composer com a legenda e reaproveita o `clientId`. A bolha "enviando" mostra a imagem local, o nome do arquivo ou o modelo. **Reenviar** vale para texto, anexo e modelo.
+- **Seletor de emoji (X3, `emoji-button.tsx`, `emoji-panel.tsx`):** botão de carinha no composer, ao lado do clipe e do modelo, nos dois escopos (não fala com a API). Abre um `Popover`
+  que **fica aberto para várias inserções**; fecha com Escape, clicando fora ou no botão, e o foco volta ao campo (`finalFocus`). O botão segue a regra do campo
+  (`blocked || send.isPending || audioAttached`: sessão personificada, sem `inbox:reply`, `read_only`, número desconectado, janela de 24 h fechada, envio em andamento, áudio anexado) e o
+  painel aberto fecha quando o campo bloqueia. O painel (`frimousse`: busca, lista por categoria em português, tom de pele) é um `React.lazy` baixado na primeira abertura; os dados vêm de `/emojibase`
+  (mesma origem; `tech/26-seguranca.md`). **Recentes:** os 16 últimos, por usuário (`bizu:emoji:recents:<id>`); **tom de pele** por usuário (`bizu:emoji:skin-tone:<id>`); valor corrompido ou
+  `localStorage` indisponível nunca quebra a tela (`src/lib/emoji/storage.ts`). A inserção (`insertAtCursor`) respeita o cursor e a seleção do `<textarea>` (que guarda a seleção ao perder o foco),
+  nunca parte um emoji (par substituto) nem passa de `maxLength` (então avisa por toast), e passa pelo mesmo `change` do texto digitado: contador, rascunho e envio veem o de sempre. Campo que nunca teve foco
+  insere no fim. A busca recebe o foco ao abrir (menos em aparelho de toque, `pointer: coarse`, para não abrir o teclado virtual); Setas e Enter escolhem. O botão leva `key={user?.id}`: recentes e tom de pele seguem a pessoa.
 - **Envio:** o texto vai como bolha "enviando" local e some quando a releitura traz a
   mensagem do servidor; erro devolve o texto ao campo, e o `clientId` é reaproveitado no reenvio depois de
   erro de rede. Um envio por vez. O campo é bloqueado, com a explicação, para: sessão personificada, sem
@@ -568,6 +577,7 @@ cascata com o arquivo órfão.
 
 ## Testes
 
+- `src/lib/emoji/*.test.ts` (X3): `insertAtCursor` (início, meio, fim, sobre seleção, emoji composto, par substituto, teto), recentes (sem repetição, teto 16, por usuário, corrompido, armazenamento indisponível), tom de pele (inválido, por usuário) e o script de cópia (`sync-emojibase.test.ts`, com pastas temporárias).
 - `tests/db/inbox-related.test.ts` (X1): `GET .../related` nos dois escopos: o que vem (outras do mesmo contato, ordem, só os cinco campos),
   contato sem outras, conversa de outro membro fora do alcance (não aparece, não conta, 404 igual a inexistente), outra organização e
   inexistente 404, sem sessão 401, sem `inbox:read` 403, plataforma × tenant nos dois sentidos. `src/components/inbox/channel-filter.test.ts`:

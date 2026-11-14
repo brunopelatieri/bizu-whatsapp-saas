@@ -1951,7 +1951,7 @@ Comparação com as SPECs 049, 056 e 066 da origem.
 | "Também neste contato" (049 §4.4) | Não existe | **X1 (implementada):** seção no `contact-panel.tsx` com as outras conversas do contato, respeitando `visibility.ts` |
 | Filtro de clientes por canal (049 §4.5) | Não existe | **X4**, opcional: parâmetro `channelId` em `GET /api/customers` com `EXISTS` |
 | Continuar por outro canal (056) | Servidor pronto: `startConversation` é o find-or-create por contato e canal (`contact-actions.ts:358-432`); falta a ação | **X2** |
-| Seletor de emoji (066) | Não existe; `Textarea` controlado sem ref de cursor (`composer.tsx:394-411`) | **X3** |
+| Seletor de emoji (066) | Não existe; `Textarea` controlado sem ref de cursor (`composer.tsx:394-411`) | **X3 (implementada)** |
 | Motores cientes de canal, teto de envio frio, enquete, API v1, webhooks de saída, IA (049 F6) | Não existem neste projeto (`plano.md`, "O que não é portado") | Fora |
 | Opt-out do contato e aviso de número não oficial (056) | Não existe o campo | Fora (D-5) |
 
@@ -2029,6 +2029,46 @@ em commit próprio, na mesma branch.
 
 **Fora de escopo e observado:** o redirecionamento do login (`/login?next=`) descarta a consulta da URL, então abrir um link com `?canal=` sem sessão perde o filtro depois do login; é do
 `ProtectedRoute`, não do atendimento, e ficou como está.
+
+### X3: o que foi feito (2026-11-14)
+
+Seletor de emoji no composer do atendimento. **Sem migration**, sem mudança na CSP e sem rota nova: o seletor só escolhe o caractere. A X2 e a X4 não foram tocadas.
+
+**Dependências** (versões fixadas, sem `^`; `npm audit` sem achado nos pacotes novos: restam 4 moderados que já existiam, de `esbuild` via `drizzle-kit`)
+
+| Pacote | Versão | Tipo | Publicada | Observação |
+|---|---|---|---|---|
+| `frimousse` | `0.4.0` | dependência | 2026-09-21 (54 dias) | Liveblocks, MIT, sem dependências (`react` e `typescript` como peer); é o pacote que a SPEC nomeia |
+| `emojibase-data` | `18.0.0` | **dev** | 2026-10-16 (29 dias) | MIT; a anterior (`17.0.0`) é de 2025-11. Pede o peer `emojibase` |
+| `emojibase` | `18.0.0` | dev (transitiva) | | Instalada sozinha como peer de `emojibase-data`; **não estava na SPEC** |
+
+O popover **não** pediu pacote: `@base-ui/react` (já usado por dropdown, tooltip e select) traz o `Popover`.
+
+**Como funciona**
+
+- `src/components/ui/popover.tsx` (novo, no padrão de `dropdown-menu`): `Popover`, `PopoverTrigger`, `PopoverContent` (`side`, `align`, `finalFocus`), `PopoverTitle` e `PopoverDescription`.
+- `src/lib/emoji/` (puro, com teste): `insert-at-cursor.ts` (início, meio, fim, sobre seleção; nunca parte um emoji; não passa de `maxLength`), `recents.ts` (16 mais recentes, sem repetição, **por usuário**, chave `bizu:emoji:recents:<id>`),
+  `preferences.ts` (tom de pele, `bizu:emoji:skin-tone:<id>`) e `storage.ts` (todo acesso a `localStorage` em `try/catch`: valor corrompido ou armazenamento indisponível vira "sem dado", nunca exceção). O que vem do armazenamento é tratado como não confiável (recente que não parece emoji é descartado).
+- `scripts/sync-emojibase.mjs` (`npm run emoji:sync`): copia `pt/data.json` e `pt/messages.json` de `emojibase-data` para `public/emojibase/pt/`, confere o formato antes de gravar, só grava o que mudou e deixa um `README.txt` com a versão. Os arquivos copiados **são versionados** (`data.json` 796 KB, ~103 KB comprimido pelo Caddy; `messages.json` 6,7 KB).
+- `emoji-button.tsx` + `emoji-panel.tsx` (`src/components/inbox/`): o botão de carinha no composer e o painel (`frimousse`: busca, categorias, recentes, tom de pele), este em `React.lazy`: o chunk `emoji-panel-*.js` (28,6 KB) só é baixado na primeira abertura. `emojibaseUrl="/emojibase"`, idioma `pt`.
+- `composer.tsx`: ref no `Textarea`, `insertEmoji` (lê `selectionStart/End` do campo, passa por `insertAtCursor` e pelo mesmo `change` do texto digitado, então o contador, o rascunho e o envio veem o de sempre) e o cursor devolvido depois do emoji (`useLayoutEffect`). O botão: `disabled = blocked || send.isPending || audioAttached` (a mesma regra do campo, mais o envio em andamento); o painel aberto fecha quando o campo bloqueia.
+- **Cabeçalho de cache de `/emojibase/*`:** o servidor de estáticos (`react-router-hono-server`) responde `Cache-Control: public, max-age=3600` a tudo de `public/` fora de `/assets/` (lido no código, ver abaixo): uma hora, sem `immutable` (o nome não tem hash), o que serve: o conteúdo só muda ao atualizar o pacote. O servidor de estáticos **não** comprime; em produção quem comprime é o Caddy (`encode zstd gzip`). A biblioteca ainda guarda os dados em `localStorage` (`frimousse/data//emojibase/pt`), dado público.
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X3-1 | Os dois pacotes entram **fixados** (`0.4.0` e `18.0.0`), não com `^`; subir a versão é ato consciente, seguido de `npm run emoji:sync` |
+| X3-2 | Os arquivos de `public/emojibase/` são **versionados** (0,8 MB no repositório), em vez de gerados no build: o build já tem as devDependencies, mas assim o resultado é revisável e reproduzível sem rodar nada |
+| X3-3 | `emojibase-data` `18.0.0` (29 dias) em vez da `17.0.0`: a `frimousse` `0.4.0` leu o formato sem ajuste (conferido no navegador) e a `18` traz os emojis mais novos; emoji que o navegador não desenha é filtrado pela própria biblioteca |
+| X3-4 | O tom de pele tem seletor **próprio** (seis botões, `aria-pressed`), não o `SkinToneSelector` da biblioteca (que só alterna e não avisa a mudança): é assim que a escolha vira preferência do usuário |
+| X3-5 | A seção "Recentes" tem **altura fixa** (legenda e duas fileiras), mesmo vazia, para a lista não se mexer sob o dedo quando o primeiro emoji vira recente; custo: perde-se uma fileira de lista |
+| X3-6 | Ao chegar no limite de caracteres, o emoji **não** é inserido e há um toast; nunca se corta no meio de um emoji composto |
+| X3-7 | Recentes e tom de pele são **por usuário e por navegador** (`localStorage`), sem ir ao servidor: não acompanham a pessoa entre aparelhos |
+
+**Roteiro conferido no navegador** (desenvolvimento; ver o relatório): abrir pelo mouse e pelo teclado, inserir vários sem fechar, inserir no meio, sobre a seleção e no fim, emoji composto (`👋🏾`), recentes e tom de pele que sobrevivem a recarregar, Escape devolve o foco ao campo, botão bloqueado com o número desconectado, nos dois escopos, em 800 px e 375 px, sem nenhum pedido fora da própria origem.
+
+**O que não foi testado:** o seletor em Firefox e Safari; teclado virtual no celular de verdade (só a emulação de 375 px); leitor de tela; o cabeçalho de cache **medido** em produção (o `npm start` local recusa o `.env` de desenvolvimento: o valor foi lido no código do servidor de estáticos); um `JOBS_MODE` ou proxy que comprima `data.json` de outro jeito.
 
 ---
 
