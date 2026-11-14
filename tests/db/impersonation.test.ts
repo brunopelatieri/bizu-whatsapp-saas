@@ -559,6 +559,7 @@ describe("personificação", () => {
       ["PATCH", `/api/team/members/${anyId}`],
       ["DELETE", `/api/team/members/${anyId}`],
       ["DELETE", `/api/customers/${anyId}/team-link`],
+      ["PUT", `/api/customers/${anyId}/team-link`],
       ["POST", "/api/roles"],
       ["PATCH", `/api/roles/${anyId}`],
       ["DELETE", `/api/roles/${anyId}`],

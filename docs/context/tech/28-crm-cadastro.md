@@ -252,7 +252,8 @@ pelos canais e a página `/verificar-telefone`; a T3, o bloqueio de acesso com t
   pelo telefone da conta confirmado para o sistema inteiro** (`userPhoneConfirmedGlobally`; a
   liberação de uma organização não basta) (no aceite do convite, confirmado dos dois lados), ao criar
   o cliente (`matchingTeamMember`) e no aceite (`linkMemberCustomer`), e é auditada
-  (`customer.team_linked`). O e-mail nunca liga sozinho: é texto de quem cadastra, e a ficha
+  (`customer.team_linked`). **À mão**, a equipe liga por e-mail ou em qualquer outro caso
+  (`linkTeamCustomer`, seção "Ficha de quem é da equipe"). O e-mail nunca liga sozinho: é texto de quem cadastra, e a ficha
   ligada **é apagada quando a pessoa sai da equipe ou exclui a conta** (D-11, bloco E, seção "Ficha de
   quem é da equipe: o que a remoção apaga"). A API do cliente devolve `team: { userId, role } | null`, com o papel
   lido de `member` na hora, e `phoneVerified`; `GET /api/customers?team=true` filtra as fichas de
@@ -262,8 +263,8 @@ pelos canais e a página `/verificar-telefone`; a T3, o bloqueio de acesso com t
 - **Ainda não existe (T4, troca com pedido e `claim`):** a troca de telefone que
   mantém o número antigo até a confirmação (`POST …/phone-change`; hoje a equipe troca direto e o
   cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), as
-  telas das filas e do modelo de verificação, o selo e o filtro na tela, e **ligar** a ficha à mão
-  (desligar existe, bloco E). Apagar a ficha ligada quando a pessoa sai da equipe (D-11) existe desde o bloco E.
+  telas das filas e do modelo de verificação, o selo e o filtro na tela. Ligar a ficha à mão existe desde
+  2026-11-14 e desligar desde o bloco E. Apagar a ficha ligada quando a pessoa sai da equipe (D-11) existe desde o bloco E.
 - **Testes:** `tests/db/phone-verified.test.ts`, `tests/db/phone-requests.test.ts`,
   `tests/db/phone-delivery.test.ts` (envio, T2b), `tests/db/inbox-ingest.test.ts` (vínculo),
   `tests/db/phone-accounts.test.ts`, `src/lib/schemas/phone.test.ts` e, no módulo Cloud,
@@ -536,14 +537,27 @@ Código: `src/lib/tenant/team-customer-removal.ts`, `deleteCustomerIn` e `afterC
   `blockWhileImpersonating`, 204; 404 para ficha de outra organização; idempotente) desfaz a ligação
   (`unlinkTeamCustomer`, auditoria `customer.team_unlinked`). A ficha vira cliente comum, com as conversas, e a
   remoção ou a exclusão da conta deixam de apagá-la. A tela da ficha tem o cartão "Também é da equipe" com a ação.
-  **Criar** a ligação à mão não existe (fora do escopo).
+- **Ligar à mão (D-9, 2026-11-14):** `PUT /api/customers/:id/team-link` com `{ userId }` (`linkTeamCustomer`,
+  `customer:update`, `blockWhileImpersonating`). Só pessoa que é membro **desta** organização (owner incluído,
+  com ou sem telefone confirmado); ficha ou pessoa de outra organização é 404; ninguém liga a si mesmo (403
+  `SELF_LINK`: excluir a própria conta apagaria a ficha de outra pessoa); ficha já ligada a outra pessoa é 409
+  `CUSTOMER_ALREADY_LINKED`, pessoa que já tem ficha é 409 `TEAM_MEMBER_HAS_CUSTOMER` (desfazer antes, com a rota
+  `DELETE`); a mesma ligação de novo não muda nada. Trava o membro (`FOR SHARE`) e depois a ficha, a ordem de
+  `removeMember`. Auditoria `customer.team_linked` com `metadata { userId, via: manual }`. **A D-11 vale igual:**
+  removida a pessoa ou excluída a conta, a ficha sai e, dela, só os contatos do telefone confirmado da pessoa
+  (ficha de outro número ligada à mão perde a ficha, mas os contatos do número dela ficam). A ligação automática
+  nunca desfaz nem duplica a manual (só liga ficha sem `user_id` a pessoa sem ficha). A tela é
+  `src/components/app/customers/customer-team-link.tsx` (cartão "Pessoa da equipe" na ficha sem ligação), com
+  a lista de `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`; id, nome, papel e
+  `hasCustomer`, sem e-mail nem telefone) e o aviso da D-11 antes de confirmar. Decisões TL-1 a TL-6 na SPEC.
 - **Avisos (contagem do que será apagado, só dos contatos do telefone confirmado):** `GET /api/team` traz
   `customerRecord: { conversationCount } | null` em cada membro, **só para quem tem `member:delete`** (sem id nem
   nome da ficha); `GET /api/me/deletion` traz `customerRecords: { customers, conversationCount }`;
   `GET /api/admin/users/:id` traz o mesmo `customerRecords`. `GET /api/customers/:id` traz
   `conversationCount` (todas as conversas dos contatos ligados: é o que `deleteCustomer` apaga). Os diálogos de
   remoção de cliente e de membro, de exclusão da conta e de exclusão pelo `/admin` usam esses números.
-- **Testes:** `tests/db/team-customer-delete.test.ts` (remover o membro, anonimizar a conta, contato de outro
+- **Testes:** `tests/db/team-customer-link.test.ts` (ligação à mão: permissão, isolamento, `SELF_LINK`, uma ficha
+  por pessoa, auditoria, candidatos e a D-11 com a ligação manual), `tests/db/team-customer-delete.test.ts` (remover o membro, anonimizar a conta, contato de outro
   número, sem telefone confirmado, ligação desfeita antes, troca de papel, rota de desfazer, contagens),
   `rbac.test.ts` e `impersonation.test.ts` (a rota nova).
 

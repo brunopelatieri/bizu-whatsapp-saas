@@ -72,7 +72,7 @@ export function useCustomer(id: string) {
 
 type CustomerRequest = {
   path: string;
-  method: "POST" | "PATCH" | "DELETE";
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 };
 

@@ -6,6 +6,7 @@ import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { CustomerFormDialog } from "@/components/app/customers/customer-form-dialog";
 import { CustomerPhoneChangeCard } from "@/components/app/customers/customer-phone-change-card";
 import { CustomerStatusBadge } from "@/components/app/customers/customer-status-badge";
+import { TeamLinkDialog } from "@/components/app/customers/customer-team-link";
 import {
   type Customer,
   formatDateTime,
@@ -100,14 +101,40 @@ function CustomFieldsCard({ customer }: { customer: Customer }) {
   );
 }
 
+/** Ficha sem ligação: quem edita pode ligá-la a uma pessoa da equipe, à mão (D-9). */
+function TeamLinkAction({ customer }: { customer: Customer }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Can resource="customer" action="update">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Pessoa da equipe</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            Se este cliente também é da equipe (por exemplo, com o mesmo e-mail), ligue a ficha à pessoa
+            para mostrar o papel dela aqui.
+          </p>
+          <Button variant="outline" onClick={() => setOpen(true)}>
+            Ligar a uma pessoa da equipe
+          </Button>
+          <TeamLinkDialog customer={customer} open={open} onClose={() => setOpen(false)} />
+        </CardContent>
+      </Card>
+    </Can>
+  );
+}
+
 /**
  * Ficha de quem é da equipe (D-9/D-11). Remover a pessoa da equipe, ou ela excluir a conta, apaga esta
  * ficha e as conversas do número dela; desfazer a ligação mantém a ficha (a ação é só de quem edita).
+ * Sem ligação, a ação de ligar à mão.
  */
 function TeamLinkCard({ customer }: { customer: Customer }) {
   const queryClient = useQueryClient();
   const unlink = useCustomerMutation("Ligação desfeita. A ficha fica com a organização.");
-  if (!customer.team) return null;
+  if (!customer.team) return <TeamLinkAction customer={customer} />;
 
   return (
     <Card>

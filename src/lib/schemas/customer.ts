@@ -60,3 +60,10 @@ export const customersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(100_000).default(1),
 });
 export type CustomersQuery = z.infer<typeof customersQuerySchema>;
+
+/**
+ * `PUT /api/customers/:id/team-link`: liga a ficha à pessoa da equipe (D-9), à mão. Só o id da conta:
+ * a pessoa é procurada entre os membros da organização no servidor.
+ */
+export const teamLinkSchema = z.object({ userId: z.uuid() }).strict();
+export type TeamLinkInput = z.infer<typeof teamLinkSchema>;

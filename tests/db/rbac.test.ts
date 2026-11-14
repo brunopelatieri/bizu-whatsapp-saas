@@ -63,6 +63,9 @@ const endpoints = [
   ["PATCH", `/api/customers/${anyId}`, "customer:update"],
   ["DELETE", `/api/customers/${anyId}`, "customer:delete"],
   ["DELETE", `/api/customers/${anyId}/team-link`, "customer:update"],
+  ["PUT", `/api/customers/${anyId}/team-link`, "customer:update"],
+  // Exige também `customer:read`; os papéis da matriz que têm `update` têm `read`.
+  ["GET", `/api/customers/${anyId}/team-candidates`, "customer:update"],
   ["POST", `/api/customers/${anyId}/invite`, "customer:invite"],
   ["GET", "/api/billing/plans", "billing:read"],
   ["GET", "/api/billing/subscription", "billing:read"],

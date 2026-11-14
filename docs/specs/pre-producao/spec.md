@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-1 a TL-6, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -123,7 +123,8 @@ telefone e e-mail. Nenhum deles substitui o outro.
   da T1): o e-mail da ficha é texto de quem cadastra, e um colaborador salvaria o contato de um
   cliente com o próprio e-mail para virar "dono" da ficha dele. Ligar por e-mail, ou em qualquer
   outro caso, é ação explícita da equipe com `customer:update`, que também desfaz a ligação
-  (T4). Toda ligação é auditada (`customer.team_linked`).
+  (T4). Toda ligação é auditada (`customer.team_linked`). **Implementada em 2026-11-14** ("Ligação
+  manual da ficha com a equipe: o que foi feito").
 - **O "status" é derivado, não gravado:** a ficha mostra o selo com o papel atual da pessoa
   (`Owner`, `Admin`, `Membro` ou o papel personalizado), lido de `member` no momento da
   consulta. Aparece na lista e no detalhe de `/app/clientes` e no painel do contato no
@@ -480,7 +481,7 @@ mão").
 |---|---|---|
 | ~~Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` (e o perfil da equipe, F2)~~ **feito em 2026-11-14** ("F2 e telas da troca: o que foi feito") | As rotas passaram a existir em 2026-11-13 ("Troca de telefone pelo pedido") | Só a tela |
 | `claim` do portal (D-1) | Idem | O `purpose = claim` e a exclusão da ficha antiga |
-| Ligar e desligar a ficha de cliente à pessoa da equipe (D-9) | Não há rota (`customer.user_id` só é gravado pelo telefone confirmado e na exclusão) | Rota com `customer:update`, auditoria `customer.team_linked` e a restrição (a) da D-11 |
+| ~~Ligar e desligar a ficha de cliente à pessoa da equipe (D-9)~~ **feito**: desligar no bloco E, ligar em 2026-11-14 ("Ligação manual da ficha com a equipe: o que foi feito") | Não havia rota | — |
 | Filtro por tipo na fila da organização | A rota lista equipe e clientes juntos | `?subject=user\|customer` em `GET /api/phone-verifications` |
 | Fila lida pelo suporte da plataforma | A rota é só do proprietário | Trocar `ownerOnly` por `requirePlatform` na leitura (decisão de regra) |
 
@@ -600,6 +601,40 @@ Implementada no servidor, sem tela nova (as telas entraram em 2026-11-14, "F2 e 
 | TC-9 | Conta do portal na troca da ficha | Só a troca pedida pela própria pessoa leva o número à conta (`portal_user`), só declarado, como o `PATCH` fazia | Nunca mexer na conta |
 | TC-10 | Repetição | O mesmo número do cadastro: 400 `PHONE_UNCHANGED` (é dado do próprio cadastro). Pedir de novo o número da troca aberta é reenviar | Tratar como nova troca |
 
+### Ligação manual da ficha com a equipe: o que foi feito (2026-11-14)
+
+Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Ficha de quem é da equipe").
+
+- **Rota:** `PUT /api/customers/:id/team-link` com `teamLinkSchema { userId }` (`requireAuth` + `requireTenant` +
+  `customer:update` + `blockWhileImpersonating`), `linkTeamCustomer` em `src/lib/tenant/team-customer.ts` (o único
+  lugar que grava `customer.user_id`). 200 `{ team: { userId, role } }`. Ficha ou pessoa de outra organização (ou
+  que não existe): 404. Ficha ligada a outra pessoa: 409 `CUSTOMER_ALREADY_LINKED`; pessoa que já tem ficha: 409
+  `TEAM_MEMBER_HAS_CUSTOMER` (o índice único parcial é a rede da corrida). A mesma ligação de novo: 200, sem
+  auditoria. Auditoria `customer.team_linked` com `metadata { userId, via: "manual" }`.
+- **Leitura para a tela:** `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`): `userId`,
+  `name`, `role` e `hasCustomer` de cada membro desta organização, sem e-mail, telefone nem estado do telefone.
+- **D-11 igual à da ligação automática:** quem decide é `customer.user_id`, venha de onde vier. Removida a pessoa ou
+  excluída a conta, a ficha sai com `deleteCustomerIn` e, dela, só os contatos cujo `phone_key` é o do telefone
+  **confirmado no sistema** da pessoa; os demais perdem o vínculo. Na prática, a ficha de **outro número** ligada à
+  mão sai sozinha (o contato do número dela fica, sem ficha). Sem mudança em `team-customer-removal.ts`.
+- **Tela:** cartão "Pessoa da equipe" na ficha sem ligação (`<Can resource="customer" action="update">`), ao lado de
+  onde fica o cartão "Também é da equipe" com a ação de desfazer. O diálogo (`customer-team-link.tsx`) diz antes de
+  confirmar que a remoção da pessoa ou a exclusão da conta apaga a ficha com as conversas do telefone confirmado
+  dela, mostra o papel de cada pessoa como selo e desabilita "você" e "já tem ficha".
+- **Testes:** `tests/db/team-customer-link.test.ts` (13 casos), mais as rotas novas em `rbac.test.ts`,
+  `impersonation.test.ts` e, sozinhas, em `phone-gate.test.ts` (nascem bloqueadas com telefone pendente).
+
+**Decisões da ligação manual a confirmar pelo proprietário**
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| TL-1 | Quem pode ser ligado | Qualquer membro desta organização, **inclusive o owner** e quem **não confirmou** o telefone (a SPEC diz "em qualquer outro caso"). Sem telefone confirmado, a remoção apaga a ficha e nenhum contato (E-2) | Exigir telefone confirmado, ou o mesmo e-mail ou telefone da ficha (apagaria menos, mas não atende "qualquer outro caso") |
+| TL-2 | Quem liga pode ligar a si mesmo? | **Não** (403 `SELF_LINK`). Com `customer:update` (o papel `member` tem), um colaborador ligaria a ficha de qualquer cliente à própria conta e, excluindo a conta, a apagaria sem ter `customer:delete`. Outra pessoa da equipe liga | Permitir; ou exigir `customer:delete` para ligar |
+| TL-3 | Como a tela escolhe a pessoa | Rota própria com id, nome, papel e "já tem ficha" (`customer:read` + `customer:update`), sem e-mail nem telefone. `GET /api/team` já mostra nome e e-mail a qualquer membro, mas não diz quem tem ficha | Reaproveitar `GET /api/team` (sem "já tem ficha") |
+| TL-4 | Ligação automática depois da manual | A manual prevalece: a automática só liga ficha sem `user_id` a pessoa sem ficha, então nunca a desfaz nem cria outra. Desfeita a manual, a automática volta a valer (cadastro, aceite de convite, confirmação pelo link) | Marcar a ficha desligada à mão para nunca mais ligar sozinha |
+| TL-5 | Permissão | `customer:update`, como a SPEC e o desfazer. Risco que sobra: dois colaboradores combinados (um liga a ficha de um cliente ao outro, que exclui a conta) apagam a ficha, mas não as conversas do número do cliente | `customer:delete` para ligar (só owner e admin, no catálogo atual) |
+| TL-6 | Corrida com a exclusão da conta | A ligação feita no mesmo instante em que a conta é anonimizada pode sobrar numa conta anonimizada: a ficha **não** é apagada (o lado que apaga menos). A corrida com `removeMember` está fechada pela ordem das travas | Travar a conta também (ciclo com `anonymizeUser`, que trava as fichas antes da conta) |
+
 ### Pedido de verificação: `phone_verification`
 
 `scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
@@ -715,7 +750,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | F1 (**implementada**; ver "F1: o que foi feito", no bloco F) | API do perfil: nome, foto (envio, troca, remoção, leitura autorizada) e LGPD | `tests/db/profile.test.ts` | Opus 5.5 + `/code-review` e `/security-review` |
 | F2 (**implementada**; ver "F2 e telas da troca: o que foi feito", no bloco F) | Página "Perfil" em `/app` e `/admin` (foto com recorte, nome, e-mail, telefone, senha), foto em membros e em quem atende, troca de telefone na ficha, em `/portal/conta` e em "Confirme seu WhatsApp", filas com `purpose = change` | `avatar-crop.test.ts`, `phone-change-api.test.ts` e conferência no navegador | Sonnet 5.5 |
-| T4 (**parcial**: filas, modelo de verificação na tela do canal, acertos de texto da T3 e telas de troca de telefone implementados; `claim` e ligação à equipe pendentes; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
+| T4 (**parcial**: filas, modelo de verificação na tela do canal, acertos de texto da T3, telas de troca de telefone e ligação manual à equipe (2026-11-14) implementados; `claim` pendente; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 
 ---
 
@@ -1248,7 +1283,7 @@ telefone, hoje obrigatório.
   telefone da conta. Código em `src/lib/tenant/team-customer-removal.ts`; detalhe em `tech/28-crm-cadastro.md`.
   - **(a)** `DELETE /api/customers/:id/team-link` (`customer:update`, auditada como `customer.team_unlinked`, recusada em
     personificação, 204 idempotente, 404 de outra organização) e o cartão "Também é da equipe" na ficha. **Criar** a
-    ligação à mão ficou de fora.
+    ligação à mão ficou de fora (feita em 2026-11-14, no bloco T: "Ligação manual da ficha com a equipe").
   - **(b)** só saem os contatos da ficha cujo `phone_key` é o do telefone **confirmado** da pessoa
     (`purgeTeamCustomerContacts`); os outros só perdem o vínculo e a conversa fica. Sem telefone confirmado, a ficha
     sai e nenhum contato é apagado.
@@ -1637,7 +1672,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-1 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

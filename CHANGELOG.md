@@ -10,6 +10,15 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Ligar a ficha de cliente à pessoa da equipe, à mão (bloco T de `docs/specs/pre-producao/spec.md`, D-9)**.
+  - `PUT /api/customers/:id/team-link` (`customer:update`, fora da personificação, auditada como `customer.team_linked` com
+    `via: manual`): só pessoa da equipe desta organização (404 de outra), nunca a si mesmo (403 `SELF_LINK`), uma ficha por pessoa e
+    uma pessoa por ficha (409 `TEAM_MEMBER_HAS_CUSTOMER` / `CUSTOMER_ALREADY_LINKED`). `GET /api/customers/:id/team-candidates`
+    (`customer:read` + `customer:update`) lista id, nome, papel e se já tem ficha.
+  - **A ligação decide o que a remoção apaga (D-11):** removida a pessoa da equipe, ou excluída a conta, a ficha ligada à mão sai
+    como a ligada pelo telefone, e dela só os contatos do telefone confirmado da pessoa.
+  - Tela: cartão "Pessoa da equipe" na ficha sem ligação, com o diálogo que avisa o que a ligação muda e mostra o papel de cada pessoa.
+  - **Migração:** nenhuma.
 - **Retenção de mensagens, fase R3b: tela do `/admin` (bloco R de `docs/specs/pre-producao/spec.md`)**; só tela sobre as rotas da R2, sem migration e
   **sem código que apague mensagem** (a limpeza continua só no job diário, com `MESSAGE_RETENTION_ENABLED=true`). Fecha o bloco R.
   - Cartão "Retenção de mensagens" em `/admin/tenants/:id` (`TenantRetentionCard`): para cada tipo de canal, o que vale em cada limite (mensagens, dias,

@@ -23,9 +23,11 @@ import { addCustomerTag, removeCustomerTag } from "@/lib/crm/tags";
 import {
   customerSchema,
   customersQuerySchema,
+  teamLinkSchema,
   updateCustomerSchema,
 } from "@/lib/schemas/customer";
 import { phoneChangeSchema } from "@/lib/schemas/phone";
+import { linkTeamCustomer, teamLinkCandidates } from "@/lib/tenant/team-customer";
 import { unlinkTeamCustomer } from "@/lib/tenant/team-customer-removal";
 import {
   cancelCustomerPhoneChangeByTeam,
@@ -159,10 +161,44 @@ customerRoutes.delete(
 );
 
 /**
+ * As pessoas da equipe que a ficha pode ser ligada: id, nome, papel e se já têm ficha. Exige ler
+ * clientes (saber quem já tem ficha é ler a lista) e editar (é para a ação de ligar).
+ */
+customerRoutes.get(
+  "/api/customers/:id/team-candidates",
+  requirePermission("customer", "read"),
+  requirePermission("customer", "update"),
+  validId,
+  async (c) =>
+    c.json({ candidates: await teamLinkCandidates(c.get("tenant").id, c.req.valid("param").id) }),
+);
+
+/**
+ * Liga a ficha à pessoa da equipe desta organização, à mão (D-9): por e-mail ou em qualquer caso
+ * que o telefone confirmado não liga sozinho. Sensível como desfazer: a ligação decide o que a
+ * remoção da pessoa apaga (D-11), por isso fora da personificação e auditada.
+ */
+customerRoutes.put(
+  "/api/customers/:id/team-link",
+  requirePermission("customer", "update"),
+  blockWhileImpersonating,
+  validId,
+  zValidator("json", teamLinkSchema, validationError),
+  async (c) => {
+    const team = await linkTeamCustomer(
+      c.get("tenant").id,
+      c.req.valid("param").id,
+      c.req.valid("json").userId,
+      teamActor(c),
+    );
+    return c.json({ team });
+  },
+);
+
+/**
  * Desfaz a ligação da ficha com a pessoa da equipe (D-9/D-11): a ficha e as conversas ficam, e deixam
  * de ser apagadas junto com a pessoa. É assim que a equipe mantém a ficha antes de remover alguém.
- * Sensível (muda o que uma remoção apaga), por isso fora da personificação. Criar a ligação à mão
- * não existe: ela nasce do telefone confirmado.
+ * Sensível (muda o que uma remoção apaga), por isso fora da personificação.
  */
 customerRoutes.delete(
   "/api/customers/:id/team-link",
