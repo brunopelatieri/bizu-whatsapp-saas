@@ -16,7 +16,12 @@ import {
   permissionDenied,
 } from "@/lib/inbox/conversations";
 import { notifyInbox } from "@/lib/inbox/notify";
-import { type InboxActor, readsCustomers, visibleConversation } from "@/lib/inbox/visibility";
+import {
+  conversationScope,
+  type InboxActor,
+  readsCustomers,
+  visibleConversation,
+} from "@/lib/inbox/visibility";
 import { canWhatsApp, normalizePhone, type PhoneKind, phoneErrorMessage } from "@/lib/phone/br";
 import { userPhoneConfirmedIn } from "@/lib/phone/confirmed";
 import { attractsConversations } from "@/lib/phone/verification";
@@ -371,6 +376,88 @@ export async function contactForStart(
 }
 
 /**
+ * Acha ou cria a conversa de um contato **já conhecido** em um número do escopo; não envia nada. Serve
+ * a "iniciar conversa" (tenant e plataforma) e a "continuar por outro número" (X2). No tenant a conversa
+ * nova nasce com quem a abriu como dono (auditado, `via`), e a que já existe e está fora do alcance do
+ * ator (é de outro atendente) responde 409 `ALREADY_ASSIGNED`; na plataforma não há dono. Quem chama já
+ * conferiu o número (`requireChannelRow`) e o contato.
+ */
+export async function openConversation(
+  tx: Tx,
+  actor: InboxActor,
+  channelId: string,
+  contactId: string,
+  via: "start" | "transfer",
+) {
+  const tenantId = scopeTenantId(actor.scope);
+  const owner = tenantId ? actor.userId : null;
+
+  const insert = tx.insert(conversation).values({
+    tenantId,
+    channelId,
+    contactId,
+    status: "open",
+    assignedUserId: owner,
+    assignedAt: owner ? sql`now()` : null,
+    lastMessageAt: sql`now()`,
+    unreadCount: 0,
+  });
+  const [inserted] = await (
+    tenantId
+      ? insert.onConflictDoNothing({
+          target: [conversation.tenantId, conversation.contactId, conversation.channelId],
+        })
+      : insert.onConflictDoNothing({
+          target: [conversation.contactId, conversation.channelId],
+          where: sql`tenant_id is null`,
+        })
+  ).returning({ id: conversation.id });
+
+  if (inserted) {
+    if (tenantId) {
+      await auditInbox(tx, actor, "inbox.conversation_claimed", { type: "conversation", id: inserted.id }, {
+        via,
+      });
+    }
+    await notifyInbox(tx, {
+      s: tenantId,
+      c: inserted.id,
+      k: "conversation",
+      a: owner,
+      p: null,
+      u: actor.userId,
+    });
+    return { id: inserted.id, created: true };
+  }
+
+  const [existing] = await tx
+    .select({
+      id: conversation.id,
+      assignedUserId: conversation.assignedUserId,
+      visible: sql<boolean>`${visibleConversation(actor)}`,
+      ownerName: user.name,
+    })
+    .from(conversation)
+    .leftJoin(user, eq(user.id, conversation.assignedUserId))
+    .where(
+      and(
+        conversationScope(actor.scope),
+        eq(conversation.contactId, contactId),
+        eq(conversation.channelId, channelId),
+      ),
+    );
+  if (!existing) throw new Error("Conversa não encontrada depois do conflito.");
+  if (!existing.visible) {
+    if (existing.assignedUserId) {
+      throw alreadyAssigned({ id: existing.assignedUserId, name: existing.ownerName });
+    }
+    // Sem dono e fora do alcance: o ator não lê o atendimento.
+    throw permissionDenied();
+  }
+  return { id: existing.id, created: false };
+}
+
+/**
  * Acha ou cria a conversa com um cliente, um membro ou um telefone, pelo número de saída escolhido.
  * Não envia nada. O número precisa poder ter WhatsApp (`canWhatsApp`) **ou já ter escrito**: com
  * `chat_contact` da mesma `phone_key`, a conversa usa esse contato e o número dele, mesmo que o
@@ -397,58 +484,7 @@ export async function startConversation(actor: InboxActor, input: StartConversat
     }
     const contactId = await contactForStart(tx, actor.scope, destination);
 
-    const [inserted] = await tx
-      .insert(conversation)
-      .values({
-        tenantId,
-        channelId: target.id,
-        contactId,
-        status: "open",
-        assignedUserId: actor.userId,
-        assignedAt: sql`now()`,
-        lastMessageAt: sql`now()`,
-        unreadCount: 0,
-      })
-      .onConflictDoNothing({
-        target: [conversation.tenantId, conversation.contactId, conversation.channelId],
-      })
-      .returning({ id: conversation.id });
-
-    if (inserted) {
-      await auditInbox(tx, actor, "inbox.conversation_claimed", { type: "conversation", id: inserted.id }, {
-        via: "start",
-      });
-      await notifyInbox(tx, {
-        s: tenantId,
-        c: inserted.id,
-        k: "conversation",
-        a: actor.userId,
-        p: null,
-        u: actor.userId,
-      });
-      return { conversation: await conversationItem(tx, actor, inserted.id), created: true };
-    }
-
-    const [existing] = await tx
-      .select({
-        id: conversation.id,
-        assignedUserId: conversation.assignedUserId,
-        visible: sql<boolean>`${visibleConversation(actor)}`,
-        ownerName: user.name,
-      })
-      .from(conversation)
-      .leftJoin(user, eq(user.id, conversation.assignedUserId))
-      .where(
-        and(
-          eq(conversation.tenantId, tenantId),
-          eq(conversation.contactId, contactId),
-          eq(conversation.channelId, target.id),
-        ),
-      );
-    if (!existing) throw new Error("Conversa não encontrada depois do conflito.");
-    if (!existing.visible && existing.assignedUserId) {
-      throw alreadyAssigned({ id: existing.assignedUserId, name: existing.ownerName });
-    }
-    return { conversation: await conversationItem(tx, actor, existing.id), created: false };
+    const opened = await openConversation(tx, actor, target.id, contactId, "start");
+    return { conversation: await conversationItem(tx, actor, opened.id), created: opened.created };
   });
 }

@@ -27,6 +27,8 @@
   da X3: `src/components/inbox/emoji-button.tsx`, `emoji-panel.tsx`, `src/components/ui/popover.tsx`, `src/lib/emoji/` (`insert-at-cursor.ts`, `recents.ts`, `preferences.ts`, `storage.ts`), `scripts/sync-emojibase.mjs`, `public/emojibase/`,
   da X1: `src/components/inbox/channel-filter.ts` (e o teste), `use-inbox-path.ts`, `related-conversations.tsx`, `listRelatedConversations` em `conversations.ts`,
   `tests/db/inbox-related.test.ts`,
+  da X2: `src/lib/inbox/transfer.ts` (e o teste), `transfer-actions.ts`, `openConversation` em `contact-actions.ts`, `src/components/inbox/continue-on-channel.tsx`, `transfer-entry.ts` (e o teste),
+  `tests/db/inbox-transfer.test.ts`,
   da C7: `tests/db/inbox-lgpd.test.ts` e os ganchos em `src/lib/lgpd/deletion.ts`, `src/lib/lgpd/export.ts`,
   `src/lib/tenant/customers.ts` (`deleteCustomer`), `src/lib/channels/events.ts` (`purgeTenantChannelEvents`) e
   `src/api/roles.ts`
@@ -155,6 +157,8 @@ Erros saem por `handleTenantError`.
 | `GET /api/inbox/conversations/:id` | `inbox:read` | `getConversation`: `{ conversation, contact, link, window }` |
 | `GET /api/inbox/conversations/:id/messages?before&limit` | `inbox:read` | `listMessages`, da mais nova para a mais antiga |
 | `GET /api/inbox/conversations/:id/related` | `inbox:read` | `listRelatedConversations` (X1): `{ items }` com as **outras** conversas do mesmo contato (outros números), cada uma só `{ id, status, channel: { id, name, type }, lastMessageAt, createdAt }`, da mais recente à mais antiga (teto 50). A atual passa por `requireVisibleConversation` (fora do alcance: 404, igual a id inexistente) e cada outra por `visibleConversation(actor)`: a que a pessoa não vê não aparece nem é contada. Sem dono, prévia, contador, nome nem telefone. Contato sem outras conversas: `items` vazio |
+| `GET /api/inbox/conversations/:id/transfer-channels` | `inbox:reply` | `listTransferChannels` (X2): `{ items }` com os **outros** números do escopo, em ordem de nome, cada um `{ channel: { id, name, type }, eligible, reason }` (`reason`: `disconnected`, `assigned_to_other`, `window_closed` ou `null`). Fora o número da conversa, o de outro escopo e o desativado. A origem passa por `requireVisibleConversation` (404 igual a id inexistente). Não pede `channel:read` |
+| `POST /api/inbox/conversations/:id/transfer` `{ channelId, text, clientId }` | `inbox:reply`, 20/min (`inbox-transfer`) mais o limite de envio | `continueOnChannel` (X2): revalida a elegibilidade, acha ou cria a conversa do mesmo contato no outro número e envia o texto por ele (ver "Continuar por outro número"). `{ conversationId, message }`: 201, ou 200 com a mensagem `failed`. 400 `SAME_CHANNEL`; 404 origem ou número fora do alcance; 409 `CHANNEL_DISABLED`, `CHANNEL_NOT_CONNECTED`, `SESSION_WINDOW_CLOSED`, `ALREADY_ASSIGNED`. Auditoria `inbox.conversation_continued` (só ids) |
 | `POST /api/inbox/conversations/:id/messages` | `inbox:reply`, 60/min (anexo: 20/min) | JSON `text` (com `replyTo`) → `sendText`; JSON `template` → `sendTemplate`; `multipart/form-data` → `sendMedia`. 201 (`sent` ou `queued`), 200 com a mensagem `failed` |
 | `GET /api/inbox/conversations/:id/templates` | `inbox:reply` | `listConversationTemplates`: modelos aprovados do WABA do canal, já analisados |
 | `GET /api/inbox/media-out/:token` | **sem sessão**, token assinado | `openOutboundMedia` (só a Evolution chama; ver "Anexo de saída") |
@@ -332,7 +336,13 @@ por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
 - **"Também neste contato" (X1, `related-conversations.tsx`):** seção do painel do contato, nos dois escopos, com as outras conversas do mesmo
   contato (selo do número, situação e data; clicar abre a conversa, mantendo o filtro). Lê `GET .../conversations/:id/related`
   (`useRelatedConversations`, chave sob `conversations` para qualquer releitura da lista reler também, ciclo de 60 s com o SSE). Carregando,
-  erro e lista vazia **não desenham nada** (a seção some). O componente tem o slot `footer` para a ação "Continuar por outro número" da X2.
+  erro e lista vazia **não desenham nada** (a seção some). O slot `footer` recebe o botão "Continuar por outro número" (X2).
+- **"Continuar por outro número" (X2, `continue-on-channel.tsx`, `transfer-entry.ts`):** nos dois escopos, com duas entradas: a faixa "Janela de 24 horas encerrada" do composer (ao lado de
+  "Enviar modelo") e o `footer` de "Também neste contato". Os números vêm de `GET .../transfer-channels` (`useTransferChannels`, chave sob `conversations`); a tela **só mostra** o que o servidor
+  devolve. O botão aparece com número elegível, aparece **desabilitado com o motivo** quando só há número oficial com a janela fechada (aponta o modelo) e some nos demais casos, sem
+  `inbox:reply`, na sessão personificada e em `read_only`. O diálogo lista os números (o que não serve, desabilitado com o motivo), mostra o **nome do número** de saída e a frase "O contato vai
+  receber de outro número, e a conversa continua por lá", pede só o texto e, depois do envio (`useContinueOnChannel`, `clientId` reaproveitado ao tentar de novo o mesmo conteúdo), abre a conversa
+  de destino (`useInboxPath()` com `moveFilterTo`: o filtro `?canal=` ligado passa ao número de destino). Sem aviso de número não oficial (D-5).
 - **Conversa:** `message-thread` mostra da mais antiga para a mais nova, com separador por dia; ao rolar perto
   do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
   um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
@@ -439,12 +449,13 @@ leitura do envio JSON ou `multipart`, resposta da mídia).
 | `GET /api/admin/inbox/conversations?status&unread&channelId&q&cursor&limit` | plataforma | `listConversations` com `tab = all` fixo (a rota não tem `tab`, `tagIds` nem `assignedTo`; `platformConversationsQuerySchema`) |
 | `GET .../conversations/:id`, `.../messages`, `.../templates` | plataforma (`templates`: quem responde) | `getConversation`, `listMessages`, `listConversationTemplates` |
 | `GET .../conversations/:id/related` | plataforma | `listRelatedConversations` (X1), no escopo da plataforma: só conversas de `tenant_id` nulo; a de tenant responde 404 |
+| `GET .../conversations/:id/transfer-channels`, `POST .../conversations/:id/transfer` | quem responde | `listTransferChannels` e `continueOnChannel` (X2), no escopo da plataforma: só números de `tenant_id` nulo (o de organização responde 404), conversa sem dono; `admin-inbox-transfer` 20/min mais o limite de envio |
 | `GET .../unread` | plataforma | `unreadCounts` (`{ queue, mine }`: a plataforma só usa `queue`, o total com não lidas) |
 | `GET .../events` | plataforma | `streamInboxEvents` com o ator da plataforma: só avisos `s = null`; batimento, 15 min, 3 por pessoa, 503 sem `LISTEN` |
 | `GET .../messages/:id/media` | plataforma | `openMessageMedia` (a mídia da mensagem aponta para `/api/admin/inbox/messages/:id/media`: `inboxBase(scope)`) |
 | `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `PUT .../messages/:id/favorite`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setMessageFavorite`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
 
-Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-queue` 60/min, `-media-retry` 20/min.
+Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-transfer` 20/min, `-queue` 60/min, `-media-retry` 20/min.
 `claim`, `assign`, `assignees`, `candidates` e `customer` **não existem** (404, teste de matriz).
 
 - **Ator** (`platform.ts`): `platformActor(user, ip)` monta o `InboxActor` com `scope = platform`, `permissions = []` e
@@ -575,9 +586,31 @@ cascata com o arquivo órfão.
   - **R3a (feita):** a estrela (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, `favorite.ts`, selo e botão na bolha) e o aviso da conversa
     esvaziada na thread (SPEC, "R3a: o que foi feito"). O teto de favoritas **não** recusa a marcação: quem rebaixa é a limpeza.
 
+## Continuar por outro número (X2)
+
+`conversation.channel_id` é imutável: trocar de número é **outra conversa**, com o mesmo `chat_contact`. `continueOnChannel` (`transfer-actions.ts`) faz isso em uma transação: lê a origem por
+`requireVisibleConversation`, calcula a elegibilidade (`eligibleTransferChannels`, `transfer.ts`, puro) sobre os números do escopo (`scopeWhere`) e as outras conversas do contato (só o número, se
+o ator a alcança e `last_inbound_at`), recusa o que não serve, acha ou cria a conversa de destino por `openConversation` (`contact-actions.ts`, o mesmo achar-ou-criar de "iniciar conversa" nos
+dois escopos) e grava a mensagem por `queueMessage`, que confere de novo, com a conversa travada, a visibilidade, o número conectado e a janela de 24 h. O provedor é chamado depois, por
+`dispatch`. A rota nunca confia na lista que a tela mostrou.
+
+- Elegível: número do mesmo escopo, diferente do atual, `connected`; com `sessionWindow24h`, só com a janela aberta **na conversa de destino** (sem conversa lá, fechada: só um modelo começa).
+- A conversa de destino fora do alcance do ator (de outro atendente) vira `assigned_to_other` na lista, **antes** da janela (nada dela é revelado além de existir), e 409 `ALREADY_ASSIGNED` no envio.
+- A conversa de origem não é tocada. A de destino segue as regras do envio: a nova nasce com quem a abriu como dono (tenant), a da fila é assumida, a encerrada reabre, a de outro (para quem
+  supervisiona) não troca de dono.
+- Idempotente: conversa única por contato e número, e `clientId` por conversa. O pedido repetido é reconhecido antes das recusas de estado (número que caiu ou janela que fechou depois do envio
+  não transformam a repetição em 409). Auditoria `inbox.conversation_continued` (alvo o destino; `fromConversationId`, `channelId`, `created`).
+- Limite conhecido: recusa do provedor deixa a conversa de destino criada, com a mensagem `failed`.
+
 ## Testes
 
 - `src/lib/emoji/*.test.ts` (X3): `insertAtCursor` (início, meio, fim, sobre seleção, emoji composto, par substituto, teto), recentes (sem repetição, teto 16, por usuário, corrompido, armazenamento indisponível), tom de pele (inválido, por usuário) e o script de cópia (`sync-emojibase.test.ts`, com pastas temporárias).
+- `tests/db/inbox-transfer.test.ts` (X2), com o provedor simulado, nos dois escopos: caminho feliz (conversa do mesmo contato no outro número, dono, auditoria só com ids, origem intocada),
+  `clientId` repetido e dois pedidos simultâneos (uma conversa, uma mensagem, um envio), destino que já existe (fila assumida, encerrada reaberta), recusa do provedor (200 `failed`), corpo
+  inválido, outra organização e id inexistente (404 igual), número de outra organização ou da plataforma (404), desconectado e desativado (409), o próprio número (400), sem `inbox:reply` (403), sem
+  sessão (401), origem de outro atendente (404 igual a inexistente), destino de outro atendente (409 `ALREADY_ASSIGNED` sem conteúdo; quem supervisiona envia e o dono não muda), janela de 24 h no
+  destino (fechada e aberta), a lista de números (motivos, campos, sem vazar dono nem janela) e os escopos que não se cruzam. `src/lib/inbox/transfer.test.ts` e
+  `src/components/inbox/transfer-entry.test.ts` cobrem a regra pura e o estado do botão. As rotas entram em `rbac.test.ts` e o `POST` em `impersonation.test.ts`.
 - `tests/db/inbox-related.test.ts` (X1): `GET .../related` nos dois escopos: o que vem (outras do mesmo contato, ordem, só os cinco campos),
   contato sem outras, conversa de outro membro fora do alcance (não aparece, não conta, 404 igual a inexistente), outra organização e
   inexistente 404, sem sessão 401, sem `inbox:read` 403, plataforma × tenant nos dois sentidos. `src/components/inbox/channel-filter.test.ts`:

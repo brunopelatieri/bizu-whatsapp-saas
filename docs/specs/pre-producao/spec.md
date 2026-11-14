@@ -1950,7 +1950,7 @@ Comparação com as SPECs 049, 056 e 066 da origem.
 | Filtro de canal na URL (049 §4.1) | Filtro existe, em estado local (`conversation-list.tsx:85`) | **X1 (implementada):** `?canal=<id>`; id inválido cai em "todos" |
 | "Também neste contato" (049 §4.4) | Não existe | **X1 (implementada):** seção no `contact-panel.tsx` com as outras conversas do contato, respeitando `visibility.ts` |
 | Filtro de clientes por canal (049 §4.5) | Não existe | **X4**, opcional: parâmetro `channelId` em `GET /api/customers` com `EXISTS` |
-| Continuar por outro canal (056) | Servidor pronto: `startConversation` é o find-or-create por contato e canal (`contact-actions.ts:358-432`); falta a ação | **X2** |
+| Continuar por outro canal (056) | Servidor pronto: `startConversation` é o find-or-create por contato e canal (`contact-actions.ts:358-432`); falta a ação | **X2 (implementada)** |
 | Seletor de emoji (066) | Não existe; `Textarea` controlado sem ref de cursor (`composer.tsx:394-411`) | **X3 (implementada)** |
 | Motores cientes de canal, teto de envio frio, enquete, API v1, webhooks de saída, IA (049 F6) | Não existem neste projeto (`plano.md`, "O que não é portado") | Fora |
 | Opt-out do contato e aviso de número não oficial (056) | Não existe o campo | Fora (D-5) |
@@ -1991,7 +1991,7 @@ número) e `/security-review`.
 
 ### X1: o que foi feito (2026-11-14)
 
-Filtro de número na URL e "Também neste contato". **Sem migration**, sem mudança de regra de visibilidade. A X2 (continuar por outro número) e a X4 não foram tocadas; a X3 vem em seguida,
+Filtro de número na URL e "Também neste contato". **Sem migration**, sem mudança de regra de visibilidade. A X2 (continuar por outro número, feita depois: ver "X2: o que foi feito") e a X4 não foram tocadas; a X3 vem em seguida,
 em commit próprio, na mesma branch.
 
 **Filtro de número na URL (`?canal=<id>`)**
@@ -2069,6 +2069,89 @@ O popover **não** pediu pacote: `@base-ui/react` (já usado por dropdown, toolt
 **Roteiro conferido no navegador** (desenvolvimento; ver o relatório): abrir pelo mouse e pelo teclado, inserir vários sem fechar, inserir no meio, sobre a seleção e no fim, emoji composto (`👋🏾`), recentes e tom de pele que sobrevivem a recarregar, Escape devolve o foco ao campo, botão bloqueado com o número desconectado, nos dois escopos, em 800 px e 375 px, sem nenhum pedido fora da própria origem.
 
 **O que não foi testado:** o seletor em Firefox e Safari; teclado virtual no celular de verdade (só a emulação de 375 px); leitor de tela; o cabeçalho de cache **medido** em produção (o `npm start` local recusa o `.env` de desenvolvimento: o valor foi lido no código do servidor de estáticos); um `JOBS_MODE` ou proxy que comprima `data.json` de outro jeito.
+
+### X2: o que foi feito (2026-11-14)
+
+Continuar a conversa por outro número. **Sem migration** (a conversa já é única por contato e número, e `message.client_id` já dá a idempotência) e sem mudança na regra de visibilidade nem no envio.
+A X4 não foi tocada.
+
+**Servidor**
+
+- `src/lib/inbox/transfer.ts` (puro, com teste): `eligibleTransferChannels({ scopeTenantId, currentChannelId, channels, destinations, now })` devolve os **outros** números do escopo, cada um com
+  `eligible` e `reason` (`disconnected`, `assigned_to_other`, `window_closed`, nesta ordem de conferência). Ficam de fora, sem motivo: o número da conversa atual, o de outro escopo e o desativado
+  (`disabled`). Número com `sessionWindow24h` só serve com a janela aberta **naquela** conversa de destino (`sessionWindow` sobre o `last_inbound_at` dela); sem conversa lá, a janela está fechada.
+- `src/lib/inbox/transfer-actions.ts`: `listTransferChannels(actor, conversationId)` e `continueOnChannel(actor, conversationId, { channelId, text, clientId })`. A origem passa por
+  `requireVisibleConversation` (fora do alcance, 404 igual a id inexistente). O envio revalida a elegibilidade, acha ou cria a conversa do **mesmo `contact_id`** no destino (`openConversation`) e
+  grava a mensagem pelo `queueMessage` de sempre, tudo em **uma transação**; o provedor é chamado depois, por `dispatch`. Nada muda no envio: número conectado, janela de 24 h, dono (a da fila é
+  assumida, a encerrada reabre) e `clientId` são os do envio normal, conferidos de novo com a conversa travada.
+- `openConversation(tx, actor, channelId, contactId, via)` (`contact-actions.ts`): o achar-ou-criar que estava repetido em `startConversation` e `startPlatformConversation` virou uma função só,
+  usada pelas três. Comportamento de "iniciar conversa" inalterado (a auditoria `inbox.conversation_claimed` leva `via: "start"` ou `"transfer"`).
+- Rotas, nos dois escopos (`src/api/inbox.ts` e `src/api/admin-inbox.ts`), schema `transferConversationSchema` (`src/lib/schemas/inbox.ts`, `.strict()`):
+
+| Rota | Quem | Resposta |
+|---|---|---|
+| `GET .../conversations/:id/transfer-channels` | `inbox:reply` (plataforma: quem responde) | `{ items: [{ channel: { id, name, type }, eligible, reason }] }`, em ordem de nome; nenhum outro campo |
+| `POST .../conversations/:id/transfer` `{ channelId, text, clientId }` | `inbox:reply`, 20/min (`inbox-transfer`) e mais o limite de envio (60/min) | `{ conversationId, message }`: 201 enviada ou sem resposta do provedor, 200 com a mensagem `failed` |
+
+- Recusas do `POST`: origem fora do alcance ou de outro escopo 404; o próprio número 400 `SAME_CHANNEL`; número inexistente ou de outro escopo 404; desativado 409 `CHANNEL_DISABLED`; desconectado
+  409 `CHANNEL_NOT_CONNECTED`; janela fechada no destino 409 `SESSION_WINDOW_CLOSED`; conversa de destino de outro atendente 409 `ALREADY_ASSIGNED` (só o erro e o dono, como em "iniciar
+  conversa"); sessão personificada 403 `IMPERSONATION_BLOCKED`; organização em `read_only` recusada pela regra geral. Nenhuma recusa deixa conversa vazia para trás.
+- **Idempotência:** `clientId` repetido devolve a mesma mensagem sem chamar o provedor de novo; a conversa é única por contato e número. Dois pedidos simultâneos: uma conversa, uma mensagem, um envio.
+  O pedido repetido é reconhecido **antes** das recusas de estado (a mensagem com aquele `clientId` na conversa do contato naquele número, dentro do alcance do ator): se o número caiu ou a
+  janela fechou depois do envio, a resposta ainda é a mesma mensagem, e não um 409 que levaria a pessoa a mandar de novo.
+- **Auditoria:** `inbox.conversation_continued`, alvo a conversa de **destino**, `metadata = { fromConversationId, channelId, created }`, só quando a mensagem é gravada de fato (o pedido repetido
+  não audita de novo). Nunca o texto nem o telefone. A conversa de origem **não é tocada** (dono, situação, prévia).
+
+**Tela** (nos dois escopos)
+
+- `src/components/inbox/continue-on-channel.tsx`: o botão "Continuar por outro número" e o diálogo. Duas entradas: na faixa "Janela de 24 horas encerrada" do composer, ao lado de "Enviar
+  modelo", e no slot `footer` de "Também neste contato". O diálogo lista os números (`ChannelBadge`), com o que não serve desabilitado e o motivo, mostra "Vai sair pelo número **nome**" e a
+  frase "O contato vai receber de outro número, e a conversa continua por lá", e pede só o texto. Sem aviso de número não oficial (D-5).
+- `transfer-entry.ts` (puro, com teste): o botão aparece com número elegível; só com número oficial de janela fechada aparece **desabilitado**, com o motivo apontando o modelo; nos demais casos
+  (nenhum outro número, só desconectado, só de outro atendente) não aparece. Também some sem `inbox:reply`, na sessão personificada e em `read_only`.
+- Depois do envio a tela abre a conversa de destino (`useInboxPath()` com `moveFilterTo`: com o filtro `?canal=` ligado, ele passa ao número de destino). Mensagem recusada pelo provedor: a
+  conversa abre do mesmo jeito, com a mensagem `failed` e um aviso; reenviar é por lá.
+- `useTransferChannels` (chave sob `conversations`, como `related`: relida com a lista) e `useContinueOnChannel` em `inbox-api.ts`. Tentar de novo o mesmo número e o mesmo texto reaproveita o
+  `clientId`.
+
+**Divergências da SPEC**
+
+- O corpo do `POST` leva `clientId` além de `{ channelId, text }`: sem ele não há como garantir que dois cliques não mandem duas mensagens (X2-1).
+- "O schema passa a aceitar contato existente" **não** foi feito: `startConversationSchema` segue igual. A rota nova chama o mesmo achar-ou-criar por dentro (`openConversation`), com o
+  `contact_id` lido da conversa de origem; expor `contactId` em `POST /api/inbox/conversations` abriria uma entrada pública nova que pediria conferência própria de alcance do contato (X2-2).
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X2-1 | `clientId` é obrigatório no `POST .../transfer`, com o mesmo formato do envio |
+| X2-2 | `contactId` não entra no schema público de "iniciar conversa"; o reaproveitamento é interno (`openConversation`) |
+| X2-3 | A lista de números é uma **rota própria** (`.../transfer-channels`, `inbox:reply`), não um campo de `.../related`: `related` é de quem lê, some sem outras conversas, e a faixa da janela precisa da lista mesmo assim |
+| X2-4 | Vale nos **dois escopos** ("canal do mesmo escopo"): a plataforma segue por outro número da plataforma, sem dono, e nunca por número de organização |
+| X2-5 | A conversa de origem não muda: não encerra, não troca de dono, não ganha marca de "continuada" |
+| X2-6 | Achar ou criar a conversa e gravar a mensagem são uma transação só: recusa não deixa conversa vazia. Recusa **do provedor** deixa a conversa de destino com a mensagem `failed` (200), para reenviar por lá |
+| X2-7 | Conversa de destino de outro atendente: na lista sai só `assigned_to_other` (sem dono e sem dizer nada da janela); no `POST`, 409 `ALREADY_ASSIGNED` com o dono, igual a "iniciar conversa". Quem responde fica sabendo que o contato já é atendido por outra pessoa naquele número, como já ficava ao iniciar conversa |
+| X2-8 | A lista sai para quem tem `inbox:reply`, **sem** pedir `channel:read`: nome e tipo dos números não desativados do escopo (o estado só como o motivo "desconectado") |
+| X2-9 | Número `connecting` ou `error` é tratado como desconectado; o desativado nem é listado |
+| X2-10 | O botão só aparece desabilitado no caso que a SPEC nomeia (número oficial com a janela fechada); só desconectado ou só de outro atendente, ele some |
+| X2-11 | Limite próprio de 20/min por pessoa (`inbox-transfer`, `admin-inbox-transfer`), somado ao de envio |
+| X2-12 | Auditoria com ação nova (`inbox.conversation_continued`) em vez de só a `conversation_claimed`; a conversa que nasce pela ação registra `via: "transfer"` |
+| X2-13 | O diálogo é só texto, sem citação, anexo nem modelo (o composer completo está na conversa de destino) |
+| X2-14 | Depois do envio, o filtro `?canal=` ligado passa ao número de destino (senão a lista esconderia a conversa aberta) |
+
+**Roteiro manual** (organização com um número oficial e um QR conectados, e um contato que escreveu pelo oficial há mais de 24 horas)
+
+1. Abrir a conversa do contato no número oficial: a faixa "Janela de 24 horas encerrada" mostra "Enviar modelo" e "Continuar por outro número".
+2. Clicar em "Continuar por outro número": o diálogo traz o número QR já escolhido, "Vai sair pelo número …" e a frase da SPEC. Enviar um texto.
+3. A tela abre a conversa nova, no número QR, com a mensagem enviada e você como responsável; o contato recebe pelo outro número. A conversa antiga segue como estava.
+4. Nas duas conversas, o painel mostra "Também neste contato" com a outra; o botão aparece ali também.
+5. Da conversa do QR, tentar seguir pelo oficial sem o contato ter escrito por ele: o botão aparece desabilitado, com o motivo apontando o modelo (ou, com um terceiro número, o oficial aparece desabilitado dentro do diálogo).
+6. Desconectar o QR e reabrir a conversa do oficial: o botão some (sem outro número que sirva).
+7. Com outro atendente (papel sem supervisão) dono da conversa do QR: o número aparece desabilitado com "Outra pessoa já atende este contato por este número"; forçar o envio pela API responde 409.
+8. Clicar duas vezes em "Enviar": uma mensagem só.
+9. Repetir 1 a 3 em `/admin/atendimento`, com dois números da plataforma.
+
+**O que não foi testado:** a tela no navegador (diálogo, foco, 375 px, leitor de tela); o envio real por um provedor (os testes usam provedor simulado); Firefox e Safari.
 
 ---
 

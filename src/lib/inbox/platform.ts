@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { type Tx, withScope } from "@/db/rls";
-import { chatContact, conversation, user } from "@/db/schema";
+import { chatContact, user } from "@/db/schema";
 import { requireChannelRow } from "@/lib/channels/service";
 import type { PlatformRole } from "@/lib/auth/types";
 import { auditInbox } from "@/lib/inbox/assignment";
@@ -8,12 +8,12 @@ import {
   contactForStart,
   contactResponse,
   notifyContactConversations,
+  openConversation,
   phoneRequired,
   requireVisibleContact,
 } from "@/lib/inbox/contact-actions";
 import { conversationItem, permissionDenied } from "@/lib/inbox/conversations";
 import { platformReplyRoles } from "@/lib/inbox/constants";
-import { notifyInbox } from "@/lib/inbox/notify";
 import type { InboxActor, InboxCapabilities } from "@/lib/inbox/visibility";
 import { normalizePhone, phoneErrorMessage } from "@/lib/phone/br";
 import { userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
@@ -150,45 +150,7 @@ export async function startPlatformConversation(
     const destination = await destinationOf(tx, input);
     const contactId = await contactForStart(tx, actor.scope, destination);
 
-    const [inserted] = await tx
-      .insert(conversation)
-      .values({
-        tenantId: null,
-        channelId: target.id,
-        contactId,
-        status: "open",
-        lastMessageAt: sql`now()`,
-        unreadCount: 0,
-      })
-      .onConflictDoNothing({
-        target: [conversation.contactId, conversation.channelId],
-        where: sql`tenant_id is null`,
-      })
-      .returning({ id: conversation.id });
-
-    if (inserted) {
-      await notifyInbox(tx, {
-        s: null,
-        c: inserted.id,
-        k: "conversation",
-        a: null,
-        p: null,
-        u: actor.userId,
-      });
-      return { conversation: await conversationItem(tx, actor, inserted.id), created: true };
-    }
-
-    const [existing] = await tx
-      .select({ id: conversation.id })
-      .from(conversation)
-      .where(
-        and(
-          sql`${conversation.tenantId} is null`,
-          eq(conversation.contactId, contactId),
-          eq(conversation.channelId, target.id),
-        ),
-      );
-    if (!existing) throw new Error("Conversa não encontrada depois do conflito.");
-    return { conversation: await conversationItem(tx, actor, existing.id), created: false };
+    const opened = await openConversation(tx, actor, target.id, contactId, "start");
+    return { conversation: await conversationItem(tx, actor, opened.id), created: opened.created };
   });
 }

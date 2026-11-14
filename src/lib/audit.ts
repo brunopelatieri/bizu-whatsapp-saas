@@ -143,6 +143,8 @@ export type AuditAction =
   | "inbox.conversation_reopened"
   | "inbox.contact_linked"
   | "inbox.contact_saved_as_customer"
+  // X2: a conversa seguiu por outro número; só ids em `metadata`, nunca o texto enviado.
+  | "inbox.conversation_continued"
   // retenção R3a: a estrela da mensagem; só ids em `metadata`, nunca o texto.
   | "inbox.message_favorited"
   | "inbox.message_unfavorited"

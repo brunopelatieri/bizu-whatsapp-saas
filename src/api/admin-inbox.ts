@@ -33,6 +33,7 @@ import {
 import { setMessageFavorite } from "@/lib/inbox/favorite";
 import { retryMessage } from "@/lib/inbox/send";
 import { listConversationTemplates } from "@/lib/inbox/send-template";
+import { continueOnChannel, listTransferChannels } from "@/lib/inbox/transfer-actions";
 import type { InboxActor } from "@/lib/inbox/visibility";
 import {
   conversationStatusSchema,
@@ -41,6 +42,7 @@ import {
   platformConversationsQuerySchema,
   platformLinkContactSchema,
   platformStartConversationSchema,
+  transferConversationSchema,
   updateContactSchema,
 } from "@/lib/schemas/inbox";
 
@@ -87,6 +89,7 @@ const uploadLimit = createMiddleware(async (c, next) =>
   isMediaUpload(c) ? uploadRate(c, next) : next(),
 );
 const startLimit = perUser("admin-inbox-start", 20);
+const transferLimit = perUser("admin-inbox-transfer", 20);
 
 /** Quem responde. O serviço confere de novo (`actor.can.reply`). */
 const canReply = requirePlatform([...PLATFORM_REPLY_ROLES]);
@@ -228,6 +231,37 @@ adminInboxRoutes.put(
         c.req.valid("json").favorite,
       ),
     }),
+);
+
+// ---------------------------------------------------------------------------
+// Continuar por outro número (X2)
+// ---------------------------------------------------------------------------
+
+/** Os outros números do escopo para seguir a conversa com o contato, cada um elegível ou com o motivo. */
+adminInboxRoutes.get("/api/admin/inbox/conversations/:id/transfer-channels", canReply, validId, async (c) =>
+  c.json(await listTransferChannels(actorOf(c), c.req.valid("param").id)),
+);
+
+/**
+ * `{ channelId, text, clientId }`: acha ou cria a conversa do contato no outro número e envia o texto por
+ * ele. O servidor revalida tudo (`continueOnChannel`). 201 enviada ou sem resposta do provedor; 200 com a
+ * mensagem `failed`, como no envio.
+ */
+adminInboxRoutes.post(
+  "/api/admin/inbox/conversations/:id/transfer",
+  canReply,
+  transferLimit,
+  sendLimit,
+  validId,
+  zValidator("json", transferConversationSchema, validationError),
+  async (c) => {
+    const { conversationId, message, failed } = await continueOnChannel(
+      actorOf(c),
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    );
+    return c.json({ conversationId, message }, failed ? 200 : 201);
+  },
 );
 
 // ---------------------------------------------------------------------------

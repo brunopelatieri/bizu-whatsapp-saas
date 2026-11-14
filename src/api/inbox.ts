@@ -46,6 +46,7 @@ import { setMessageFavorite } from "@/lib/inbox/favorite";
 import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
 import { retryMessage } from "@/lib/inbox/send";
 import { listConversationTemplates } from "@/lib/inbox/send-template";
+import { continueOnChannel, listTransferChannels } from "@/lib/inbox/transfer-actions";
 import { type InboxActor, inboxCapabilities } from "@/lib/inbox/visibility";
 import {
   assignSchema,
@@ -56,6 +57,7 @@ import {
   messagesQuerySchema,
   saveContactAsCustomerSchema,
   startConversationSchema,
+  transferConversationSchema,
   updateContactSchema,
 } from "@/lib/schemas/inbox";
 
@@ -111,6 +113,8 @@ const uploadLimit = createMiddleware(async (c, next) =>
 );
 /** Iniciar conversa: 20 por minuto por pessoa. */
 const startLimit = perUser("inbox-start", 20);
+/** Continuar por outro número: 20 por minuto por pessoa, além do limite de envio. */
+const transferLimit = perUser("inbox-transfer", 20);
 
 const canRead = requirePermission("inbox", "read");
 const canReply = requirePermission("inbox", "reply");
@@ -260,6 +264,37 @@ inboxRoutes.put(
         c.req.valid("json").favorite,
       ),
     }),
+);
+
+// ---------------------------------------------------------------------------
+// Continuar por outro número (X2)
+// ---------------------------------------------------------------------------
+
+/** Os outros números do escopo para seguir a conversa com o contato, cada um elegível ou com o motivo. */
+inboxRoutes.get("/api/inbox/conversations/:id/transfer-channels", canReply, validId, async (c) =>
+  c.json(await listTransferChannels(inboxActor(c), c.req.valid("param").id)),
+);
+
+/**
+ * `{ channelId, text, clientId }`: acha ou cria a conversa do contato no outro número e envia o texto por
+ * ele. O servidor revalida tudo (`continueOnChannel`). 201 enviada ou sem resposta do provedor; 200 com a
+ * mensagem `failed`, como no envio.
+ */
+inboxRoutes.post(
+  "/api/inbox/conversations/:id/transfer",
+  canReply,
+  transferLimit,
+  sendLimit,
+  validId,
+  zValidator("json", transferConversationSchema, validationError),
+  async (c) => {
+    const { conversationId, message, failed } = await continueOnChannel(
+      inboxActor(c),
+      c.req.valid("param").id,
+      c.req.valid("json"),
+    );
+    return c.json({ conversationId, message }, failed ? 200 : 201);
+  },
 );
 
 // ---------------------------------------------------------------------------

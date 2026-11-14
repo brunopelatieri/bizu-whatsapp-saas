@@ -20,6 +20,7 @@ import type {
   MessageType,
 } from "@/lib/inbox/constants";
 import { type InboxRealtimeMode, useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
+import type { TransferOption } from "@/lib/inbox/transfer";
 import type { ConversationTab } from "@/lib/schemas/inbox";
 import { type InboxMode, type InboxScope, useInboxScope } from "@/components/inbox/inbox-scope";
 import { useAuth } from "@/providers/auth-provider";
@@ -175,6 +176,9 @@ export const inboxKeys = {
    */
   related: (tenantId: TenantId, id: string) =>
     [INBOX_KEY, tenantId, "conversations", "related", id] as const,
+  /** Os números para "Continuar por outro número" (X2). Sob `conversations`, como `related`. */
+  transferChannels: (tenantId: TenantId, id: string) =>
+    [INBOX_KEY, tenantId, "conversations", "transfer", id] as const,
   messages: (tenantId: TenantId, id: string) => [INBOX_KEY, tenantId, "messages", id] as const,
   unread: (tenantId: TenantId) => [INBOX_KEY, tenantId, "unread"] as const,
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
@@ -329,6 +333,26 @@ export function useRelatedConversations(conversationId: string | undefined) {
         `${scope.api}/conversations/${conversationId}/related`,
       ).then(({ items }) => items),
     enabled: scope.ready && Boolean(conversationId),
+    refetchInterval: interval,
+    retry: false,
+  });
+}
+
+/**
+ * Os outros números do escopo para seguir a conversa com o contato (X2), cada um elegível ou com o
+ * motivo, como o servidor decidiu (`GET .../conversations/:id/transfer-channels`). A tela só mostra.
+ */
+export function useTransferChannels(conversationId: string | undefined, enabled = true) {
+  const scope = useInboxScope();
+  const interval = useInboxRefetchInterval("list");
+
+  return useQuery({
+    queryKey: inboxKeys.transferChannels(scope.key, conversationId ?? ""),
+    queryFn: () =>
+      apiFetch<{ items: TransferOption[] }>(
+        `${scope.api}/conversations/${conversationId}/transfer-channels`,
+      ).then(({ items }) => items),
+    enabled: enabled && scope.ready && Boolean(conversationId),
     refetchInterval: interval,
     retry: false,
   });
@@ -519,6 +543,34 @@ export function useSendMessage(conversationId: string) {
       sendRequest(scope, conversationId, clientId, payload),
     // A janela fechada e o número caído se corrigem relendo a conversa.
     onSettled: () => invalidateInbox(queryClient, scope.key, { conversationId }),
+  });
+}
+
+export type ContinueResult = { conversationId: string; message: MessageView };
+
+/**
+ * "Continuar por outro número" (X2): acha ou cria a conversa do contato no número escolhido e envia o
+ * texto por ele. `clientId` como no envio: repetir o mesmo pedido não manda duas vezes.
+ */
+export function useContinueOnChannel(conversationId: string) {
+  const queryClient = useQueryClient();
+  const scope = useInboxScope();
+
+  return useMutation({
+    mutationFn: (body: { channelId: string; text: string; clientId: string }) =>
+      apiFetch<ContinueResult>(`${scope.api}/conversations/${conversationId}/transfer`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // A conversa de destino pode já estar em cache (com as mensagens de antes). Sem devolver a promessa:
+    // a tela segue para a conversa sem esperar as releituras.
+    onSuccess: (result) => {
+      void invalidateInbox(queryClient, scope.key, { conversationId: result.conversationId });
+    },
+    // Recusa (número caiu, janela fechou, outro atendente assumiu): a lista de números é relida.
+    onError: () => {
+      void invalidateInbox(queryClient, scope.key);
+    },
   });
 }
 

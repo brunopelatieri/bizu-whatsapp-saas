@@ -175,7 +175,10 @@ export async function seedConversationOnContact(
   scope: Scope,
   channelId: string,
   contactId: string,
-  seed: Pick<ConversationSeed, "status" | "assignedUserId" | "lastMessageAt" | "unreadCount"> = {},
+  seed: Pick<
+    ConversationSeed,
+    "status" | "assignedUserId" | "lastMessageAt" | "lastInboundAt" | "unreadCount"
+  > = {},
 ) {
   return withScope(scope, async (tx) => {
     const at = seed.lastMessageAt ?? new Date();
@@ -191,7 +194,7 @@ export async function seedConversationOnContact(
         lastMessageAt: at,
         lastMessagePreview: "segredo da outra conversa",
         lastMessageDirection: "in",
-        lastInboundAt: at,
+        lastInboundAt: seed.lastInboundAt === undefined ? at : seed.lastInboundAt,
         unreadCount: seed.unreadCount ?? 0,
       })
       .returning();

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { ContinueOnChannelButton } from "@/components/inbox/continue-on-channel";
 import { EmojiButton } from "@/components/inbox/emoji-button";
 import { formatFileSize } from "@/components/inbox/format";
 import {
@@ -343,6 +344,8 @@ export function Composer({
               Enviar modelo
             </Button>
           ) : null}
+          {/* X2: seguir a conversa por outro número do escopo; só aparece se o servidor oferecer um. */}
+          <ContinueOnChannelButton conversationId={conversationId} />
         </div>
       ) : null}
 

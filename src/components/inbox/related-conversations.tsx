@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge";
 type RelatedConversationsProps = {
   conversationId: string;
   /**
-   * Lugar da ação "Continuar por outro número" (X2): entra abaixo da lista. A X1 não a implementa; a
-   * seção só existe quando há outra conversa visível do contato.
+   * Lugar da ação "Continuar por outro número" (X2, `continue-on-channel.tsx`): entra abaixo da lista.
+   * A seção só existe quando há outra conversa visível do contato; a outra entrada da ação é a faixa
+   * "Janela de 24 horas encerrada" do composer.
    */
   footer?: ReactNode;
 };

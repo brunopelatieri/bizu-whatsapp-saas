@@ -38,6 +38,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Atendimento: continuar a conversa por outro número (bloco X de `docs/specs/pre-producao/spec.md`, fase X2)**.
+  - Botão "Continuar por outro número" na faixa "Janela de 24 horas encerrada" e em "Também neste contato", em `/app/atendimento` e `/admin/atendimento`: o diálogo mostra o nome do número de
+    saída, pede o texto e abre a conversa nova com o mesmo contato. O número que não serve aparece desabilitado com o motivo (desconectado, janela de 24 horas encerrada, contato já atendido por
+    outra pessoa naquele número).
+  - Rotas novas, nos dois escopos: `GET .../conversations/:id/transfer-channels` e `POST .../conversations/:id/transfer` (`{ channelId, text, clientId }`), com `inbox:reply`. O servidor revalida
+    tudo, respeita a visibilidade por pessoa e a janela de 24 horas do número de destino, e não envia duas vezes o mesmo `clientId`. Auditoria `inbox.conversation_continued`.
+  - **Migração:** nenhuma mudança de banco, de variável nem de dependência.
+
 - **Atendimento: seletor de emoji no composer (bloco X de `docs/specs/pre-producao/spec.md`, fase X3)**.
   - Botão de emoji ao lado do clipe, nos dois escopos: painel com busca em português, categorias, **recentes** (os 16 últimos) e **tom de pele**, que fica aberto para inserir vários e devolve o foco ao
     campo ao fechar (Escape, clique fora). Entra na posição do cursor ou sobre a seleção, nunca parte um emoji e respeita o limite de caracteres; mesma regra de bloqueio do campo.

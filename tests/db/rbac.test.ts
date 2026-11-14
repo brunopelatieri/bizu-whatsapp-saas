@@ -125,6 +125,8 @@ const endpoints = [
   ["POST", `/api/inbox/messages/${anyId}/retry`, "inbox:reply"],
   ["PUT", `/api/inbox/messages/${anyId}/favorite`, "inbox:reply"],
   ["POST", "/api/inbox/conversations", "inbox:reply"],
+  ["GET", `/api/inbox/conversations/${anyId}/transfer-channels`, "inbox:reply"],
+  ["POST", `/api/inbox/conversations/${anyId}/transfer`, "inbox:reply"],
   ["PATCH", `/api/inbox/contacts/${anyId}`, "inbox:reply"],
   ["GET", `/api/inbox/contacts/${anyId}/candidates`, "inbox:reply"],
   ["POST", `/api/inbox/contacts/${anyId}/link`, "inbox:reply"],

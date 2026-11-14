@@ -109,6 +109,23 @@ export const sendMediaFormSchema = z.object({
 });
 export type SendMediaFormInput = z.infer<typeof sendMediaFormSchema>;
 
+/**
+ * "Continuar por outro número" (X2): o número de saída e a primeira mensagem, só texto. `clientId` como
+ * no envio: repetir o pedido (dois cliques, queda de rede) devolve a mesma mensagem, sem enviar de novo.
+ */
+export const transferConversationSchema = z
+  .object({
+    channelId: z.uuid("Número inválido."),
+    text: z
+      .string()
+      .trim()
+      .min(1, "Escreva a mensagem.")
+      .max(MESSAGE_TEXT_MAX, "Mensagem muito longa."),
+    clientId: clientIdSchema,
+  })
+  .strict();
+export type TransferConversationInput = z.infer<typeof transferConversationSchema>;
+
 export const assignSchema = z.object({
   /** `null` devolve à fila. */
   userId: z.uuid("Atendente inválido.").nullable(),

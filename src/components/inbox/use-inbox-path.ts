@@ -18,7 +18,12 @@ export function useInboxPath() {
   const channelId = parseChannelParam(params.get(CHANNEL_PARAM));
 
   return useCallback(
-    (conversationId?: string) => inboxPath(route, conversationId, channelId),
+    /**
+     * `moveFilterTo`: a conversa aberta é de **outro** número (X2). Com o filtro ligado, ele passa a
+     * ser o desse número (senão a lista esconderia a conversa aberta); sem filtro, segue sem.
+     */
+    (conversationId?: string, moveFilterTo?: string) =>
+      inboxPath(route, conversationId, channelId && moveFilterTo ? moveFilterTo : channelId),
     [route, channelId],
   );
 }
