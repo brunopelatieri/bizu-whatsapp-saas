@@ -13,6 +13,11 @@ export type TeamMember = {
   createdAt: string;
   /** Tipo do telefone do membro (`null` sem telefone); o número não sai da API. */
   phoneKind: PhoneKind | null;
+  /**
+   * Só para quem pode remover membros: a pessoa tem ficha de cliente ligada nesta organização, e a
+   * remoção a apaga (D-11) com as `conversationCount` conversas do telefone dela. `null`: sem ficha.
+   */
+  customerRecord?: { conversationCount: number } | null;
 };
 
 export type TeamInvitation = {

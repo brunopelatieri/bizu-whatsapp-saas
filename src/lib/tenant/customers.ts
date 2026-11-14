@@ -27,7 +27,11 @@ import {
 } from "@/lib/crm/custom-fields";
 import { replaceCustomerTags, tagsOfCustomers, type CustomerTagView } from "@/lib/crm/tags";
 import { type CustomFieldValues, mergeCustomFields } from "@/lib/crm/values";
-import { purgeCustomerContacts } from "@/lib/inbox/privacy";
+import {
+  countCustomerConversations,
+  purgeCustomerContacts,
+  purgeTeamCustomerContacts,
+} from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
@@ -59,7 +63,8 @@ export type CustomerActor = {
 
 type CustomerRow = typeof customer.$inferSelect;
 
-const NOT_FOUND = "Cliente não encontrado.";
+export const CUSTOMER_NOT_FOUND = "Cliente não encontrado.";
+const NOT_FOUND = CUSTOMER_NOT_FOUND;
 const EMAIL_TAKEN = new TenantRuleError(
   409,
   "CUSTOMER_EMAIL_TAKEN",
@@ -153,6 +158,8 @@ function byId(tenantId: string, customerId: string) {
   return and(eq(customer.id, customerId), eq(customer.tenantId, tenantId));
 }
 
+export { byId as byCustomerId };
+
 export function listCustomers(tenantId: string, query: CustomersQuery) {
   const term = query.q ? `%${escapeLike(query.q)}%` : null;
   const filters: (SQL | undefined)[] = [eq(customer.tenantId, tenantId)];
@@ -212,6 +219,7 @@ export async function getCustomer(tenantId: string, customerId: string) {
       tags: await tagsOfCustomers(tx, [row.id]),
       roles: await teamRolesOf(tx, tenantId, [row.userId]),
       phoneChange: await customerPhoneChange(tx, row.id),
+      conversationCount: await countCustomerConversations(tx, row.id),
     };
   });
 
@@ -221,6 +229,8 @@ export async function getCustomer(tenantId: string, customerId: string) {
   return {
     ...toCustomer(found.row, found.tags.get(found.row.id), found.roles),
     phoneChange: found.phoneChange,
+    // As conversas que a exclusão da ficha apaga (o diálogo da tela avisa com este número).
+    conversationCount: found.conversationCount,
   };
 }
 
@@ -488,6 +498,74 @@ export async function cancelCustomerPhoneChangeByTeam(
 }
 
 /**
+ * Apaga a ficha e o que está ligado a ela: os contatos vinculados saem com conversas, mensagens e
+ * mídia (SPEC da caixa de entrada, LGPD), os pedidos de verificação de telefone e o vínculo do
+ * portal. Roda na transação de quem chama, com o RLS limitando tudo ao tenant (ou na de plataforma,
+ * na anonimização da conta). Devolve o que sobra para **depois do commit**: as chaves dos objetos
+ * do armazenamento e a identidade do portal que ficou sem ficha.
+ *
+ * `teamPhoneKey` (D-11, ficha de quem é da equipe): só os contatos desse número saem; os demais só
+ * perdem o vínculo. `undefined` é a exclusão comum (todos os contatos da ficha).
+ */
+export async function deleteCustomerIn(
+  tx: Tx,
+  tenantId: string,
+  customerId: string,
+  audit: {
+    actor: { type?: "user" | "system"; id: string | null };
+    ip?: string;
+    metadata?: Record<string, string | number | boolean | null>;
+  },
+  options: { teamPhoneKey?: string | null } = {},
+) {
+  const [found] = await tx
+    .select({ id: customer.id })
+    .from(customer)
+    .where(byId(tenantId, customerId))
+    .for("update");
+  if (!found) throw notFound(NOT_FOUND);
+
+  const inbox =
+    options.teamPhoneKey === undefined
+      ? await purgeCustomerContacts(tx, [found.id])
+      : await purgeTeamCustomerContacts(tx, found.id, options.teamPhoneKey);
+  await deleteVerificationsOf(tx, "customer", [found.id]);
+  const [removed] = await tx
+    .delete(customer)
+    .where(byId(tenantId, customerId))
+    .returning({ portalUserId: customer.portalUserId });
+  if (!removed) throw notFound(NOT_FOUND);
+
+  if (removed.portalUserId) {
+    await leavePortalTenant(tx, removed.portalUserId, tenantId);
+  }
+
+  await auditInTransaction(tx, "customer.deleted", {
+    actor: audit.actor,
+    tenantId,
+    target: { type: "customer", id: customerId },
+    ip: audit.ip,
+    metadata: audit.metadata,
+  });
+
+  return { portalUserId: removed.portalUserId, storageKeys: inbox.storageKeys };
+}
+
+/** Depois do commit: os objetos saem do armazenamento (falha vira log) e a identidade órfã do portal cai. */
+export async function afterCustomerDeleted(deleted: {
+  portalUserId: string | null;
+  storageKeys: string[];
+}) {
+  for (const key of deleted.storageKeys) {
+    await getStorage()
+      .delete(key)
+      .catch((error) => logError("Falha ao apagar a mídia do cliente excluído", error));
+  }
+
+  if (deleted.portalUserId) await dropOrphanPortalUser(deleted.portalUserId);
+}
+
+/**
  * Apaga o cliente. As conversas de WhatsApp com ele saem junto (contatos vinculados, mensagens e
  * mídia; SPEC da caixa de entrada, LGPD): o RLS do tenant limita tudo a este tenant, e os objetos
  * do armazenamento saem depois do commit.
@@ -497,43 +575,11 @@ export async function deleteCustomer(
   customerId: string,
   actor: CustomerActor,
 ) {
-  const { portalUserId, storageKeys } = await withTenant(tenantId, async (tx) => {
-    const [found] = await tx
-      .select({ id: customer.id })
-      .from(customer)
-      .where(byId(tenantId, customerId))
-      .for("update");
-    if (!found) throw notFound(NOT_FOUND);
+  const deleted = await withTenant(tenantId, (tx) =>
+    deleteCustomerIn(tx, tenantId, customerId, { actor: { id: actor.userId }, ip: actor.ip }),
+  );
 
-    const inbox = await purgeCustomerContacts(tx, [found.id]);
-    await deleteVerificationsOf(tx, "customer", [found.id]);
-    const [removed] = await tx
-      .delete(customer)
-      .where(byId(tenantId, customerId))
-      .returning({ portalUserId: customer.portalUserId });
-    if (!removed) throw notFound(NOT_FOUND);
-
-    if (removed.portalUserId) {
-      await leavePortalTenant(tx, removed.portalUserId, tenantId);
-    }
-
-    await auditInTransaction(tx, "customer.deleted", {
-      actor: { id: actor.userId },
-      tenantId,
-      target: { type: "customer", id: customerId },
-      ip: actor.ip,
-    });
-
-    return { portalUserId: removed.portalUserId, storageKeys: inbox.storageKeys };
-  });
-
-  for (const key of storageKeys) {
-    await getStorage()
-      .delete(key)
-      .catch((error) => logError("Falha ao apagar a mídia do cliente excluído", error));
-  }
-
-  if (portalUserId) await dropOrphanPortalUser(portalUserId);
+  await afterCustomerDeleted(deleted);
 }
 
 /**

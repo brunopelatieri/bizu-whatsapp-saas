@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { Hono } from "hono";
 import { requireAuth } from "@/api/auth";
+import { blockWhileImpersonating } from "@/api/impersonation";
 import {
   authRateLimit,
   jsonBodyLimit,
@@ -25,6 +26,7 @@ import {
   updateCustomerSchema,
 } from "@/lib/schemas/customer";
 import { phoneChangeSchema } from "@/lib/schemas/phone";
+import { unlinkTeamCustomer } from "@/lib/tenant/team-customer-removal";
 import {
   cancelCustomerPhoneChangeByTeam,
   createCustomer,
@@ -152,6 +154,23 @@ customerRoutes.delete(
   validId,
   async (c) => {
     await cancelCustomerPhoneChangeByTeam(c.get("tenant").id, c.req.valid("param").id, teamActor(c));
+    return c.body(null, 204);
+  },
+);
+
+/**
+ * Desfaz a ligação da ficha com a pessoa da equipe (D-9/D-11): a ficha e as conversas ficam, e deixam
+ * de ser apagadas junto com a pessoa. É assim que a equipe mantém a ficha antes de remover alguém.
+ * Sensível (muda o que uma remoção apaga), por isso fora da personificação. Criar a ligação à mão
+ * não existe: ela nasce do telefone confirmado.
+ */
+customerRoutes.delete(
+  "/api/customers/:id/team-link",
+  requirePermission("customer", "update"),
+  blockWhileImpersonating,
+  validId,
+  async (c) => {
+    await unlinkTeamCustomer(c.get("tenant").id, c.req.valid("param").id, teamActor(c));
     return c.body(null, 204);
   },
 );

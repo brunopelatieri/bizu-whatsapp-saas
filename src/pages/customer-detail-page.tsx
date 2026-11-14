@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
@@ -16,6 +17,8 @@ import { phoneKindOf, StartConversationButton } from "@/components/inbox/new-con
 import { DetailRow } from "@/components/detail-row";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { roleLabel } from "@/lib/auth/permissions";
+import { conversationsLabel } from "@/lib/format/conversations";
 import { formatPhoneForDisplay } from "@/lib/phone/br";
 import { TagChip } from "@/components/crm/tag-chip";
 import { TagPicker } from "@/components/crm/tag-picker";
@@ -92,6 +95,50 @@ function CustomFieldsCard({ customer }: { customer: Customer }) {
             />
           ))}
         </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Ficha de quem é da equipe (D-9/D-11). Remover a pessoa da equipe, ou ela excluir a conta, apaga esta
+ * ficha e as conversas do número dela; desfazer a ligação mantém a ficha (a ação é só de quem edita).
+ */
+function TeamLinkCard({ customer }: { customer: Customer }) {
+  const queryClient = useQueryClient();
+  const unlink = useCustomerMutation("Ligação desfeita. A ficha fica com a organização.");
+  if (!customer.team) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Também é da equipe</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p>
+          Esta ficha está ligada a uma pessoa da equipe ({roleLabel(customer.team.role)}). Se ela for
+          removida da equipe ou excluir a própria conta,{" "}
+          <strong>esta ficha e as conversas do número dela são apagadas, sem volta</strong>.
+        </p>
+        <p className="text-muted-foreground">
+          Para manter a ficha, desfaça a ligação antes. Ela continua como cliente comum e nada é
+          apagado quando a pessoa sair.
+        </p>
+        <Can resource="customer" action="update">
+          <Button
+            variant="outline"
+            disabled={unlink.isPending}
+            onClick={() =>
+              unlink.mutate(
+                { path: `/api/customers/${customer.id}/team-link`, method: "DELETE" },
+                // O aviso da remoção de membros (`/app/equipe`) vem da lista da equipe.
+                { onSuccess: () => queryClient.invalidateQueries({ queryKey: ["team"] }) },
+              )
+            }
+          >
+            Desfazer a ligação com a equipe
+          </Button>
+        </Can>
       </CardContent>
     </Card>
   );
@@ -238,6 +285,8 @@ export function CustomerDetailPage() {
 
             <PortalAccessCard customer={customer} />
 
+            <TeamLinkCard customer={customer} />
+
             <CustomerFormDialog
               open={editing}
               customer={customer}
@@ -246,7 +295,16 @@ export function CustomerDetailPage() {
             <ConfirmDialog
               open={removing}
               title="Remover cliente"
-              description={`${customer.name} sai desta organização e perde o acesso ao portal na hora.`}
+              description={
+                <>
+                  {customer.name} sai desta organização e perde o acesso ao portal na hora.{" "}
+                  <strong>
+                    {customer.conversationCount
+                      ? `${conversationsLabel(customer.conversationCount)} de WhatsApp, com as mensagens e os arquivos, serão apagadas sem volta.`
+                      : "As conversas e os arquivos do atendimento ligados a este cliente também são apagados, sem volta."}
+                  </strong>
+                </>
+              }
               confirmLabel="Remover"
               pending={remove.isPending}
               onConfirm={confirmRemoval}

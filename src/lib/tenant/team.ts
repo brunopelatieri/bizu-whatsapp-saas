@@ -15,7 +15,12 @@ import { releaseAssignments } from "@/lib/inbox/assignment";
 import { inboxCapabilities } from "@/lib/inbox/visibility";
 import { normalizePhone } from "@/lib/phone/br";
 import { phoneAfterMemberLeft, routeVerificationToPlatform } from "@/lib/phone/requests";
+import { afterCustomerDeleted } from "@/lib/tenant/customers";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import {
+  deleteMemberCustomer,
+  teamCustomerWarnings,
+} from "@/lib/tenant/team-customer-removal";
 
 /** Quem está agindo: permissões já resolvidas em `requireTenant`. */
 export type TeamActor = {
@@ -56,10 +61,14 @@ export function assertKnownRole(catalog: RoleCatalog, role: string) {
 /**
  * `phoneKind` diz se o membro tem telefone e de que tipo (a tela decide se oferece "Conversar");
  * o número em si não sai: o servidor o lê pelo `userId` ao iniciar a conversa.
+ *
+ * `customerRecord` (só com `withCustomerRecord`, para quem pode remover membros): a pessoa tem ficha
+ * de cliente ligada a ela nesta organização, e a remoção a apagaria (D-11) com `conversationCount`
+ * conversas. Sem o id nem o nome da ficha: quem remove não precisa de `customer:read` para saber.
  */
-export async function listMembers(tenantId: string) {
-  const rows = await withTenant(tenantId, (tx) =>
-    tx
+export async function listMembers(tenantId: string, options: { withCustomerRecord?: boolean } = {}) {
+  const { rows, warnings } = await withTenant(tenantId, async (tx) => {
+    const found = await tx
       .select({
         id: member.id,
         userId: member.userId,
@@ -72,12 +81,26 @@ export async function listMembers(tenantId: string) {
       .from(member)
       .innerJoin(user, eq(member.userId, user.id))
       .where(eq(member.organizationId, tenantId))
-      .orderBy(asc(member.createdAt)),
-  );
+      .orderBy(asc(member.createdAt));
+
+    const warned = options.withCustomerRecord
+      ? await teamCustomerWarnings(
+          tx,
+          tenantId,
+          found.map(({ userId }) => userId),
+        )
+      : new Map<string, never>();
+
+    return { rows: found, warnings: warned };
+  });
 
   return rows.map(({ phoneNormalized, ...row }) => {
     const parsed = phoneNormalized ? normalizePhone(`+${phoneNormalized}`) : null;
-    return { ...row, phoneKind: parsed?.ok ? parsed.kind : null };
+    return {
+      ...row,
+      phoneKind: parsed?.ok ? parsed.kind : null,
+      ...(options.withCustomerRecord ? { customerRecord: warnings.get(row.userId) ?? null } : {}),
+    };
   });
 }
 
@@ -256,7 +279,7 @@ export async function removeMember(
 ) {
   let removedUserId: string | null = null;
 
-  await withTenant(tenantId, async (tx) => {
+  const customerRemoval = await withTenant(tenantId, async (tx) => {
     const members = await lockMembers(tx, tenantId);
     const target = members.find(({ id }) => id === memberId);
 
@@ -270,6 +293,12 @@ export async function removeMember(
     await tx.delete(member).where(eq(member.id, memberId));
     // As conversas dele voltam à fila (caixa de entrada, RF-25).
     await releaseAssignments(tx, target.userId, tenantId);
+    // D-11: a ficha de cliente ligada à própria pessoa, nesta organização, sai com ela (e só ela;
+    // a equipe desfaz a ligação antes para mantê-la). Os objetos saem depois do commit.
+    const removedCustomer = await deleteMemberCustomer(tx, tenantId, target.userId, {
+      id: actor.userId,
+      ip: actor.ip,
+    });
     // `requireTenant` já recusaria; limpar deixa `/api/me` escolher outro tenant.
     await tx
       .update(session)
@@ -287,7 +316,15 @@ export async function removeMember(
       metadata: { role: target.role },
       ip: actor.ip,
     });
+
+    return removedCustomer;
   });
+
+  if (customerRemoval) {
+    await afterCustomerDeleted(customerRemoval).catch((error: unknown) =>
+      logError("Falha ao concluir a exclusão da ficha do membro removido", error),
+    );
+  }
 
   // Depois do commit, em outro escopo: a liberação que o owner daqui fez no telefone da pessoa
   // deixa de valer, e o pedido que estava na fila desta organização volta à plataforma.

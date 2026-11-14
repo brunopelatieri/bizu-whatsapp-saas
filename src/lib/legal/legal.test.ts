@@ -63,4 +63,20 @@ describe("markdown dos textos legais", () => {
       expect(source).toContain("[NOME DO CONTROLADOR");
     }
   });
+
+  it("os dois textos citam o telefone e o atendimento por WhatsApp (bloco L)", () => {
+    for (const source of [termos, privacidade]) {
+      expect(source).toContain("WhatsApp");
+      expect(source).toMatch(/telefone/i);
+    }
+    // Termos: canal por QR Code é conexão não oficial; o owner remove os números antes de excluir.
+    expect(termos).toMatch(/não oficial/i);
+    expect(termos).toMatch(/remover os números/i);
+    // Privacidade: operadores e o que a exclusão apaga.
+    expect(privacidade).toContain("Meta");
+    expect(privacidade).toContain("Evolution");
+    expect(privacidade).toMatch(/Excluir um cliente/);
+    // D-11: a exclusão da conta de quem também é cliente apaga a ficha ligada a ela.
+    expect(privacidade).toMatch(/também é cliente da organização/);
+  });
 });

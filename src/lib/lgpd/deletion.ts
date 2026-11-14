@@ -58,6 +58,8 @@ import { deleteAvatarsOf } from "@/lib/profile/avatar";
 import { getStorage } from "@/lib/storage";
 import { TenantRuleError, notFound } from "@/lib/tenant/errors";
 import { soleOwnerTenants } from "@/lib/tenant/ownership";
+import { deleteAccountCustomers } from "@/lib/tenant/team-customer-removal";
+import { dropOrphanPortalUser } from "@/lib/portal/access";
 
 /**
  * Exclusão de dados pessoais com carência (`deletion_request`). Pedir agenda; cancelar desfaz;
@@ -731,7 +733,11 @@ export async function listPendingDeletions(
   };
 }
 
-type Anonymized = { storageKeys: string[] };
+type Anonymized = {
+  storageKeys: string[];
+  /** Identidades do portal que ficaram sem ficha (D-11): caem depois do commit. */
+  portalUserIds?: string[];
+};
 
 async function exportKeysOf(tx: Tx, type: "user" | "portal_user", id: string) {
   const rows = await tx
@@ -746,6 +752,10 @@ async function exportKeysOf(tx: Tx, type: "user" | "portal_user", id: string) {
 async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   const [person] = await tx.select({ email: user.email }).from(user).where(eq(user.id, id));
   if (!person) return { storageKeys: [] };
+
+  // D-11: as fichas de cliente ligadas à própria pessoa, em todas as organizações, saem com ela.
+  // Antes de zerar o telefone: o número confirmado decide quais contatos saem com a ficha.
+  const ownCustomers = await deleteAccountCustomers(tx, id);
 
   await tx
     .update(user)
@@ -788,7 +798,14 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   // A foto de perfil (bloco F): o registro sai aqui e o objeto depois do commit.
   const avatarKeys = await deleteAvatarsOf(tx, [id]);
 
-  return { storageKeys: [...avatarKeys, ...(await exportKeysOf(tx, "user", id))] };
+  return {
+    storageKeys: [
+      ...ownCustomers.storageKeys,
+      ...avatarKeys,
+      ...(await exportKeysOf(tx, "user", id)),
+    ],
+    portalUserIds: ownCustomers.portalUserIds,
+  };
 }
 
 const anonymizedCustomer = {
@@ -928,7 +945,7 @@ export async function executeDeletion(
   requestId: string,
   now = new Date(),
 ): Promise<DeletionOutcome> {
-  const { outcome, storageKeys } = await withPlatformScope("lgpd", async (tx) => {
+  const { outcome, storageKeys, portalUserIds } = await withPlatformScope("lgpd", async (tx) => {
     const [request] = await tx
       .select()
       .from(deletionRequest)
@@ -936,7 +953,7 @@ export async function executeDeletion(
       .for("update");
 
     if (request?.status !== "pending" || request.scheduledFor > now) {
-      return { outcome: "skipped" as const, storageKeys: [] as string[] };
+      return { outcome: "skipped" as const, storageKeys: [] as string[], portalUserIds: [] as string[] };
     }
 
     // Dono único de organização ativa que surgiu durante a carência: não deixa órfã.
@@ -948,7 +965,7 @@ export async function executeDeletion(
           .update(deletionRequest)
           .set({ status: "failed" })
           .where(eq(deletionRequest.id, request.id));
-        return { outcome: "failed" as const, storageKeys: [] as string[] };
+        return { outcome: "failed" as const, storageKeys: [] as string[], portalUserIds: [] as string[] };
       }
     }
 
@@ -970,13 +987,22 @@ export async function executeDeletion(
       target: { type: request.subjectType, id: request.subjectId },
     });
 
-    return { outcome: "executed" as const, storageKeys: result.storageKeys };
+    return {
+      outcome: "executed" as const,
+      storageKeys: result.storageKeys,
+      portalUserIds: result.portalUserIds ?? [],
+    };
   });
 
   for (const key of storageKeys) {
     await getStorage()
       .delete(key)
       .catch((error) => logError("Falha ao apagar arquivo na exclusão", error));
+  }
+  for (const portalUserId of portalUserIds) {
+    await dropOrphanPortalUser(portalUserId).catch((error: unknown) =>
+      logError("Falha ao remover a identidade do portal sem ficha", error),
+    );
   }
 
   return outcome;

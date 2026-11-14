@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido e a F1 do bloco F (decisões T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10 e F1-1 a F1-5 a confirmar)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F e os blocos L e E (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -812,6 +812,28 @@ telefone, hoje obrigatório.
 - **Verificação:** `src/lib/legal/legal.test.ts`; teste novo exige que os dois textos contenham
   "WhatsApp". **LLM:** Sonnet 5.5 no texto; revisão jurídica é humana.
 
+### L: o que foi feito (2026-11-13)
+
+- `privacidade.md` (agora com 9 seções) e `termos.md` (11) citam telefone e WhatsApp. Cada afirmação foi conferida no
+  código e em `lgpd.md`: dados do atendimento (contato, nome do perfil, mensagens, mídia, aviso de canal), operadores
+  (Meta na Cloud API; servidor Evolution da plataforma no QR Code; armazenamento), a confirmação do telefone por link
+  (canal do responsável, quem vê a mensagem no QR Code, liberação à mão), prazos (aviso de canal 30 dias,
+  pedido de telefone encerrado 30 dias, backup 14 dias) e o que cada exclusão apaga.
+- **Só o que vale hoje:** conversas e mensagens aparecem como **sem prazo automático** (o bloco R não existe ainda; quando
+  existir, a seção 6 do texto muda com ele). O efeito de D-11 (ficha de cliente de quem é da equipe) entra no texto no
+  bloco E, junto com o código que o faz valer.
+- `LEGAL_VERSIONS` já estava em `2026-11` (de `66893fa`): o bloco L mantém `2026-11` para as duas, como a SPEC pede
+  para o mês do deploy; **por isso nenhum aceite existente é invalidado**. Se algum banco já tem aceite de `2026-11` e
+  o re-aceite importa, suba para o mês do deploy real.
+- Teste novo em `legal.test.ts`: os dois textos contêm "WhatsApp" e "telefone"; os termos citam "não oficial" e a
+  remoção dos números; a privacidade cita Meta, Evolution e a exclusão de cliente.
+- **Para o olhar de um advogado:** responsabilidade do owner pelos números e pelas políticas da Meta e limite de
+  responsabilidade (termos, seções 4 e 9); o canal por QR Code como conexão não oficial e o risco de banimento (4);
+  o papel de controlador × operador nas conversas de WhatsApp (privacidade, 1); as bases legais do atendimento e da
+  confirmação do telefone (3); o compartilhamento com Meta e Evolution (4); a ausência de prazo de retenção das conversas
+  (6); a frase de que o dono do número por QR Code vê o link de confirmação (5); o que a exclusão não apaga (7: faturas,
+  consentimento, auditoria, backups); o controlador e o encarregado continuam entre colchetes.
+
 ---
 
 ## Bloco E: exclusões (P6, P7)
@@ -823,6 +845,40 @@ telefone, hoje obrigatório.
 | Excluir organização | Não toca em `channel`; credenciais cifradas e a instância no provedor continuam; o cartão não cita números (`organization-deletion-card.tsx:92-103`) | Comportamento mantido (P6). O cartão lista os números ainda ativos e pede a remoção antes; o pedido não é bloqueado |
 
 **LLM:** Sonnet 5.5.
+
+### E: o que foi feito (2026-11-14)
+
+- **Excluir cliente:** `GET /api/customers/:id` devolve `conversationCount` (todas as conversas dos contatos ligados, o
+  que `deleteCustomer` apaga) e o diálogo da ficha diz que as conversas, as mensagens e os arquivos do atendimento saem
+  sem volta, com a contagem. `deleteCustomer` virou `deleteCustomerIn` (na transação de quem chama) mais
+  `afterCustomerDeleted` (objetos e identidade órfã do portal, depois do commit), para o D-11 reaproveitá-lo.
+- **Remover membro e excluir conta (D-11, C-1):** `removeMember` apaga, na mesma transação, a ficha ligada à pessoa
+  (`customer.user_id`) **naquela organização**; `anonymizeUser` apaga as ligadas em **todas**, antes de zerar o
+  telefone da conta. Código em `src/lib/tenant/team-customer-removal.ts`; detalhe em `tech/28-crm-cadastro.md`.
+  - **(a)** `DELETE /api/customers/:id/team-link` (`customer:update`, auditada como `customer.team_unlinked`, recusada em
+    personificação, 204 idempotente, 404 de outra organização) e o cartão "Também é da equipe" na ficha. **Criar** a
+    ligação à mão ficou de fora.
+  - **(b)** só saem os contatos da ficha cujo `phone_key` é o do telefone **confirmado** da pessoa
+    (`purgeTeamCustomerContacts`); os outros só perdem o vínculo e a conversa fica. Sem telefone confirmado, a ficha
+    sai e nenhum contato é apagado.
+  - **(c)** o que decide é `customer.user_id`; `chat_contact.user_id` nunca. Outras fichas, outros contatos e outras
+    conversas não são tocados, e trocar o papel não apaga nada (testes em `tests/db/team-customer-delete.test.ts`).
+  - **Avisos:** diálogo de remoção do membro (`GET /api/team` traz `customerRecord` só a quem tem `member:delete`),
+    cartão e diálogo da exclusão da conta (`GET /api/me/deletion` traz `customerRecords`) e o diálogo de exclusão do
+    `/admin/usuarios/:id` (mesmo caminho `anonymizeUser`), todos com a contagem das conversas que seriam apagadas.
+- **Excluir organização (P6):** comportamento intacto. O cartão lista os números de WhatsApp que não estão desativados
+  (e cita os desativados, que também ficam cadastrados), pede a remoção antes e **não bloqueia** o pedido.
+- **Decisões minhas, a confirmar pelo proprietário (E-1 a E-6):** E-1: "telefone confirmado" é o do **sistema inteiro**
+  (`userPhoneConfirmedGlobally`), não a liberação de uma organização, o mesmo critério que liga a ficha sozinha;
+  E-2: pessoa sem telefone confirmado perde a ficha mas nenhum contato é apagado (a SPEC não fechava, e o caso não
+  escolhe a opção que apaga mais); E-3: o aviso da remoção conta só as conversas que seriam apagadas (contatos do número
+  confirmado), enquanto o da ficha de cliente conta todas; E-4: `customerRecord` não traz id nem nome da ficha, para
+  quem remove sem `customer:read`; E-5: a rota de desfazer fica em `customer:update` e sem corpo, e o `/admin` também
+  avisa na exclusão de usuário; E-6: a remoção do membro **não** zera autoria (a conta continua; `sender_user_id`,
+  `closed_by` e `file.created_by` só ficam nulos na anonimização da conta, que já os zerava).
+- **Não coberto:** o diálogo de exclusão da organização com número ativo em navegador real (ver relatório da sessão); o
+  caminho "ficha com conta no portal" na exclusão por D-11 usa o mesmo `dropOrphanPortalUser` do `deleteCustomer`, sem
+  teste próprio.
 
 ---
 
@@ -1178,7 +1234,7 @@ Comparação com a SPEC 059 da origem.
 |---|---|---|---|
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
-| 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real |
+| 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
 | 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 

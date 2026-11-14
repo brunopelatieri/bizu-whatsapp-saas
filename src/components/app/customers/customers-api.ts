@@ -26,6 +26,8 @@ export type Customer = {
   phoneVerified: boolean;
   /** A pessoa da equipe que também é este cliente, com o papel atual dela. */
   team: { userId: string; role: string } | null;
+  /** Conversas de WhatsApp que a exclusão da ficha apaga; só o detalhe (`GET /api/customers/:id`) traz. */
+  conversationCount?: number;
   createdAt: string;
   /** A troca de número em aberto; só `GET /api/customers/:id` e o `PATCH` a trazem. A ficha segue com `phone` até ela fechar. */
   phoneChange?: PhoneChange | null;

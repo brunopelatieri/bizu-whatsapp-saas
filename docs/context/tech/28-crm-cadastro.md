@@ -253,18 +253,17 @@ pelos canais e a página `/verificar-telefone`; a T3, o bloqueio de acesso com t
   liberação de uma organização não basta) (no aceite do convite, confirmado dos dois lados), ao criar
   o cliente (`matchingTeamMember`) e no aceite (`linkMemberCustomer`), e é auditada
   (`customer.team_linked`). O e-mail nunca liga sozinho: é texto de quem cadastra, e a ficha
-  ligada será apagada quando a pessoa sair da equipe (D-11). A exclusão da conta desfaz a ligação
-  (`anonymizeUser`). A API do cliente devolve `team: { userId, role } | null`, com o papel
+  ligada **é apagada quando a pessoa sai da equipe ou exclui a conta** (D-11, bloco E, seção "Ficha de
+  quem é da equipe: o que a remoção apaga"). A API do cliente devolve `team: { userId, role } | null`, com o papel
   lido de `member` na hora, e `phoneVerified`; `GET /api/customers?team=true` filtra as fichas de
   quem é da equipe.
 - **Permissão `phone:confirm`:** reservada ao owner (`tech/21`); é a das rotas de liberação
   manual da organização (seção seguinte).
-- **Ainda não existe (T4, troca com pedido, `claim` e bloco E):** a troca de telefone que
+- **Ainda não existe (T4, troca com pedido e `claim`):** a troca de telefone que
   mantém o número antigo até a confirmação (`POST …/phone-change`; hoje a equipe troca direto e o
   cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), as
-  telas das filas e do modelo de verificação, o selo
-  e o filtro na tela, ligar e desligar a ficha à mão, e apagar a ficha ligada quando a pessoa sai
-  da equipe (D-11).
+  telas das filas e do modelo de verificação, o selo e o filtro na tela, e **ligar** a ficha à mão
+  (desligar existe, bloco E). Apagar a ficha ligada quando a pessoa sai da equipe (D-11) existe desde o bloco E.
 - **Testes:** `tests/db/phone-verified.test.ts`, `tests/db/phone-requests.test.ts`,
   `tests/db/phone-delivery.test.ts` (envio, T2b), `tests/db/inbox-ingest.test.ts` (vínculo),
   `tests/db/phone-accounts.test.ts`, `src/lib/schemas/phone.test.ts` e, no módulo Cloud,
@@ -512,6 +511,41 @@ T3-9 na SPEC ("T3: o que foi feito").
 - **Limites conhecidos:** o SSE já aberto segue até 15 min depois que a confirmação cai; o login do
   portal pendente não escolhe a organização do `?org=`; a correção do número no portal exige ficha
   ativa (o lead não corrige sozinho).
+
+## Ficha de quem é da equipe: o que a remoção apaga (pré-produção, bloco E, D-11)
+
+Código: `src/lib/tenant/team-customer-removal.ts`, `deleteCustomerIn` e `afterCustomerDeleted` em
+`src/lib/tenant/customers.ts`, `purgeTeamCustomerContacts` em `src/lib/inbox/privacy.ts`.
+
+- **Quem decide é `customer.user_id`**, a ligação da ficha com a pessoa (criada por telefone confirmado ou aceite
+  de convite, `team-customer.ts`). Nunca `chat_contact.user_id` e nunca o e-mail. Fichas de outros clientes
+  e de outras pessoas da equipe nunca são tocadas (P7). Trocar o papel da pessoa não apaga nada.
+- **Dois caminhos (C-1):** `removeMember` apaga a ficha ligada à pessoa **naquela organização**, na transação da
+  remoção (`deleteMemberCustomer`); a exclusão da conta (`anonymizeUser`, `lgpd.delete`, também a do `/admin`)
+  apaga as fichas ligadas em **todas** as organizações (`deleteAccountCustomers`), antes de zerar o telefone da
+  conta. A exclusão é a de `deleteCustomer` (`deleteCustomerIn`): pedidos de verificação da ficha, vínculo do
+  portal (a identidade que ficou sem ficha cai depois do commit), auditoria `customer.deleted` com
+  `metadata { userId, via: member_removed | account_deleted }`, e os objetos do armazenamento depois do commit.
+- **Só os contatos do telefone confirmado da pessoa saem com a ficha (restrição b).** Quem tem `customer:update`
+  liga à mão o contato de qualquer número à ficha (`linkContact`); por isso `purgeTeamCustomerContacts` apaga
+  (com conversas, mensagens e mídia) só os contatos da ficha cujo `phone_key` é o do telefone **confirmado para o
+  sistema inteiro** da pessoa (`userPhoneConfirmedGlobally`; a liberação de uma organização não prova posse). Os
+  demais contatos só perdem o vínculo com a ficha, e as conversas ficam com a organização. Pessoa sem telefone
+  confirmado: a ficha sai e **nenhum** contato é apagado.
+- **Manter a ficha (restrição a):** `DELETE /api/customers/:id/team-link` (`customer:update`,
+  `blockWhileImpersonating`, 204; 404 para ficha de outra organização; idempotente) desfaz a ligação
+  (`unlinkTeamCustomer`, auditoria `customer.team_unlinked`). A ficha vira cliente comum, com as conversas, e a
+  remoção ou a exclusão da conta deixam de apagá-la. A tela da ficha tem o cartão "Também é da equipe" com a ação.
+  **Criar** a ligação à mão não existe (fora do escopo).
+- **Avisos (contagem do que será apagado, só dos contatos do telefone confirmado):** `GET /api/team` traz
+  `customerRecord: { conversationCount } | null` em cada membro, **só para quem tem `member:delete`** (sem id nem
+  nome da ficha); `GET /api/me/deletion` traz `customerRecords: { customers, conversationCount }`;
+  `GET /api/admin/users/:id` traz o mesmo `customerRecords`. `GET /api/customers/:id` traz
+  `conversationCount` (todas as conversas dos contatos ligados: é o que `deleteCustomer` apaga). Os diálogos de
+  remoção de cliente e de membro, de exclusão da conta e de exclusão pelo `/admin` usam esses números.
+- **Testes:** `tests/db/team-customer-delete.test.ts` (remover o membro, anonimizar a conta, contato de outro
+  número, sem telefone confirmado, ligação desfeita antes, troca de papel, rota de desfazer, contagens),
+  `rbac.test.ts` e `impersonation.test.ts` (a rota nova).
 
 ## Telas da liberação à mão (pré-produção, T4)
 

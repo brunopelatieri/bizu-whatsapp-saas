@@ -23,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { roleLabel } from "@/lib/auth/permissions";
+import { conversationsLabel, deletedVerb } from "@/lib/format/conversations";
 import type { BillingState } from "@/lib/billing/state";
 import { useAuth } from "@/providers/auth-provider";
 
@@ -50,6 +51,8 @@ type UserDetail = {
     planName: string | null;
   }>;
   deletion: PendingDeletion;
+  /** Fichas de cliente ligadas à conta (D-11): a exclusão as apaga com as conversas do número dela. */
+  customerRecords: { customers: number; conversationCount: number };
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -228,7 +231,25 @@ export function AdminUserDetailPage() {
             <DeleteDialog
               open={deleting}
               title={`Excluir ${target.name}`}
-              description="Agendar bane a conta e encerra as sessões até a data. A exclusão anonimiza a conta, tira o papel de plataforma e remove vínculos, convites e exportações; a auditoria fica."
+              description={
+                <>
+                  Agendar bane a conta e encerra as sessões até a data. A exclusão anonimiza a conta, tira o
+                  papel de plataforma e remove vínculos, convites e exportações; a auditoria fica.
+                  {detail.customerRecords.customers > 0 ? (
+                    <strong>
+                      {" "}
+                      A pessoa também é cliente de {detail.customerRecords.customers}{" "}
+                      {detail.customerRecords.customers === 1 ? "organização" : "organizações"}:{" "}
+                      {detail.customerRecords.customers === 1 ? "a ficha" : "as fichas"} de cliente
+                      ligada{detail.customerRecords.customers === 1 ? "" : "s"} a ela
+                      {detail.customerRecords.conversationCount > 0
+                        ? ` e ${conversationsLabel(detail.customerRecords.conversationCount)} de WhatsApp do número dela`
+                        : ""}{" "}
+                      {deletedVerb(detail.customerRecords.customers, detail.customerRecords.conversationCount)}, sem volta.
+                    </strong>
+                  ) : null}
+                </>
+              }
               confirmText={target.email}
               confirmLabel="o e-mail"
               pending={remove.isPending}
