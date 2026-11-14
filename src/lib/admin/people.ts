@@ -24,12 +24,7 @@ import { billingState } from "@/lib/billing/state";
 import { maskEmail } from "@/lib/email/address";
 import { canWhatsApp } from "@/lib/phone/br";
 import { phoneColumns, phoneValues } from "@/lib/phone/columns";
-import {
-  accountPhoneConflicts,
-  accountPhoneInUse,
-  lockPhoneKey,
-} from "@/lib/phone/uniqueness";
-import { closeVerificationsOf, dropTenantVouchesOf } from "@/lib/phone/requests";
+import { changeUserPhoneByPlatform, sendOpenedAfterChange } from "@/lib/phone/requests";
 import { verifiedPhone } from "@/lib/phone/verification";
 import { sendEmail } from "@/lib/email/send";
 import { emailChangedTemplate } from "@/lib/email/templates/email-changed";
@@ -197,29 +192,39 @@ export async function updateUserByAdmin(
 
   const phone = input.phone === undefined ? null : whatsappPhoneValues(input.phone);
 
+  let opened: string[] = [];
+
   const updated = await withPlatformScope("admin: edita usuário", async (tx) => {
+    // Outro número passa pelo pedido de troca, e quem edita é o proprietário da plataforma, o
+    // responsável dela: ele o libera à mão na mesma transação (`manual`). As regras são as da
+    // liberação à mão, que não prova a posse: com outra conta do mesmo grupo (owners, a equipe de
+    // uma organização, a equipe da plataforma) já confirmada no número, 409 `PHONE_IN_USE`. O mesmo
+    // número, escrito de outro jeito, é gravado direto.
+    let samePhone = false;
     if (phone) {
-      // Liberação manual não prova a posse do número: com outra conta do mesmo grupo (owners,
-      // a equipe de uma organização, a equipe da plataforma) já confirmada nele, é recusada.
-      await lockPhoneKey(tx, phone.phoneKey);
-      const holders = await accountPhoneConflicts(tx, target.id, phone.phoneKey);
-      if (holders.length > 0) throw accountPhoneInUse();
-      // O número informado aqui já vale como confirmado: o pedido aberto é encerrado, e o que
-      // as organizações atestaram sobre o número antigo sai.
-      await closeVerificationsOf(tx, { type: "user", id: target.id });
-      await dropTenantVouchesOf(tx, target.id);
+      const [current] = await tx
+        .select({ phoneKey: user.phoneKey })
+        .from(user)
+        .where(eq(user.id, target.id));
+      samePhone = current?.phoneKey === phone.phoneKey;
+      if (!samePhone) opened = await changeUserPhoneByPlatform(tx, target.id, phone, actor.id);
     }
 
-    const [row] = await tx
-      .update(user)
-      .set({
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        // Quem edita é o proprietário da plataforma: o número que ele informa vale (`manual`).
-        ...(phone ? { ...phone, ...verifiedPhone("manual") } : {}),
-        ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
-      })
-      .where(eq(user.id, target.id))
-      .returning({ id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified });
+    const fields = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(phone && samePhone ? phone : {}),
+      ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
+    };
+    const columns = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      emailVerified: user.emailVerified,
+    };
+    const [row] =
+      Object.keys(fields).length > 0
+        ? await tx.update(user).set(fields).where(eq(user.id, target.id)).returning(columns)
+        : await tx.select(columns).from(user).where(eq(user.id, target.id));
 
     if (emailChanged) {
       await tx.delete(session).where(sessionsOf(target.id));
@@ -252,6 +257,7 @@ export async function updateUserByAdmin(
   });
 
   if (!updated) throw notFound("Usuário não encontrado.");
+  await sendOpenedAfterChange(opened, target.id);
 
   if (emailChanged) {
     await notifyEmailChanged(target, updated.email);

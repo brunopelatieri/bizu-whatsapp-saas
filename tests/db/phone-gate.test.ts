@@ -446,7 +446,7 @@ describe("predicado do portão", () => {
     expect((await call("GET", "/api/portal/me", { cookie })).status).toBe(200);
   });
 
-  it("portal: corrigir o número passa pelo portão e deixa a ficha pendente", async () => {
+  it("portal: corrigir o número passa pelo portão (pela troca) e a ficha segue pendente", async () => {
     const email = customerEmail();
     const created = await createCustomer(ownerA, { email });
     const cookie = await inviteAndEnter(ownerA, mail, created.id, email);
@@ -456,11 +456,19 @@ describe("predicado do portão", () => {
     );
     setPhoneRequired("true");
 
-    const fixed = await call("PATCH", "/api/portal/me", {
+    const fixed = await call("POST", "/api/portal/me/phone-change", {
       cookie,
-      body: { name: "Cliente Teste", phone: uniquePhone() },
+      body: { phone: uniquePhone() },
     });
-    expect(fixed.status).toBe(200);
+    expect(fixed.status).toBe(202);
+    expect((await call("DELETE", "/api/portal/me/phone-change", { cookie })).status).toBe(204);
+    // Editar o perfil (nome e telefone) não passa mais: com o telefone pendente, só a troca.
+    await expectBlocked(
+      await call("PATCH", "/api/portal/me", {
+        cookie,
+        body: { name: "Cliente Teste", phone: uniquePhone() },
+      }),
+    );
     await expectBlocked(await call("GET", "/api/portal/customer", { cookie }));
   });
 

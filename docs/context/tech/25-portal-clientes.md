@@ -57,7 +57,9 @@ internet.
 | `POST /api/portal/auth-ext/set-password` | `requirePortalAuth` | define ou troca; derruba as outras sessões |
 | `GET /api/portal/me` | `requirePortalAuth` | `{ user, tenants, active, consentRequired, phonePending }` |
 | `POST /api/portal/active-tenant` | `requirePortalAuth` | só tenant disponível; o resto é 404. Passa pelo portão de telefone |
-| `PATCH /api/portal/me` | `requirePortalTenant` | atualiza a pessoa e o `customer` do tenant ativo. Passa pelo portão de telefone (corrigir o número) |
+| `PATCH /api/portal/me` | `requirePortalTenant` | atualiza o nome da pessoa e do `customer` do tenant ativo; outro número **abre a troca** (`phoneChangePending`), e a ficha segue com o antigo até a confirmação. Bloqueado com o telefone pendente |
+| `POST /api/portal/me/phone-change` | `requirePortalTenant` | `{ phone }`: troca do número da ficha do tenant ativo pelo pedido (202, sempre a mesma resposta). O link vai ao número novo e confirma nesta sessão. Passa pelo portão de telefone (corrigir o número) |
+| `DELETE /api/portal/me/phone-change` | `requirePortalTenant` | desiste da troca aberta (204). Passa pelo portão de telefone |
 | `GET /api/portal/customer` | `requirePortalTenant` | dados do cliente, sem `notes`, etiquetas (`customer_tag`) nem campos adicionais (`custom_fields`) |
 | `/api/customers/*` | `requireTenant` + `customer:*` | ver `tech/06-hono-api.md` |
 
@@ -66,7 +68,7 @@ internet.
 não está confirmada (`portalPhoneGatePasses`, `src/lib/phone/gate.ts`). Sem organização em uso, passa
 se alguma ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa. A
 conta (`portal_user`) nunca é avaliada: nenhuma organização a confirma. Passam pelo portão só
-`GET`/`POST …/me/phone-verification[/resend|/confirm]`, `PATCH /api/portal/me`,
+`GET`/`POST …/me/phone-verification[/resend|/confirm]`, `POST`/`DELETE /api/portal/me/phone-change`,
 `POST /api/portal/active-tenant` e a exclusão da própria conta (`DELETE /api/portal/me` e
 `…/me/deletion[/confirm|/cancel]`, LGPD) (`src/api/phone-gate.ts`); sair é do Better Auth. `PortalLayout`
 mostra só "Confirme seu WhatsApp" (`PortalPhoneGate`), e o login, a escolha de organização e
@@ -160,7 +162,10 @@ enviar acesso (`customer:invite`, o único caminho de `lead` para `active`) e ex
 `EMAIL_REQUIRED`, o magic link e o login nunca casam, e o botão fica desabilitado com a explicação.
 Tirar o e-mail de quem tinha acesso corta o acesso. O telefone é obrigatório e **único por tenant**
 (409 `PHONE_IN_USE`, também na variante com ou sem o 9º dígito); `ensurePortalUser(email, name,
-phone)` e `confirmPortalSignup` levam o telefone ao `portal_user` e ao `customer`. O portal segue
+phone)` e `confirmPortalSignup` levam o telefone ao `portal_user` e ao `customer`. **Trocar o número**
+(pelo portal ou pela equipe) passa pelo pedido: a ficha mantém o antigo até o link do número novo ser
+confirmado na sessão do portal dela, ou o owner liberar (`tech/28-crm-cadastro.md`, "Troca de telefone pelo
+pedido"). O portal segue
 com a lista fechada de colunas (`findPortalCustomer`): nada de etiqueta ou campo adicional.
 Detalhes: `tech/28-crm-cadastro.md`.
 

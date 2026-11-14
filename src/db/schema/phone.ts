@@ -12,6 +12,8 @@ import {
 } from "drizzle-orm/pg-core";
 import {
   type PhoneDeliveryAttempt,
+  phoneRequesterTypes,
+  phoneVerificationPurposes,
   phoneVerificationStatuses,
   phoneVerificationSubjects,
 } from "../../lib/phone/verification";
@@ -43,6 +45,13 @@ export const phoneVerification = pgTable(
     tenantId: uuid("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
     subjectType: text("subject_type", { enum: phoneVerificationSubjects }).notNull(),
     subjectId: uuid("subject_id").notNull(),
+    /**
+     * `signup`: confirma o número que o cadastro tem. `change`: a troca; o número deste pedido é o
+     * NOVO, e o cadastro guarda o antigo até a confirmação (`src/lib/phone/requests.ts`).
+     */
+    purpose: text("purpose", { enum: phoneVerificationPurposes }).notNull().default("signup"),
+    /** O número como foi digitado, para gravar no cadastro na troca. Nulo nos pedidos de cadastro. */
+    phone: text("phone"),
     phoneNormalized: text("phone_normalized").notNull(),
     phoneKey: text("phone_key").notNull(),
     status: text("status", { enum: phoneVerificationStatuses })
@@ -64,6 +73,13 @@ export const phoneVerification = pgTable(
     attempts: jsonb("attempts").$type<PhoneDeliveryAttempt[]>().notNull().default([]),
     /** Quando o responsável foi avisado por e-mail de que o pedido espera a liberação à mão. */
     manualNotifiedAt: timestamptz("manual_notified_at"),
+    /**
+     * Quem pediu a troca (`change`): a conta da equipe (a própria, alguém da equipe pela ficha do
+     * cliente, ou o proprietário pelo /admin) ou a pessoa do portal. Nulo nos pedidos de cadastro.
+     * Sem FK: aponta para `user` ou `portal_user`, e só serve à auditoria e ao efeito no portal.
+     */
+    requestedByType: text("requested_by_type", { enum: phoneRequesterTypes }),
+    requestedById: uuid("requested_by_id"),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at")
       .notNull()
@@ -71,15 +87,20 @@ export const phoneVerification = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => [
-    // Um pedido aberto por cadastro e por responsável: quem é da equipe de duas organizações
-    // pode estar na fila das duas (e na da plataforma), sem uma cancelar a outra. Com
-    // `tenant_id` nulo o Postgres não vê dois nulos como iguais: a plataforma tem o índice dela.
+    // Um pedido aberto por cadastro, por responsável e por finalidade: quem é da equipe de duas
+    // organizações pode estar na fila das duas (e na da plataforma), sem uma cancelar a outra, e
+    // a troca convive com o pedido do número atual. Com `tenant_id` nulo o Postgres não vê dois
+    // nulos como iguais: a plataforma tem o índice dela.
     uniqueIndex("phone_verification_open_tenant_idx")
-      .on(table.subjectType, table.subjectId, table.tenantId)
+      .on(table.subjectType, table.subjectId, table.tenantId, table.purpose)
       .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.tenantId} is not null`),
     uniqueIndex("phone_verification_open_platform_idx")
-      .on(table.subjectType, table.subjectId)
+      .on(table.subjectType, table.subjectId, table.purpose)
       .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.tenantId} is null`),
+    // Uma troca aberta por cadastro, qualquer que seja o responsável.
+    uniqueIndex("phone_verification_open_change_idx")
+      .on(table.subjectType, table.subjectId)
+      .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.purpose} = 'change'`),
     index("phone_verification_scope_status_idx").on(table.tenantId, table.status),
     index("phone_verification_updated_at_idx").on(table.updatedAt),
     index("phone_verification_message_idx")
@@ -94,6 +115,20 @@ export const phoneVerification = pgTable(
       sql`${table.status} in ('sent', 'awaiting_manual', 'confirmed', 'canceled')`,
     ),
     check("phone_verification_subject_known", sql`${table.subjectType} in ('user', 'customer')`),
+    check("phone_verification_purpose_known", sql`${table.purpose} in ('signup', 'change')`),
+    check(
+      "phone_verification_requester_known",
+      sql`${table.requestedByType} is null or ${table.requestedByType} in ('user', 'portal_user')`,
+    ),
+    // A troca leva o número digitado e quem pediu; o pedido de cadastro, não.
+    check(
+      "phone_verification_change_complete",
+      sql`${table.purpose} <> 'change' or (${table.phone} is not null and ${table.requestedByType} is not null)`,
+    ),
+    check(
+      "phone_verification_requester_pair",
+      sql`(${table.requestedByType} is null) = (${table.requestedById} is null)`,
+    ),
     // A ficha de cliente é sempre de uma organização; só a conta pode estar com a plataforma.
     check(
       "phone_verification_customer_has_tenant",

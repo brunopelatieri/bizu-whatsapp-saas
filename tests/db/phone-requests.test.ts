@@ -15,7 +15,7 @@ import { teamPhoneHolders } from "@/lib/phone/uniqueness";
 import { asPlatform, makePlatformUser } from "./billing-helpers";
 import { cleanUpChannels, seedCloudChannel, tenantScope } from "./channels-helpers";
 import { seedConversation } from "./inbox-helpers";
-import { uniquePhone } from "./phone-helpers";
+import { makeCustomerPhonePending, uniquePhone } from "./phone-helpers";
 import {
   cleanUpPortal,
   createCustomer,
@@ -215,15 +215,11 @@ async function allowSelfSignup(tenantId: string) {
   `;
 }
 
-/** Cliente com conta no portal que trocou o próprio telefone: ficha pendente e pedido aberto. */
+/** Cliente com conta no portal e número só declarado: ficha pendente e pedido aberto. */
 async function pendingPortalCustomer(boss: TestUser, phone = uniquePhone()) {
   const customer = await createCustomer(boss);
   const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
-  const changed = await call("PATCH", "/api/portal/me", {
-    cookie,
-    body: { name: "Cliente", phone },
-  });
-  expect(changed.status).toBe(200);
+  await makeCustomerPhonePending(customer.id, phone);
 
   return { customer, cookie, phone };
 }
@@ -338,11 +334,19 @@ describe("quem abre o pedido", () => {
     expect(await openScopes(otherOwner.id)).toEqual([null]);
   });
 
-  it("o cliente que troca o próprio telefone no portal entra na fila da organização", async () => {
+  it("o cliente que troca o próprio telefone no portal abre a troca na fila da organização", async () => {
     const boss = await createUser(owner);
     const tenant = await createTenant(boss);
+    const customer = await createCustomer(boss);
+    const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
     const first = uniquePhone();
-    const { customer, cookie } = await pendingPortalCustomer(boss, first);
+
+    const changed = await call("PATCH", "/api/portal/me", {
+      cookie,
+      body: { name: "Cliente", phone: first },
+    });
+    expect(changed.status).toBe(200);
+    expect(await changed.json()).toMatchObject({ phoneChangePending: true });
 
     const opened = await openRequestOf(customer.id);
     expect(opened).toMatchObject({
@@ -350,12 +354,17 @@ describe("quem abre o pedido", () => {
       status: "awaiting_manual",
       phone_key: phoneValues(first).phoneKey,
     });
+    // A ficha segue com o número que tinha, confirmado pela equipe.
+    expect((await customerPhone(customer.id))?.via).toBe("team");
     const mine = await call("GET", "/api/portal/me/phone-verification", { cookie });
     expect(await mine.json()).toMatchObject({
-      pending: { status: "awaiting_manual", phoneHint: first.slice(-4) },
+      pending: null,
+      responsibles: [
+        { status: "confirmed", change: { status: "awaiting_manual", phoneHint: first.slice(-4) } },
+      ],
     });
 
-    // Trocou de novo: o pedido do número anterior cai e vale o do atual.
+    // Trocou de novo: a troca anterior cai e vale a do número atual.
     const second = uniquePhone();
     await call("PATCH", "/api/portal/me", { cookie, body: { name: "Cliente", phone: second } });
     const current = await openRequestOf(customer.id);
@@ -366,20 +375,30 @@ describe("quem abre o pedido", () => {
     );
   });
 
-  it("a equipe informa outro número: vale na hora e o pedido aberto é encerrado", async () => {
+  it("a equipe informa outro número: abre a troca, e a ficha segue com o antigo", async () => {
     const boss = await createUser(owner);
     await createTenant(boss);
-    const { customer } = await pendingPortalCustomer(boss);
-    await openRequestOf(customer.id);
+    const { customer, phone } = await pendingPortalCustomer(boss);
+    const signup = await openRequestOf(customer.id);
 
+    const next = uniquePhone();
     const edited = await call("PATCH", `/api/customers/${customer.id}`, {
       cookie: boss.cookie,
-      body: { phone: uniquePhone() },
+      body: { phone: next },
     });
     expect(edited.status).toBe(200);
+    const body = await edited.json();
+    expect(body.customer).toMatchObject({
+      phone,
+      phoneVerified: false,
+      phoneChange: { status: "awaiting_manual", phoneHint: next.slice(-4) },
+    });
 
-    expect((await requestsOf(customer.id)).map(({ status }) => status)).toEqual(["canceled"]);
-    expect((await customerPhone(customer.id))?.via).toBe("team");
+    // O pedido do número atual continua; a troca é outro pedido.
+    const open = await openRequests(customer.id);
+    expect(open.map(({ id }) => id)).toContain(signup.id);
+    expect(open).toHaveLength(2);
+    expect((await customerPhone(customer.id))?.via).toBeNull();
   });
 });
 
@@ -755,7 +774,7 @@ describe("liberação à mão pela organização", () => {
     };
     expect(items.map(({ id }) => id)).toEqual([request.id]);
     expect(total).toBe(1);
-    expect(items[0]?.name).toBe("Cliente");
+    expect(items[0]?.name).toBe("Cliente Teste");
 
     // O owner de outra organização não alcança o pedido; nem este owner, o da plataforma; nem
     // o proprietário da plataforma, o da organização.

@@ -46,6 +46,9 @@ export type AuditAction =
   | "phone.verified"
   // A conta perdeu a confirmação: outra provou a posse do mesmo número (`metadata.reason`).
   | "phone.unverified"
+  // Troca de número pedida e desistida (`metadata.responsible`). O número nunca vai para cá.
+  | "phone.change_requested"
+  | "phone.change_canceled"
   | "portal.signed_up"
   | "portal.profile_updated"
   | "portal.password_set"

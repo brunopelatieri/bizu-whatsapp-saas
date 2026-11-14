@@ -173,6 +173,11 @@ describe("rotas de equipe sobre o servidor Node", () => {
       expect((await request("DELETE", `/api/me/sessions/${anyId}`)).status).toBe(404);
     });
 
+    it("DELETE das trocas de telefone sem corpo chega à regra de negócio (204, nada aberto)", async () => {
+      expect((await request("DELETE", "/api/me/phone-change")).status).toBe(204);
+      expect((await request("DELETE", `/api/customers/${anyId}/phone-change`)).status).toBe(404);
+    });
+
     it("POST /api/me/sessions/revoke-others sem corpo responde", async () => {
       expect((await request("POST", "/api/me/sessions/revoke-others")).status).toBe(200);
     });

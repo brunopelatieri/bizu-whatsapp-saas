@@ -36,6 +36,19 @@ export const phoneVerificationSubjects = ["user", "customer"] as const;
 export type PhoneVerificationSubject = (typeof phoneVerificationSubjects)[number];
 
 /**
+ * Para que serve o pedido: `signup` confirma o número que o cadastro **tem** (cadastro, convite,
+ * autocadastro, número que caiu); `change` é a troca de número, e o número do pedido é o **novo**:
+ * o cadastro mantém o antigo, e a confirmação que ele tinha, até o pedido ser confirmado
+ * (`src/lib/phone/requests.ts`). `claim` (P3, D-1) ainda não existe.
+ */
+export const phoneVerificationPurposes = ["signup", "change"] as const;
+export type PhoneVerificationPurpose = (typeof phoneVerificationPurposes)[number];
+
+/** Quem pediu a troca: a própria conta da equipe (ou alguém da equipe), ou a pessoa do portal. */
+export const phoneRequesterTypes = ["user", "portal_user"] as const;
+export type PhoneRequesterType = (typeof phoneRequesterTypes)[number];
+
+/**
  * Situação do pedido: `sent` tem um link válido a caminho da pessoa; `awaiting_manual` espera a
  * liberação do responsável (sem canal para enviar, ou todos falharam); `confirmed` e `canceled`
  * estão encerrados.

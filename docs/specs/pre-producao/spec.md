@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B e as fases T1, T2a, T2b e T3 do bloco T (a T3 com as decisões T3-1 a T3-9 a confirmar)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial) e a troca de telefone pelo pedido (decisões T3-1 a T3-9, T4-1 a T4-4 e TC-1 a TC-10 a confirmar)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -477,7 +477,7 @@ mão").
 
 | Pendente | Por que ficou | O que destrava |
 |---|---|---|
-| Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` | `…/phone-change` não existe (pendente da T2b) | As três rotas de "Contratos" |
+| Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` (e o perfil da equipe, F2) | As rotas passaram a existir em 2026-11-13 ("Troca de telefone pelo pedido") | Só a tela |
 | `claim` do portal (D-1) | Idem | O `purpose = claim` e a exclusão da ficha antiga |
 | Ligar e desligar a ficha de cliente à pessoa da equipe (D-9) | Não há rota (`customer.user_id` só é gravado pelo telefone confirmado e na exclusão) | Rota com `customer:update`, auditoria `customer.team_linked` e a restrição (a) da D-11 |
 | Filtro por tipo na fila da organização | A rota lista equipe e clientes juntos | `?subject=user\|customer` em `GET /api/phone-verifications` |
@@ -538,6 +538,65 @@ auditoria.
 | T4-3 | Modelo de verificação na tela do canal | Tela dentro de "Gerenciar" do número Cloud; a leitura do canal passou a trazer `verificationTemplate` (autorizado em 2026-11-13) | Seção própria fora do diálogo, ou rota dedicada de leitura |
 | T4-4 | Suporte da plataforma | Não vê a fila (a rota é do proprietário) | Liberar a leitura ao suporte |
 
+### Troca de telefone pelo pedido: o que foi feito (2026-11-13)
+
+Implementada no servidor, sem tela nova (a tela da troca fica para a próxima fase de telas). Detalhe em
+`docs/context/tech/28-crm-cadastro.md` ("Troca de telefone pelo pedido").
+
+- **Migration `0038_troca_telefone`:** `phone_verification` ganhou `purpose` (`signup` ou `change`; `claim` não
+  existe ainda), `phone` (o número digitado, para gravar no cadastro), `requested_by_type` (`user` ou
+  `portal_user`) e `requested_by_id`, com `CHECK`s (a troca sempre leva número e quem pediu). Os índices de
+  pedido aberto passaram a incluir `purpose` (a troca convive com o pedido do número atual), e um índice novo
+  garante **uma troca aberta por cadastro**, qualquer que seja o responsável.
+- **O cadastro mantém o número antigo, e a confirmação dele, até a troca se confirmar.** O número novo vive só
+  no pedido. Confirmada (pelo link do número novo, na sessão do próprio cadastro, ou pelo responsável à mão), a
+  troca grava o número com o estado do responsável, fecha os pedidos que sobravam (eram do número antigo) e
+  apaga as liberações de organização (eram do número antigo). Cancelada (`DELETE`), nada a desfazer.
+- **Rotas (as de "Contratos"):** `POST`/`DELETE /api/me/phone-change` (`userPhoneChangeSchema`, só WhatsApp,
+  bloqueadas em personificação), `POST`/`DELETE /api/portal/me/phone-change` (`requirePortalAuth` +
+  `requirePortalTenant`, ficha da organização ativa) e `POST`/`DELETE /api/customers/:id/phone-change`
+  (`customer:update`). `POST` responde 202 `{ ok: true }`, `DELETE` 204 (também sem troca aberta). Pedir de novo o
+  mesmo número reenvia o link; outro número substitui a troca. Limite de 5 pedidos por hora por cadastro, além
+  dos 3 links por hora do job. O mesmo número que o cadastro já tem é 400 `PHONE_UNCHANGED`.
+- **`PATCH /api/customers/:id` e `PATCH /api/portal/me`** deixaram de gravar outro número: abrem a troca (o
+  `PATCH` do portal devolve `phoneChangePending`). O mesmo número escrito de outro jeito (mesma `phone_key`,
+  com ou sem o 9º dígito) continua gravado direto. **A edição de conta em `/admin/usuarios/:id`** abre a troca
+  e o proprietário a libera à mão na mesma transação (`manual`). Criar cliente pela equipe segue `team`.
+- **Leitura do estado sem quebrar a T3 e a T4:** `GET /api/me/phone-verification` ganhou `change`
+  (`{ status, phoneHint, responsible, tenantId, tenantName, requestedAt } | null`; `phoneHint` é o final do
+  número **novo**); `pending` e `responsibles` seguem sendo do número atual. No portal, cada item de
+  `responsibles` ganhou `change`. `GET /api/customers/:id` (e a resposta do `PATCH`) ganhou `phoneChange`. As
+  filas (`GET /api/phone-verifications` e a do admin) ganharam `purpose`. Reenviar o link da troca:
+  `POST …/phone-verification/resend` com `{ purpose: "change" }` (na equipe e no portal).
+- **Envio:** o link vai sempre ao número **novo**, pelo canal do responsável da troca. A troca não espera a
+  D-12 (foi pedida). A troca da ficha sem conta no portal não manda link (ninguém o confirmaria): vai direto à
+  liberação do owner, que é avisado por e-mail.
+- **Bloqueio (T3):** `POST` e `DELETE /api/me/phone-change` entraram na lista do que passa com o telefone
+  pendente (é o "corrigir o número" da equipe, que não existia; a decisão T3-6 deixa de valer na parte da
+  equipe). No portal, `POST` e `DELETE /api/portal/me/phone-change` entraram e **`PATCH /api/portal/me` saiu**:
+  com o telefone pendente, o portal só corrige o número, não edita o perfil. A tela da T3 do portal passou a
+  usar a rota da troca.
+- **Testes:** `tests/db/phone-change.test.ts` (15 casos: conta, membro comum, cancelamento, uma troca por
+  cadastro, número em uso, personificação, bloqueio ligado, portal, equipe, `/admin`) e três casos em
+  `tests/db/phone-delivery.test.ts` (link ao número novo; ficha sem portal sem link; troca da conta sem
+  esperar a D-12). Os testes que trocavam o número no portal para criar uma ficha pendente passaram a usar
+  `makeCustomerPhonePending` (`tests/db/phone-helpers.ts`).
+
+**Decisões da troca a confirmar pelo proprietário**
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| TC-1 | Cadastro cujo número atual nunca foi confirmado "corrige" o número | **O mesmo fluxo:** abre a troca; o número antigo (pendente) fica no cadastro até a confirmação, e o pedido dele segue aberto. Uniforme, sem gravar número sem prova e sem oráculo; a fila mostra os dois pedidos, marcados por `purpose` | Gravar o número novo direto, como pendente (não há confirmação a preservar), fechando o pedido do antigo |
+| TC-2 | Conferência de unicidade no pedido e na confirmação | **No pedido, só onde quem pede pode saber:** a equipe recebe 409 `PHONE_IN_USE` ao pedir a troca da ficha (como no cadastro). A própria conta e a pessoa do portal recebem sempre 202. **Na confirmação, sempre**, sob a trava do número (conta, `lockPhoneKey`) ou da ficha (com o índice único como rede): conta pelo link da plataforma fica com o número (quem provou fica com ele, como no cadastro); pelo link da organização ou à mão, 409; ficha, 409 (D-1, o `claim`, ainda não existe) | Recusar já no pedido (oráculo de quem tem conta ou é cliente) |
+| TC-3 | Quem responde pela troca da conta | **A plataforma** para quem responde a ela e para quem já tem o número confirmado no sistema inteiro (a troca não rebaixa a conta); **a organização em uso** (ou a primeira em que entrou) para o membro comum sem essa confirmação. Confirmada pela organização, a conta fica com o número novo pendente no sistema e liberada só nela; ganha os pedidos da plataforma (sem envio, D-12) e das outras organizações | Sempre a plataforma (contraria a D-12), ou sempre a organização (rebaixa quem tinha a confirmação do sistema) |
+| TC-4 | O que acontece na confirmação com o resto | Pedidos abertos do número antigo: fechados. Liberações de organização: apagadas (eram do número antigo). Ligação da ficha à pessoa da equipe (`customer.user_id`): fica (é por id, D-9); a ficha que troca pelo link liga a pessoa da equipe do número novo se não tinha ligação. Contato e conversas do número antigo: continuam na ficha (P1) | Desfazer a ligação da ficha na troca da conta |
+| TC-5 | Troca pedida pela equipe para um cliente | **Pelo link**, como diz a SPEC: o link vai ao número novo e só confirma na sessão do portal da ficha. Ficha sem conta no portal: sem link, direto à liberação do owner, que vale `manual` (não atrai conversas nem liga à equipe). Assim um colaborador não passa a ficha de um cliente para um número dele | A equipe atestar (`team`), como no cadastro |
+| TC-6 | Edição em `/admin` | Conta: troca aberta e liberada à mão pelo proprietário na mesma transação (`manual`, 409 se outra conta do grupo tem o número; editar a própria conta já era recusado). **Pessoa do portal: continua gravando direto como `manual`** (a conta do portal não tem pedido, e nada da ficha muda) | Criar pedido para `portal_user` |
+| TC-7 | `PATCH` que traz telefone | Continuam aceitando `phone`: outro número abre a troca, o mesmo é gravado. `PATCH /api/portal/me` saiu da lista do bloqueio | Recusar `phone` no `PATCH` e exigir a rota da troca |
+| TC-8 | Troca e responsáveis que mudam | A troca não espera a D-12. Membro que sai da organização responsável perde a troca (cancelada, como os pedidos dela); quem vira owner tem a troca movida para a plataforma, na fila, sem link até pedir o reenvio. A troca da plataforma aparece na fila do proprietário também para o membro comum | Manter a troca na organização até expirar |
+| TC-9 | Conta do portal na troca da ficha | Só a troca pedida pela própria pessoa leva o número à conta (`portal_user`), só declarado, como o `PATCH` fazia | Nunca mexer na conta |
+| TC-10 | Repetição | O mesmo número do cadastro: 400 `PHONE_UNCHANGED` (é dado do próprio cadastro). Pedir de novo o número da troca aberta é reenviar | Tratar como nova troca |
+
 ### Pedido de verificação: `phone_verification`
 
 `scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
@@ -552,13 +611,13 @@ com o envio. A T2a criou também `phone_tenant_vouch` (`user_id`, `tenant_id`, `
 |---|---|
 | `id`, `tenant_id` | Escopo responsável pelo envio |
 | `subject_type`, `subject_id` | `customer` ou `user` |
-| `purpose` | `signup` (número do cadastro), `change` (troca) ou `claim` (número que já existe, P3) |
+| `purpose` | `signup` (número do cadastro), `change` (troca) ou `claim` (número que já existe, P3). **Implementados `signup` e `change`** (migration `0038`) |
 | `payload` | `jsonb` nulo: dados validados da ficha que nasce na confirmação (`claim`) |
 | `phone`, `phone_normalized`, `phone_key` | O número a confirmar, de `phoneValues`. Na troca, o cadastro mantém o antigo até a confirmação |
 | `token_hash` | SHA-256, único. O token (`randomBytes(32)`) só existe no link |
 | `status` | `pending`, `sent`, `awaiting_manual`, `confirmed`, `canceled` |
 | `channel_id`, `provider_message_id`, `attempts` | Canal e mensagem da tentativa atual; histórico em `jsonb` (canal, hora, erro) |
-| `requested_by_type`, `requested_by_id` | Quem pediu |
+| `requested_by_type`, `requested_by_id` | Quem pediu (`user` ou `portal_user`); preenchidos na troca (`0038`) |
 | `expires_at`, `created_at`, `confirmed_at`, `confirmed_by` | Validade por `PHONE_VERIFICATION_TTL_MINUTES`; `confirmed_by` só na liberação manual |
 
 Dois índices únicos parciais para pedidos abertos: `(subject_type, subject_id, tenant_id)` nos
@@ -1029,7 +1088,8 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
-que foi feito").
+que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito") e TC-1 a TC-10 da troca de telefone (em "Troca
+de telefone pelo pedido: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

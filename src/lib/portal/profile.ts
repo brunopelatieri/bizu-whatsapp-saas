@@ -1,7 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 import { getDb } from "@/db";
-import { isUniqueViolation } from "@/db/errors";
-import { withTenant } from "@/db/rls";
+import { type Tx, withTenant } from "@/db/rls";
 import { customer, portalAccount, portalSession, portalUser } from "@/db/schema";
 import { audit, auditInTransaction } from "@/lib/audit";
 import { runInBackground } from "@/lib/auth/background";
@@ -15,7 +14,11 @@ import {
 import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
-import { closeVerificationsOf, ensureCustomerVerification } from "@/lib/phone/requests";
+import {
+  cancelCustomerPhoneChange,
+  type NewPhone,
+  openCustomerPhoneChange,
+} from "@/lib/phone/requests";
 import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { sendPortalPasswordChanged } from "@/lib/auth/portal-emails";
 import type { PortalCustomer } from "@/lib/portal/access";
@@ -24,7 +27,7 @@ import type {
   SetPasswordInput,
 } from "@/lib/schemas/portal";
 import { phoneValues } from "@/lib/phone/columns";
-import { phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
+import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /** Sessão aberta há menos que isto acabou de provar o e-mail ou a senha. */
 const FRESH_SESSION_MS = 10 * 60 * 1000;
@@ -45,7 +48,31 @@ export async function hasPortalPassword(portalUserId: string) {
   return row !== undefined;
 }
 
-/** Atualiza a pessoa e o cadastro dela no tenant ativo, sem tocar nos outros tenants. */
+/** Trava a ficha da pessoa no tenant ativo: é a ordem de quem confirma o telefone (`requests.ts`). */
+async function lockRecord(tx: Tx, tenantId: string, customerId: string) {
+  const [record] = await tx
+    .select({ phoneKey: customer.phoneKey })
+    .from(customer)
+    .where(and(eq(customer.id, customerId), eq(customer.tenantId, tenantId)))
+    .for("update");
+  if (!record) throw notFound("Cliente não encontrado.");
+
+  return record;
+}
+
+const requesterOf = (portalUserId: string) => ({ type: "portal_user", id: portalUserId }) as const;
+
+/**
+ * Atualiza a pessoa e o cadastro dela no tenant ativo, sem tocar nos outros tenants. O nome muda na
+ * hora. **O telefone não**: outro número abre a troca pelo pedido (`openCustomerPhoneChange`), e a
+ * ficha fica com o número antigo, e a confirmação dele, até o link do número novo ser confirmado na
+ * sessão desta pessoa ou o owner liberar (bloco T, P1). Sem isso, a pessoa trocaria o número da
+ * ficha pelo de um terceiro, e a conversa dele viria para ela. A resposta não diz se o número novo já
+ * é de outro cliente da organização: isso só aparece para quem prova a posse dele.
+ *
+ * O mesmo número escrito de outro jeito (com ou sem o 9º dígito: a mesma `phone_key`) é gravado
+ * direto, sem mexer na confirmação.
+ */
 export async function updatePortalProfile(
   portalUserId: string,
   current: PortalCustomer,
@@ -53,37 +80,28 @@ export async function updatePortalProfile(
   ip?: string,
 ) {
   const tenantId = current.tenant.id;
-  // Duas formas do mesmo número casam em `phone_key`; o índice único do tenant barra a repetida.
   const phone = phoneValues(input.phone);
-  const base = { name: input.name, ...phone };
-
-  /**
-   * Número novo declarado pela própria pessoa deixa de valer como confirmado: é o que impede a
-   * conversa de outro dono do número de ser vinculada a este cadastro (`autoLinkContact` só usa
-   * telefone confirmado). A decisão é **por linha**. A conta é global e a ficha é do tenant
-   * ativo: as duas podem ter números diferentes (a pessoa já trocou o número em outra
-   * organização, ou o /admin editou a conta), e a confirmação de uma nunca serve à outra. A
-   * troca com link de verificação é a T2.
-   */
-  const valuesFor = (currentKey: string | null | undefined) =>
-    currentKey === phone.phoneKey ? base : { ...base, ...UNVERIFIED_PHONE };
 
   const updated = await withTenant(tenantId, async (tx) => {
-    // A ficha antes da conta: é a ordem de quem confirma o telefone (`requests.ts`).
-    const [record] = await tx
-      .select({ phoneKey: customer.phoneKey })
-      .from(customer)
-      .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)))
-      .for("update");
+    const record = await lockRecord(tx, tenantId, current.id);
     const [account] = await tx
       .select({ phoneKey: portalUser.phoneKey })
       .from(portalUser)
       .where(eq(portalUser.id, portalUserId))
       .for("update");
+    const samePhone = record.phoneKey === phone.phoneKey;
+
+    // A conta global acompanha a ficha só quando a ficha não muda de número; o número novo chega
+    // à conta na confirmação da troca. A confirmação de uma linha nunca serve à outra.
+    const accountPhone = !samePhone
+      ? {}
+      : account?.phoneKey === phone.phoneKey
+        ? phone
+        : { ...phone, ...UNVERIFIED_PHONE };
 
     const [person] = await tx
       .update(portalUser)
-      .set(valuesFor(account?.phoneKey))
+      .set({ name: input.name, ...accountPhone })
       .where(eq(portalUser.id, portalUserId))
       .returning({
         id: portalUser.id,
@@ -95,31 +113,60 @@ export async function updatePortalProfile(
 
     await tx
       .update(customer)
-      .set(valuesFor(record?.phoneKey))
+      .set({ name: input.name, ...(samePhone ? phone : {}) })
       .where(and(eq(customer.id, current.id), eq(customer.tenantId, tenantId)));
-    // Número novo: o pedido antigo cai e abre-se o do número atual (se ficou pendente).
-    if (record?.phoneKey !== phone.phoneKey) {
-      await closeVerificationsOf(tx, { type: "customer", id: current.id });
-    }
-    const requestId = await ensureCustomerVerification(tx, tenantId, current.id);
+
+    const opened = samePhone
+      ? null
+      : await openCustomerPhoneChange(tx, tenantId, current.id, phone, requesterOf(portalUserId));
+
     await auditInTransaction(tx, "portal.profile_updated", {
       actor: { type: "portal_user", id: portalUserId },
       tenantId,
       target: { type: "customer", id: current.id },
+      metadata: { phoneChange: opened !== null },
       ip,
     });
 
-    // Número novo: o link sai pelos canais da organização depois do commit (o job decide se o
-    // pedido que já existia precisa de outro).
-    return { person, requestId: record?.phoneKey !== phone.phoneKey ? requestId : null };
-  }).catch((error: unknown) => {
-    // Outro cliente do tenant já tem o número: sem dizer quem (o autor é o próprio cliente).
-    if (isUniqueViolation(error)) throw phoneInUse();
-    throw error;
+    return { person, opened };
   });
 
-  await requestPhoneVerificationSend(updated.requestId, { type: "customer", id: current.id });
-  return updated.person;
+  if (updated.opened) {
+    await requestPhoneVerificationSend(
+      updated.opened.requestId,
+      { type: "customer", id: current.id },
+      updated.opened.reason,
+    );
+  }
+
+  return { user: updated.person, phoneChangePending: updated.opened !== null };
+}
+
+/**
+ * `POST /api/portal/me/phone-change`: a troca do número da ficha da organização ativa, pedida pela
+ * própria pessoa. A ficha não muda até a confirmação. Devolve o pedido para o envio, depois do commit.
+ */
+export function requestPortalPhoneChange(
+  portalUserId: string,
+  current: PortalCustomer,
+  phone: NewPhone,
+) {
+  const tenantId = current.tenant.id;
+
+  return withTenant(tenantId, async (tx) => {
+    await lockRecord(tx, tenantId, current.id);
+    return openCustomerPhoneChange(tx, tenantId, current.id, phone, requesterOf(portalUserId));
+  });
+}
+
+/** `DELETE /api/portal/me/phone-change`: desiste da troca aberta da ficha da organização ativa. */
+export function cancelPortalPhoneChange(portalUserId: string, current: PortalCustomer) {
+  const tenantId = current.tenant.id;
+
+  return withTenant(tenantId, async (tx) => {
+    await lockRecord(tx, tenantId, current.id);
+    return cancelCustomerPhoneChange(tx, tenantId, current.id, requesterOf(portalUserId));
+  });
 }
 
 type PasswordActor = {

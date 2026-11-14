@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
+import { isUniqueViolation } from "@/db/errors";
 import { type Scope, scopeTenantId, type Tx, withPlatformScope, withScope } from "@/db/rls";
 import {
   customer,
@@ -8,20 +9,25 @@ import {
   organization,
   phoneTenantVouch,
   phoneVerification,
+  portalUser,
   user,
 } from "@/db/schema";
 import { auditInTransaction } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { notifyPhoneClaimed } from "@/lib/phone/notify";
 import { userPhoneConfirmed, userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
 import {
   accountPhoneConflicts,
   accountPhoneInUse,
+  customerPhoneHolder,
   isOwnerOrPlatformStaff,
   lockPhoneKey,
 } from "@/lib/phone/uniqueness";
 import {
+  type PhoneRequesterType,
+  type PhoneVerificationPurpose,
   type PhoneVerificationSubject,
   UNVERIFIED_PHONE,
   verifiedPhone,
@@ -82,6 +88,12 @@ const ofSubject = ({ type, id }: VerificationSubject) =>
 /** Pedido aberto: com link a caminho ou na fila de liberação. */
 export const isOpen = inArray(phoneVerification.status, [...OPEN]);
 
+/** Pedido do número que o cadastro tem (cadastro, convite, número que caiu). */
+const isSignup = eq(phoneVerification.purpose, "signup");
+
+/** Pedido de troca: o número do pedido é o novo, e o cadastro guarda o antigo até a confirmação. */
+const isChange = eq(phoneVerification.purpose, "change");
+
 /**
  * A ficha de cliente que confirma o número no portal: `lead` ou `active`, de organização ativa (a
  * consulta faz o `join` com `organization`). A bloqueada e a de organização suspensa ficam de fora,
@@ -101,9 +113,9 @@ const inScope = (scope: Scope) =>
 const CLOSED = { status: "canceled", tokenHash: null, expiresAt: null } as const;
 
 /**
- * Abre o pedido do cadastro para um número, perante um responsável. Substitui o que ele tinha
- * aberto com ESSE responsável; os pedidos com outros responsáveis não são tocados. Sem canal para
- * enviar o link (o envio é a fase T2b), nasce esperando a liberação.
+ * Abre o pedido do cadastro para o número que ele tem, perante um responsável. Substitui o que ele
+ * tinha aberto com ESSE responsável; os pedidos com outros responsáveis, e a troca de número, não
+ * são tocados. Nasce esperando a liberação, até um canal aceitar o link.
  */
 async function open(
   tx: Tx,
@@ -114,7 +126,7 @@ async function open(
   await tx
     .update(phoneVerification)
     .set(CLOSED)
-    .where(and(ofSubject(subject), isOpen, inScope(scope)));
+    .where(and(ofSubject(subject), isOpen, isSignup, inScope(scope)));
 
   const [row] = await tx
     .insert(phoneVerification)
@@ -174,7 +186,7 @@ async function ensureUser(tx: Tx, userId: string, wanted: Scope) {
   const [current] = await tx
     .select({ id: phoneVerification.id, phoneKey: phoneVerification.phoneKey })
     .from(phoneVerification)
-    .where(and(ofSubject(subject), isOpen, inScope(scope)));
+    .where(and(ofSubject(subject), isOpen, isSignup, inScope(scope)));
   // Mesmo número, mesmo responsável: o pedido que existe continua valendo.
   if (current?.phoneKey === person.phoneKey) return current.id;
 
@@ -216,7 +228,7 @@ export async function ensureCustomerVerification(tx: Tx, tenantId: string, custo
   const [current] = await tx
     .select({ id: phoneVerification.id, phoneKey: phoneVerification.phoneKey })
     .from(phoneVerification)
-    .where(and(ofSubject(subject), isOpen));
+    .where(and(ofSubject(subject), isOpen, isSignup));
   if (current?.phoneKey === record.phoneKey) return current.id;
 
   return open(tx, { kind: "tenant", tenantId }, subject, {
@@ -306,6 +318,28 @@ export function routeVerificationToPlatform(userId: string) {
     if (!(await isOwnerOrPlatformStaff(tx, userId))) return;
 
     await lockUser(tx, userId);
+    // A troca de número que esperava uma organização passa para a plataforma, com o mesmo número:
+    // a pessoa pediu, e só a plataforma pode fechá-la agora. Sem link (o token sai): fica na fila
+    // do proprietário, e a pessoa pede o reenvio.
+    await tx
+      .update(phoneVerification)
+      .set({
+        tenantId: null,
+        status: "awaiting_manual",
+        tokenHash: null,
+        expiresAt: null,
+        channelId: null,
+        providerMessageId: null,
+        manualNotifiedAt: null,
+      })
+      .where(
+        and(
+          ofSubject({ type: "user", id: userId }),
+          isOpen,
+          isChange,
+          isNotNull(phoneVerification.tenantId),
+        ),
+      );
     await tx
       .update(phoneVerification)
       .set(CLOSED)
@@ -313,6 +347,7 @@ export function routeVerificationToPlatform(userId: string) {
         and(
           ofSubject({ type: "user", id: userId }),
           isOpen,
+          isSignup,
           isNotNull(phoneVerification.tenantId),
         ),
       );
@@ -411,7 +446,7 @@ export function ownPhoneVerification(subject: VerificationSubject) {
         phoneNormalized: phoneVerification.phoneNormalized,
       })
       .from(phoneVerification)
-      .where(and(ofSubject(subject), isOpen))
+      .where(and(ofSubject(subject), isOpen, isSignup))
       .orderBy(asc(phoneVerification.createdAt));
 
     const [first] = rows;
@@ -473,9 +508,10 @@ export function userPhoneOverview(userId: string) {
         phoneNormalized: phoneVerification.phoneNormalized,
       })
       .from(phoneVerification)
-      .where(and(ofSubject({ type: "user", id: userId }), isOpen))
+      .where(and(ofSubject({ type: "user", id: userId }), isOpen, isSignup))
       .orderBy(asc(phoneVerification.createdAt));
-    const statusOf = (tenantId: string | null): ResponsibleStatus => {
+    const change = await changeView(tx, { type: "user", id: userId });
+    const statusOf =(tenantId: string | null): ResponsibleStatus => {
       const found = requests.find((row) => row.tenantId === tenantId)?.status;
       return found === "sent" || found === "awaiting_manual" ? found : "none";
     };
@@ -528,9 +564,41 @@ export function userPhoneOverview(userId: string) {
       confirmedGlobally: global,
       answersTo: platformOnly ? ("platform" as const) : ("organization" as const),
       responsibles,
+      // A troca de número em andamento (o número da conta, e as situações acima, são do antigo).
+      change,
     };
   });
 }
+
+/**
+ * A troca de número aberta do cadastro, para as telas: a situação, os 4 últimos dígitos do número
+ * NOVO, quem responde por ela e quando foi pedida. `null` sem troca aberta.
+ */
+async function changeView(tx: Tx, subject: VerificationSubject) {
+  const [row] = await tx
+    .select({
+      status: phoneVerification.status,
+      phoneNormalized: phoneVerification.phoneNormalized,
+      tenantId: phoneVerification.tenantId,
+      tenantName: organization.name,
+      requestedAt: phoneVerification.createdAt,
+    })
+    .from(phoneVerification)
+    .leftJoin(organization, eq(organization.id, phoneVerification.tenantId))
+    .where(and(ofSubject(subject), isOpen, isChange));
+  if (!row) return null;
+
+  return {
+    status: row.status as (typeof OPEN)[number],
+    phoneHint: phoneHint(row.phoneNormalized),
+    responsible: row.tenantId ? ("organization" as const) : ("platform" as const),
+    tenantId: row.tenantId,
+    tenantName: row.tenantName,
+    requestedAt: row.requestedAt,
+  };
+}
+
+export type PhoneChangeView = Awaited<ReturnType<typeof changeView>>;
 
 /** As fichas de cliente (uma por organização) da pessoa do portal, com a situação de cada uma. */
 export function portalPhoneOverview(portalUserId: string) {
@@ -544,12 +612,17 @@ export function portalPhoneOverview(portalUserId: string) {
         verifiedAt: customer.phoneVerifiedAt,
         // Dá para entrar nela agora (`POST /api/portal/active-tenant`): ficha ativa, organização ativa.
         enterable: sql<boolean>`(${customer.status} = 'active' and ${organization.status} = 'active')`,
-        request: sql<string | null>`(select pv.status from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') limit 1)`,
+        request: sql<string | null>`(select pv.status from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') and pv.purpose = 'signup' limit 1)`,
       })
       .from(customer)
       .innerJoin(organization, eq(organization.id, customer.tenantId))
       .where(eq(customer.portalUserId, portalUserId))
       .orderBy(asc(organization.name));
+
+    const changes = new Map<string, PhoneChangeView>();
+    for (const record of records) {
+      changes.set(record.id, await changeView(tx, { type: "customer", id: record.id }));
+    }
 
     return records.map((record) => {
       const request = record.request === "sent" || record.request === "awaiting_manual" ? record.request : "none";
@@ -565,6 +638,7 @@ export function portalPhoneOverview(portalUserId: string) {
         view,
         enterable: Boolean(record.enterable),
         phoneHint: record.phoneNormalized ? phoneHint(record.phoneNormalized) : null,
+        change: changes.get(record.id) ?? null,
       };
     });
   });
@@ -604,8 +678,18 @@ export function portalTokenSubject(token: string, portalUserId: string) {
  * ela, senão o mais antigo das organizações. Abre o pedido se o telefone ainda não está
  * confirmado para esse responsável. `null`: nada a reenviar.
  */
-export function userResendTarget(userId: string, responsible?: string) {
+export function userResendTarget(
+  userId: string,
+  responsible?: string,
+  purpose: PhoneVerificationPurpose = "signup",
+) {
   return withPlatformScope("telefone: escolhe o pedido do reenvio", async (tx) => {
+    // A troca tem um pedido só, com o responsável que ela ganhou ao ser pedida.
+    if (purpose === "change") {
+      await lockUser(tx, userId);
+      return openChangeId(tx, { type: "user", id: userId });
+    }
+
     let wanted: Scope = PLATFORM;
     if (responsible && responsible !== "platform") {
       wanted = { kind: "tenant", tenantId: responsible };
@@ -643,7 +727,11 @@ export function userResendTarget(userId: string, responsible?: string) {
  * Só a ficha que pode confirmar (`lead` ou `active`, organização ativa): as mesmas regras de
  * `portalTokenSubject`, para não mandar um link que não serviria.
  */
-export function portalResendTarget(portalUserId: string, tenantId: string) {
+export function portalResendTarget(
+  portalUserId: string,
+  tenantId: string,
+  purpose: PhoneVerificationPurpose = "signup",
+) {
   return withPlatformScope("telefone: escolhe o pedido do reenvio no portal", async (tx) => {
     const [record] = await tx
       .select({ id: customer.id })
@@ -658,7 +746,10 @@ export function portalResendTarget(portalUserId: string, tenantId: string) {
       );
     if (!record) return null;
 
-    const requestId = await ensureCustomerVerification(tx, tenantId, record.id);
+    const requestId =
+      purpose === "change"
+        ? await openChangeId(tx, { type: "customer", id: record.id })
+        : await ensureCustomerVerification(tx, tenantId, record.id);
     return requestId ? { requestId, customerId: record.id } : null;
   });
 }
@@ -721,8 +812,92 @@ async function demote(tx: Tx, holderIds: string[], phoneKey: string) {
   }
 }
 
+type Outcome = { demoted: string[]; global: boolean; changed?: boolean };
+
+/** As colunas de telefone que a troca grava no cadastro: as do pedido, calculadas quando ele abriu. */
+const changedPhone = (request: Request) => ({
+  phone: request.phone ?? request.phoneNormalized,
+  phoneNormalized: request.phoneNormalized,
+  phoneKey: request.phoneKey,
+});
+
+/**
+ * Troca de número da conta, confirmada. Só aqui o número novo entra em `user`: até agora a conta
+ * tinha o antigo, com a confirmação que ele tinha. O alcance é o do responsável, como no pedido de
+ * cadastro: pela plataforma, a conta fica confirmada no sistema inteiro (pelo link, quem provou
+ * fica com o número); por uma organização, a conta fica com o número novo **pendente** no sistema e
+ * liberada só nela. As liberações de organização eram do número antigo e saem; a ligação com fichas
+ * de cliente é por id e fica (D-9).
+ */
+async function confirmUserChange(
+  tx: Tx,
+  request: Request,
+  confirmation: Confirmation,
+): Promise<Outcome> {
+  const [person] = await tx
+    .select({ id: user.id, phoneKey: user.phoneKey })
+    .from(user)
+    .where(eq(user.id, request.subjectId));
+  if (!person) throw INVALID_LINK();
+  if (actorOf(confirmation) === person.id) throw SELF_CONFIRMATION();
+
+  const memberships = await tx
+    .select({ tenantId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, person.id));
+
+  if (request.tenantId) {
+    if (confirmation.via === "manual") throw INVALID_LINK();
+    if (confirmation.via === "tenant" && confirmation.tenantId !== request.tenantId) {
+      throw INVALID_LINK();
+    }
+    if (!memberships.some(({ tenantId }) => tenantId === request.tenantId)) throw INVALID_LINK();
+    if (await isOwnerOrPlatformStaff(tx, person.id)) throw PLATFORM_ONLY();
+
+    // A trava do número já foi tomada (`lockForConfirmation`): a conferência de agora vale.
+    const holders = await accountPhoneConflicts(tx, person.id, request.phoneKey, {
+      onlyTenantId: request.tenantId,
+    });
+    if (holders.length > 0) throw accountPhoneInUse();
+
+    await tx
+      .update(user)
+      .set({ ...changedPhone(request), ...UNVERIFIED_PHONE })
+      .where(eq(user.id, person.id));
+    await dropTenantVouchesOf(tx, person.id);
+    await tx.insert(phoneTenantVouch).values({
+      userId: person.id,
+      tenantId: request.tenantId,
+      phoneKey: request.phoneKey,
+      vouchedBy: actorOf(confirmation),
+    });
+
+    return { demoted: [], global: false, changed: true };
+  }
+
+  if (confirmation.via === "tenant") throw INVALID_LINK();
+
+  const holders = await accountPhoneConflicts(tx, person.id, request.phoneKey);
+  if (holders.length > 0 && confirmation.via === "manual") throw accountPhoneInUse();
+  await demote(tx, holders, request.phoneKey);
+
+  await tx
+    .update(user)
+    .set({ ...changedPhone(request), ...verifiedPhone(confirmation.via) })
+    .where(eq(user.id, person.id));
+  await dropTenantVouchesOf(tx, person.id);
+
+  for (const { tenantId } of memberships) {
+    await linkExistingCustomer(tx, tenantId, person.id);
+  }
+
+  return { demoted: holders, global: true, changed: true };
+}
+
 /** Confirma o número na conta. O pedido só vale para o número que a conta ainda tem. */
-async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation) {
+async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation): Promise<Outcome> {
+  if (request.purpose === "change") return confirmUserChange(tx, request, confirmation);
+
   const [person] = await tx
     .select({ id: user.id, phoneKey: user.phoneKey })
     .from(user)
@@ -791,8 +966,92 @@ async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation)
   return { demoted: holders, global: true };
 }
 
+/**
+ * Troca de número da ficha de cliente, confirmada pelo link (na sessão do portal da própria ficha)
+ * ou pelo owner, à mão. A unicidade é conferida de novo aqui, com a ficha travada: no pedido, a
+ * pessoa do portal não fica sabendo se o número é de outro cliente (seria um oráculo); aqui quem
+ * fica sabendo provou a posse do número, ou é o owner que libera. O contato e as conversas do
+ * número antigo continuam ligados à ficha (P1: o histórico é do cadastro, não do número).
+ */
+async function confirmCustomerChange(
+  tx: Tx,
+  request: Request,
+  confirmation: Confirmation,
+): Promise<Outcome> {
+  const [record] = await tx
+    .select({
+      id: customer.id,
+      tenantId: customer.tenantId,
+      userId: customer.userId,
+      portalUserId: customer.portalUserId,
+    })
+    .from(customer)
+    .where(eq(customer.id, request.subjectId));
+  if (!record || record.tenantId !== request.tenantId) throw INVALID_LINK();
+  if (confirmation.via === "manual") throw INVALID_LINK();
+  if (confirmation.via === "tenant" && confirmation.tenantId !== record.tenantId) {
+    throw INVALID_LINK();
+  }
+
+  if (await customerPhoneHolder(tx, record.tenantId, request.phoneKey, record.id)) {
+    throw accountPhoneInUse();
+  }
+
+  const proven = confirmation.via === "whatsapp";
+  const phone = changedPhone(request);
+  await tx
+    .update(customer)
+    .set({ ...phone, ...verifiedPhone(proven ? "whatsapp" : "manual") })
+    .where(eq(customer.id, record.id));
+
+  // A troca que a própria pessoa pediu no portal leva o número também para a conta dela, como o
+  // `PATCH /api/portal/me` fazia. Só declarado: a conta do portal é global, e nenhuma organização a
+  // confirma (T2a).
+  if (
+    request.requestedByType === "portal_user" &&
+    record.portalUserId !== null &&
+    request.requestedById === record.portalUserId
+  ) {
+    const [account] = await tx
+      .select({ phoneKey: portalUser.phoneKey })
+      .from(portalUser)
+      .where(eq(portalUser.id, record.portalUserId))
+      .for("update");
+    await tx
+      .update(portalUser)
+      .set(account?.phoneKey === phone.phoneKey ? phone : { ...phone, ...UNVERIFIED_PHONE })
+      .where(eq(portalUser.id, record.portalUserId));
+  }
+
+  // Como na confirmação do cadastro: só a prova de posse liga a ficha à pessoa da equipe com o
+  // número e o contato que já escreveu dele. A ligação que a ficha já tinha (por id) fica.
+  if (proven) {
+    if (!record.userId) {
+      const teamUserId = await matchingTeamMember(tx, record.tenantId, request.phoneKey);
+      if (teamUserId) {
+        await tx.update(customer).set({ userId: teamUserId }).where(eq(customer.id, record.id));
+        await auditInTransaction(tx, "customer.team_linked", {
+          actor: { id: null, type: "system" },
+          tenantId: record.tenantId,
+          target: { type: "customer", id: record.id },
+          metadata: { userId: teamUserId, via: "verified" },
+        });
+      }
+    }
+    await linkUnlinkedContactToCustomer(tx, record.tenantId, request.phoneKey, record.id);
+  }
+
+  return { demoted: [], global: false, changed: true };
+}
+
 /** Confirma o número na ficha de cliente. Os efeitos que dependem de prova só vêm com o link. */
-async function confirmCustomer(tx: Tx, request: Request, confirmation: Confirmation) {
+async function confirmCustomer(
+  tx: Tx,
+  request: Request,
+  confirmation: Confirmation,
+): Promise<Outcome> {
+  if (request.purpose === "change") return confirmCustomerChange(tx, request, confirmation);
+
   const [record] = await tx
     .select({
       id: customer.id,
@@ -895,8 +1154,9 @@ async function confirm(tx: Tx, request: Request, confirmation: Confirmation, now
     })
     .where(eq(phoneVerification.id, request.id));
 
-  // Confirmada para o sistema inteiro, a conta não deve mais nada a nenhum responsável.
-  if (outcome.global) {
+  // Confirmada para o sistema inteiro, a conta não deve mais nada a nenhum responsável. Trocado o
+  // número, os pedidos que sobravam eram do número antigo.
+  if (outcome.global || outcome.changed) {
     await tx
       .update(phoneVerification)
       .set(CLOSED)
@@ -909,16 +1169,41 @@ async function confirm(tx: Tx, request: Request, confirmation: Confirmation, now
       );
   }
 
+  // A conta que trocou de número por uma organização ainda deve o número novo à plataforma e às
+  // outras organizações em que é membro comum: os pedidos abrem aqui e o envio sai depois do commit.
+  const opened: string[] = [];
+  if (outcome.changed && request.subjectType === "user") {
+    const scopes: Scope[] = [PLATFORM];
+    const memberships = await tx
+      .select({ tenantId: member.organizationId })
+      .from(member)
+      .where(eq(member.userId, request.subjectId));
+    for (const { tenantId } of memberships) scopes.push({ kind: "tenant", tenantId });
+    for (const scope of scopes) {
+      const id = await ensureUser(tx, request.subjectId, scope);
+      if (id && !opened.includes(id)) opened.push(id);
+    }
+  }
+
   const actorId = actorOf(confirmation);
   await auditInTransaction(tx, "phone.verified", {
     actor: actorId ? { id: actorId } : { id: null, type: "system" },
     tenantId: request.tenantId,
     target: { type: request.subjectType, id: request.subjectId },
     // Só ids e enums: o número nunca vai para a auditoria.
-    metadata: { via: confirmation.via, demoted: outcome.demoted.length },
+    metadata: {
+      via: confirmation.via,
+      demoted: outcome.demoted.length,
+      purpose: request.purpose,
+    },
   });
 
-  return outcome.demoted;
+  return { demoted: outcome.demoted, opened };
+}
+
+/** Depois do commit: o link dos pedidos que a troca de número abriu. */
+async function sendOpened(opened: string[], subject: VerificationSubject) {
+  for (const id of opened) await requestPhoneVerificationSend(id, subject);
 }
 
 /**
@@ -938,6 +1223,8 @@ export async function confirmPhoneVerificationByToken(
     await rerouteIfPlatformOnly(error, subject.id);
     throw error;
   }
+
+  await sendOpened(claimed.opened, subject);
 
   // Depois do commit: quem perdeu a confirmação para quem provou o número fica sabendo. Falha
   // no aviso não desfaz a confirmação.
@@ -979,10 +1266,19 @@ function consumeToken(token: string, subject: VerificationSubject, now: Date) {
       throw INVALID_LINK();
     }
 
-    const demoted = await confirm(tx, locked, { via: "whatsapp" }, now);
+    const { demoted, opened } = await confirm(tx, locked, { via: "whatsapp" }, now);
 
-    return { demoted, hint: phoneHint(locked.phoneNormalized) };
-  });
+    return { demoted, opened, hint: phoneHint(locked.phoneNormalized) };
+  }).catch(phoneInUseOnUnique);
+}
+
+/**
+ * A ficha que troca de número bate no índice único do tenant se outro cliente ganhou o número no
+ * meio (a conferência foi feita, mas a criação de cliente não toma a trava): a mesma resposta.
+ */
+function phoneInUseOnUnique(error: unknown): never {
+  if (isUniqueViolation(error)) throw accountPhoneInUse();
+  throw error;
 }
 
 /**
@@ -999,7 +1295,7 @@ export async function confirmPhoneVerificationManually(
   let subjectId: string | null = null;
 
   try {
-    await withPlatformScope("telefone: liberação manual", async (tx) => {
+    const done = await withPlatformScope("telefone: liberação manual", async (tx) => {
       const [found] = await tx
         .select()
         .from(phoneVerification)
@@ -1015,8 +1311,11 @@ export async function confirmPhoneVerificationManually(
           ? { via: "tenant", actorId, tenantId: scope.tenantId }
           : { via: "manual", actorId };
 
-      await confirm(tx, locked, confirmation, now);
-    });
+      const { opened } = await confirm(tx, locked, confirmation, now);
+      return { opened, subject: { type: locked.subjectType, id: locked.subjectId } };
+    }).catch(phoneInUseOnUnique);
+
+    await sendOpened(done.opened, done.subject);
   } catch (error) {
     if (!(error instanceof TenantRuleError)) throw error;
 
@@ -1043,12 +1342,14 @@ export function listPhoneVerifications(scope: Scope, page = 1) {
   // Na plataforma, só quem responde a ela: owners, a equipe da plataforma e quem não é de
   // organização nenhuma. O membro comum tem o pedido da plataforma aberto (é o caminho dele para
   // a confirmação que vale em todo lugar, pelo link), mas quem o libera à mão é a organização:
-  // listá-lo aqui só encheria a fila do proprietário.
+  // listá-lo aqui só encheria a fila do proprietário. A troca de número é outra coisa: ela só fica
+  // com a plataforma quando a conta já era confirmada no sistema inteiro, e só a plataforma a fecha.
   const stillThere =
     scope.kind === "tenant"
       ? sql`(${customer.id} is not null or exists (select 1 from member where member.user_id = ${user.id} and member.organization_id = ${scope.tenantId}))`
       : sql`(${user.id} is not null and (
-          ${user.role} in ('platform_owner', 'platform_support')
+          ${phoneVerification.purpose} = 'change'
+          or ${user.role} in ('platform_owner', 'platform_support')
           or not exists (select 1 from member where member.user_id = ${user.id})
           or exists (select 1 from member where member.user_id = ${user.id} and 'owner' = any(string_to_array(member.role, ',')))
         ))`;
@@ -1061,6 +1362,7 @@ export function listPhoneVerifications(scope: Scope, page = 1) {
         status: phoneVerification.status,
         subjectType: phoneVerification.subjectType,
         subjectId: phoneVerification.subjectId,
+        purpose: phoneVerification.purpose,
         phone: phoneVerification.phoneNormalized,
         name: sql<string>`coalesce(${user.name}, ${customer.name})`,
         createdAt: phoneVerification.createdAt,
@@ -1158,6 +1460,8 @@ export async function prunePhoneVerifications(now = new Date()) {
         and(
           eq(phoneVerification.subjectType, "user"),
           isOpen,
+          // A troca de número não: ela é sobre o número novo.
+          isSignup,
           sql`exists (select 1 from "user" where "user"."id" = ${phoneVerification.subjectId} and ${userPhoneConfirmedGlobally})`,
         ),
       );
@@ -1181,3 +1485,259 @@ export async function prunePhoneVerifications(now = new Date()) {
 export async function dropTenantVouchesOf(tx: Tx, userId: string) {
   await tx.delete(phoneTenantVouch).where(eq(phoneTenantVouch.userId, userId));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Troca de número (`purpose = change`)
+// ---------------------------------------------------------------------------------------------
+
+/** Quem pediu a troca: vai para o pedido, e decide o efeito na conta do portal. */
+export type PhoneChangeRequester = { type: PhoneRequesterType; id: string };
+
+/** O número novo, de `phoneValues` (nunca do corpo da requisição). */
+export type NewPhone = { phone: string; phoneNormalized: string; phoneKey: string };
+
+/** O que a rota faz depois do commit: `open` manda o link; `resend`, o próximo canal da ordem. */
+export type PhoneChangeOpened = { requestId: string; reason: "open" | "resend" };
+
+const PHONE_UNCHANGED = () =>
+  new TenantRuleError(400, "PHONE_UNCHANGED", "Este já é o número do cadastro.");
+
+/** A troca aberta do cadastro, se houver. */
+async function openChangeId(tx: Tx, subject: VerificationSubject) {
+  const [row] = await tx
+    .select({ id: phoneVerification.id })
+    .from(phoneVerification)
+    .where(and(ofSubject(subject), isOpen, isChange));
+
+  return row?.id ?? null;
+}
+
+/**
+ * Abre a troca do cadastro para o número novo, perante o responsável. **O cadastro não muda**: o
+ * número novo fica só no pedido até a confirmação. Uma troca por cadastro: a anterior cai. Pedir de
+ * novo o mesmo número, ao mesmo responsável, é reenviar o link da troca que já existe.
+ */
+async function openChange(
+  tx: Tx,
+  scope: Scope,
+  subject: VerificationSubject,
+  phone: NewPhone,
+  requester: PhoneChangeRequester,
+): Promise<PhoneChangeOpened> {
+  const [current] = await tx
+    .select({
+      id: phoneVerification.id,
+      phoneKey: phoneVerification.phoneKey,
+      tenantId: phoneVerification.tenantId,
+    })
+    .from(phoneVerification)
+    .where(and(ofSubject(subject), isOpen, isChange))
+    .for("update");
+  if (current?.phoneKey === phone.phoneKey && current.tenantId === scopeTenantId(scope)) {
+    return { requestId: current.id, reason: "resend" };
+  }
+
+  if (current) {
+    await tx.update(phoneVerification).set(CLOSED).where(eq(phoneVerification.id, current.id));
+  }
+
+  const [row] = await tx
+    .insert(phoneVerification)
+    .values({
+      tenantId: scopeTenantId(scope),
+      subjectType: subject.type,
+      subjectId: subject.id,
+      purpose: "change",
+      phone: phone.phone,
+      phoneNormalized: phone.phoneNormalized,
+      phoneKey: phone.phoneKey,
+      status: "awaiting_manual",
+      requestedByType: requester.type,
+      requestedById: requester.id,
+    })
+    .returning({ id: phoneVerification.id });
+  if (!row) throw new Error("pedido de troca não criado");
+
+  await auditInTransaction(tx, "phone.change_requested", {
+    actor: requester.type === "portal_user" ? requester : { id: requester.id },
+    tenantId: scopeTenantId(scope),
+    target: subject,
+    // Só enums: o número nunca vai para a auditoria.
+    metadata: { responsible: scope.kind },
+  });
+
+  return { requestId: row.id, reason: "open" };
+}
+
+/**
+ * Quem responde pela troca de número da conta ("Quem verifica, por onde e quem libera", linha
+ * "Troca de telefone"): a plataforma para quem responde a ela (owners, equipe da plataforma, quem
+ * não é de organização nenhuma) **e para quem já tem o número confirmado no sistema inteiro** (a
+ * troca não rebaixa a conta: só a plataforma dá essa confirmação de novo). O membro comum sem essa
+ * confirmação troca perante a organização em uso, se é da equipe dela, senão a primeira em que
+ * entrou (D-12: a organização é quem responde por ele).
+ */
+async function changeResponsible(
+  tx: Tx,
+  userId: string,
+  activeTenantId: string | null,
+): Promise<Scope> {
+  const [account] = await tx
+    .select({ global: sql<boolean>`coalesce(${userPhoneConfirmedGlobally}, false)` })
+    .from(user)
+    .where(eq(user.id, userId));
+  if (account?.global || (await answersToPlatform(tx, userId))) return PLATFORM;
+
+  const memberships = await tx
+    .select({ tenantId: member.organizationId })
+    .from(member)
+    .where(eq(member.userId, userId))
+    .orderBy(asc(member.createdAt), asc(member.id));
+  const chosen =
+    memberships.find(({ tenantId }) => tenantId === activeTenantId) ?? memberships[0];
+
+  return chosen ? { kind: "tenant", tenantId: chosen.tenantId } : PLATFORM;
+}
+
+/**
+ * `POST /api/me/phone-change`: a própria conta pede para trocar de número. A resposta é a mesma
+ * esteja o número livre ou não (não diz se ele tem conta): a unicidade é conferida na confirmação,
+ * sob a trava do número, quando quem confirma provou a posse (link) ou é o responsável (à mão).
+ */
+export function requestUserPhoneChange(
+  userId: string,
+  phone: NewPhone,
+  activeTenantId: string | null,
+) {
+  return withPlatformScope("telefone: pede a troca de número da conta", async (tx) => {
+    await lockUser(tx, userId);
+    const [person] = await tx
+      .select({ phoneKey: user.phoneKey })
+      .from(user)
+      .where(eq(user.id, userId));
+    if (!person) throw notFound("Usuário não encontrado.");
+    if (person.phoneKey === phone.phoneKey) throw PHONE_UNCHANGED();
+
+    const scope = await changeResponsible(tx, userId, activeTenantId);
+    return openChange(tx, scope, { type: "user", id: userId }, phone, {
+      type: "user",
+      id: userId,
+    });
+  });
+}
+
+/** Cancela a troca aberta (o cadastro não tinha mudado: nada a desfazer). Devolve se havia uma. */
+async function cancelChange(
+  tx: Tx,
+  subject: VerificationSubject,
+  actor: PhoneChangeRequester,
+  tenantId: string | null,
+) {
+  const closed = await tx
+    .update(phoneVerification)
+    .set(CLOSED)
+    .where(and(ofSubject(subject), isOpen, isChange))
+    .returning({ id: phoneVerification.id });
+  if (closed.length === 0) return false;
+
+  await auditInTransaction(tx, "phone.change_canceled", {
+    actor: actor.type === "portal_user" ? actor : { id: actor.id },
+    tenantId,
+    target: subject,
+  });
+
+  return true;
+}
+
+/** `DELETE /api/me/phone-change`. */
+export function cancelUserPhoneChange(userId: string) {
+  return withPlatformScope("telefone: cancela a troca de número da conta", async (tx) => {
+    await lockUser(tx, userId);
+    return cancelChange(tx, { type: "user", id: userId }, { type: "user", id: userId }, null);
+  });
+}
+
+/**
+ * Troca de número da ficha de cliente, pedida pela equipe (`/api/customers/:id/phone-change`) ou
+ * pela própria pessoa no portal. Roda no `withTenant` de quem chama, que já travou a ficha (a ordem
+ * de quem confirma: a ficha, depois o pedido). O responsável é sempre a organização da ficha. A
+ * ficha não muda até a confirmação; quem decide se o número novo já é de outro cliente é quem chama
+ * (a equipe pode saber; a pessoa do portal, não).
+ */
+export async function openCustomerPhoneChange(
+  tx: Tx,
+  tenantId: string,
+  customerId: string,
+  phone: NewPhone,
+  requester: PhoneChangeRequester,
+) {
+  const [record] = await tx
+    .select({ phoneKey: customer.phoneKey })
+    .from(customer)
+    .where(and(eq(customer.id, customerId), eq(customer.tenantId, tenantId)));
+  if (!record) throw notFound("Cliente não encontrado.");
+  if (record.phoneKey === phone.phoneKey) throw PHONE_UNCHANGED();
+
+  return openChange(
+    tx,
+    { kind: "tenant", tenantId },
+    { type: "customer", id: customerId },
+    phone,
+    requester,
+  );
+}
+
+/** Cancela a troca aberta da ficha, na transação (e com a ficha travada) de quem chama. */
+export function cancelCustomerPhoneChange(
+  tx: Tx,
+  tenantId: string,
+  customerId: string,
+  actor: PhoneChangeRequester,
+) {
+  return cancelChange(tx, { type: "customer", id: customerId }, actor, tenantId);
+}
+
+/** A troca aberta da ficha, para a tela do cliente na equipe. Roda no `withTenant` de quem chama. */
+export function customerPhoneChange(tx: Tx, customerId: string) {
+  return changeView(tx, { type: "customer", id: customerId });
+}
+
+/**
+ * A edição do telefone de uma conta em `/admin/usuarios/:id`: o proprietário da plataforma é o
+ * responsável da plataforma, então o pedido de troca abre e ele o libera à mão na mesma transação
+ * (`manual`, que vale no sistema inteiro). As regras são as da liberação à mão: recusada com
+ * `PHONE_IN_USE` se outra conta do grupo tem o número confirmado, e ninguém libera o próprio número
+ * (a rota já recusa editar a própria conta). Roda na transação com bypass de quem chama. Devolve os
+ * pedidos que a troca abriu, para o envio depois do commit.
+ */
+export async function changeUserPhoneByPlatform(
+  tx: Tx,
+  userId: string,
+  phone: NewPhone,
+  actorId: string,
+  now = new Date(),
+) {
+  if (actorId === userId) throw SELF_CONFIRMATION();
+
+  await lockPhoneKey(tx, phone.phoneKey);
+  await lockUser(tx, userId);
+  const subject = { type: "user", id: userId } as const;
+  const { requestId } = await openChange(tx, PLATFORM, subject, phone, {
+    type: "user",
+    id: actorId,
+  });
+
+  const [request] = await tx
+    .select()
+    .from(phoneVerification)
+    .where(and(eq(phoneVerification.id, requestId), isOpen))
+    .for("update");
+  if (!request) throw new Error("pedido de troca sumiu");
+
+  const { opened } = await confirm(tx, request, { via: "manual", actorId }, now);
+  return opened;
+}
+
+/** Envia os links dos pedidos abertos por `changeUserPhoneByPlatform`, depois do commit. */
+export const sendOpenedAfterChange = (opened: string[], userId: string) =>
+  sendOpened(opened, { type: "user", id: userId });

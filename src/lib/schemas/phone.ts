@@ -47,13 +47,28 @@ export const phoneVerificationTokenSchema = z.object({ token: verificationToken 
  * primeiro. Só serve para escolher entre os pedidos do próprio cadastro (vindo da sessão).
  */
 export const phoneVerificationResendSchema = z
-  .object({ responsible: z.union([z.literal("platform"), z.uuid()]).optional() })
+  .object({
+    responsible: z.union([z.literal("platform"), z.uuid()]).optional(),
+    /** `change`: o link da troca de número aberta (o responsável é o da troca). */
+    purpose: z.enum(["signup", "change"]).optional(),
+  })
   .strict();
 
 /** O mesmo no portal: a organização da ficha. Ausente: a organização ativa da sessão. */
 export const portalPhoneVerificationResendSchema = z
-  .object({ tenantId: z.uuid().optional() })
+  .object({ tenantId: z.uuid().optional(), purpose: z.enum(["signup", "change"]).optional() })
   .strict();
+
+/**
+ * Troca do número de uma ficha de cliente (`POST /api/portal/me/phone-change` e
+ * `POST /api/customers/:id/phone-change`): o cliente pode ter fixo. O número novo só entra na ficha
+ * quando o pedido é confirmado.
+ */
+export const phoneChangeSchema = z.object({ phone: phoneSchema }).strict();
+export type PhoneChangeInput = z.infer<typeof phoneChangeSchema>;
+
+/** Troca do número da própria conta da equipe (`POST /api/me/phone-change`): só WhatsApp (P18). */
+export const userPhoneChangeSchema = z.object({ phone: whatsappPhoneSchema }).strict();
 
 export const phoneVerificationPageSchema = z.object({
   page: z.coerce.number().int().min(1).max(10_000).default(1),

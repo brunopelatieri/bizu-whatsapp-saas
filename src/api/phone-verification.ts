@@ -14,10 +14,13 @@ import { blockWhileImpersonating } from "@/api/impersonation";
 import { requirePermission, requireTenant, type TenantEnv } from "@/api/permissions";
 import { rateLimit } from "@/api/rate-limit";
 import { handleTenantError } from "@/api/tenant-errors";
+import { phoneValues } from "@/lib/phone/columns";
 import {
+  cancelUserPhoneChange,
   confirmPhoneVerificationByToken,
   confirmPhoneVerificationManually,
   listPhoneVerifications,
+  requestUserPhoneChange,
   userPhoneOverview,
   userResendTarget,
 } from "@/lib/phone/requests";
@@ -26,6 +29,7 @@ import {
   phoneVerificationPageSchema,
   phoneVerificationResendSchema,
   phoneVerificationTokenSchema,
+  userPhoneChangeSchema,
 } from "@/lib/schemas/phone";
 
 /**
@@ -112,7 +116,7 @@ mine.post(
     // O job não manda mais de 3 links por hora ao cadastro (o automático da abertura conta):
     // dizer agora, em vez de aceitar um reenvio que não vai sair.
     if (await sendLimitReached({ type: "user", id })) return tooManyLinks(c);
-    const requestId = await userResendTarget(id, body.data.responsible);
+    const requestId = await userResendTarget(id, body.data.responsible, body.data.purpose);
     await requestPhoneVerificationSend(requestId, { type: "user", id }, "resend");
 
     return c.json({ ok: true }, 202);
@@ -135,6 +139,51 @@ mine.post(
 );
 
 phoneVerificationRoutes.route("/api/me/phone-verification", mine);
+
+/**
+ * Pedidos de troca de número por hora, por cadastro (além do limite de links do job). Pedir de novo
+ * o mesmo número reenvia o link; pedir outro substitui a troca.
+ */
+export const phoneChangeRateLimit = (name: string, key: (c: Context) => string) =>
+  rateLimit({ name, limit: 5, windowMs: 60 * MINUTE, key });
+
+const change = new Hono<AuthEnv>();
+
+change.use("*", sameOrigin, jsonBodyLimit, authRateLimit, requireAuth, blockWhileImpersonating);
+
+/**
+ * Troca do número da própria conta (bloco T, "Contratos"). O número novo vive no pedido e a conta
+ * fica com o antigo, e com a confirmação dele, até o link do número novo ser confirmado na sessão
+ * desta conta ou o responsável liberar. Liberada com o telefone pendente: é como a conta corrige um
+ * número errado (`src/api/phone-gate.ts`). A resposta é 202 esteja o número livre ou não.
+ */
+change.post(
+  "/",
+  phoneChangeRateLimit("phone-change", (c) => (c as Context<AuthEnv>).get("user").id),
+  zValidator("json", userPhoneChangeSchema, validationError),
+  async (c) => {
+    const id = c.get("user").id;
+    const opened = await requestUserPhoneChange(
+      id,
+      phoneValues(c.req.valid("json").phone),
+      c.get("activeOrganizationId"),
+    );
+    if (opened.reason === "resend" && (await sendLimitReached({ type: "user", id }))) {
+      return tooManyLinks(c);
+    }
+    await requestPhoneVerificationSend(opened.requestId, { type: "user", id }, opened.reason);
+
+    return c.json({ ok: true }, 202);
+  },
+);
+
+/** Desiste da troca: a conta segue como estava (ela não tinha mudado). Sem troca aberta, também 204. */
+change.delete("/", async (c) => {
+  await cancelUserPhoneChange(c.get("user").id);
+  return c.body(null, 204);
+});
+
+phoneVerificationRoutes.route("/api/me/phone-change", change);
 
 phoneVerificationRoutes.use(
   "/api/phone-verifications/*",

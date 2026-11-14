@@ -13,8 +13,10 @@ import { getEnv } from "@/lib/env";
  *
  * O que passa: ler o próprio estado, reenviar o link, confirmar, trocar a organização em uso (o
  * portão é por organização: quem foi liberado em outra precisa conseguir ir para ela), aceitar o
- * convite (é o aceite que torna a organização responsável pelo telefone) e, no portal, corrigir o
- * número (`PATCH /api/portal/me`). Sair é do Better Auth (`/api/auth/sign-out`,
+ * convite (é o aceite que torna a organização responsável pelo telefone) e corrigir o número pela
+ * troca (`POST`/`DELETE …/phone-change`, na equipe e no portal), que só grava o número novo quando
+ * ele é confirmado. O `PATCH /api/portal/me` (nome e telefone) saiu da lista quando a troca ganhou
+ * rota própria: com o telefone pendente, o portal só corrige o número. Sair é do Better Auth (`/api/auth/sign-out`,
  * `/api/portal/auth/sign-out`), que não passa por estes middlewares, e, na personificação,
  * `POST /api/admin/stop-impersonating` (sem ele o suporte ficaria preso na sessão da conta).
  *
@@ -33,6 +35,12 @@ export const TEAM_PHONE_PENDING_ALLOWED: readonly Allowed[] = [
   { method: "POST", path: /^\/api\/me\/phone-verification\/resend$/, why: "reenviar o link" },
   { method: "POST", path: /^\/api\/me\/phone-verification\/confirm$/, why: "confirmar pelo link" },
   { method: "POST", path: /^\/api\/tenant\/active$/, why: "ir à organização que liberou o número" },
+  {
+    method: "POST",
+    path: /^\/api\/me\/phone-change$/,
+    why: "corrigir o número: abre a troca, que só vale confirmada",
+  },
+  { method: "DELETE", path: /^\/api\/me\/phone-change$/, why: "desistir da troca de número" },
   {
     method: "POST",
     path: /^\/api\/admin\/stop-impersonating$/,
@@ -60,7 +68,16 @@ export const PORTAL_PHONE_PENDING_ALLOWED: readonly Allowed[] = [
     path: /^\/api\/portal\/me\/phone-verification\/confirm$/,
     why: "confirmar pelo link",
   },
-  { method: "PATCH", path: /^\/api\/portal\/me$/, why: "corrigir o número" },
+  {
+    method: "POST",
+    path: /^\/api\/portal\/me\/phone-change$/,
+    why: "corrigir o número: abre a troca, que só vale confirmada",
+  },
+  {
+    method: "DELETE",
+    path: /^\/api\/portal\/me\/phone-change$/,
+    why: "desistir da troca de número",
+  },
   { method: "POST", path: /^\/api\/portal\/active-tenant$/, why: "ir à organização da ficha confirmada" },
   { method: "DELETE", path: /^\/api\/portal\/me$/, why: "LGPD: pedir a exclusão da própria conta" },
   {

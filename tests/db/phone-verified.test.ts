@@ -242,7 +242,7 @@ describe("estado de verificação nos cadastros", () => {
     expect(await customerRow(created.customer?.id ?? "")).toMatchObject({ via: "team" });
   });
 
-  it("o cliente que troca o próprio telefone no portal volta a pendente, na conta e na ficha", async () => {
+  it("o cliente que troca o próprio telefone no portal: a ficha e a conta seguem como estavam até a confirmação", async () => {
     const boss = await createUser(owner);
     await createTenant(boss);
     const customer = await createCustomer(boss);
@@ -258,21 +258,23 @@ describe("estado de verificação nos cadastros", () => {
     expect(await customerRow(customer.id)).toMatchObject({ via: "team" });
 
     const stolen = uniquePhone();
+    const original = await customerRow(customer.id);
     const response = await call("PATCH", "/api/portal/me", {
       cookie,
       body: { name: "Cliente Teste", phone: stolen },
     });
     expect(response.status).toBe(200);
 
+    // O número novo vive no pedido de troca (bloco T, P1): a ficha não muda até a confirmação, e
+    // o número de um terceiro não chega à ficha só porque a pessoa o digitou.
     const after = await owner<Verification[]>`
       select phone_verified_at as at, phone_verified_via as via
       from portal_user where email = ${customer.email}
     `;
     expect(after[0]).toEqual({ at: null, via: null });
     expect(await customerRow(customer.id)).toMatchObject({
-      phone_key: phoneValues(stolen).phoneKey,
-      at: null,
-      via: null,
+      phone_key: original?.phone_key,
+      via: "team",
     });
   });
 
@@ -291,17 +293,19 @@ describe("estado de verificação nos cadastros", () => {
       where email = ${customer.email}
     `;
 
+    const original = await customerRow(customer.id);
     const response = await call("PATCH", "/api/portal/me", {
       cookie,
       body: { name: "Cliente Teste", phone: victim },
     });
     expect(response.status).toBe(200);
 
-    // Para a conta nada mudou; para a ficha o número é novo, e novo número é pendente.
+    // Para a ficha o número é novo: vira um pedido de troca, e a ficha segue com o dela, `team`.
+    // Quando a troca se confirmar (pelo link, nesta sessão), a ficha recebe o número com a forma
+    // da confirmação dela, nunca a da conta.
     expect(await customerRow(customer.id)).toMatchObject({
-      phone_key: values.phoneKey,
-      at: null,
-      via: null,
+      phone_key: original?.phone_key,
+      via: "team",
     });
   });
 

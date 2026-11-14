@@ -76,6 +76,20 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     ganhou o campo `verificationTemplate` (`{ name, language }` ou `null`). Nenhuma rota nova, permissão ou
     migration. Texto da tela "Confirme seu WhatsApp" corrigido. **Pendentes:** modelo de verificação na tela do
     canal), troca de telefone e `claim`. Decisões a confirmar: T4-1 a T4-4.
+  - **Troca de telefone pelo pedido (bloco T):** o cadastro mantém o número antigo, e a confirmação dele, até o link do
+    número novo ser confirmado na sessão do próprio cadastro ou o responsável liberar. Rotas novas:
+    `POST`/`DELETE /api/me/phone-change` (só WhatsApp; bloqueadas em personificação; passam pelo bloqueio de telefone),
+    `POST`/`DELETE /api/portal/me/phone-change` e `POST`/`DELETE /api/customers/:id/phone-change` (`customer:update`).
+    **Mudança de comportamento:** `PATCH /api/customers/:id` e `PATCH /api/portal/me` com outro número deixam de
+    gravá-lo e abrem a troca (o do portal devolve `phoneChangePending`; a ficha segue com o antigo); a edição do telefone
+    de uma conta em `/admin/usuarios/:id` passa pelo pedido, liberado à mão pelo proprietário na mesma transação; com o
+    telefone pendente, o portal corrige o número pela troca, e `PATCH /api/portal/me` fica bloqueado. A leitura ganhou
+    `change` (`GET /api/me/phone-verification` e cada responsável do portal), `phoneChange` (`GET /api/customers/:id`) e
+    `purpose` (filas). O reenvio aceita `{ purpose: "change" }`. Decisões a confirmar: TC-1 a TC-10.
+  - **Migração da troca:** migration `0038` (`purpose`, `phone`, `requested_by_type` e `requested_by_id` em
+    `phone_verification`, índices de pedido aberto por finalidade e uma troca aberta por cadastro). Integração que
+    trocava o telefone da ficha pelo `PATCH` precisa confirmar a troca (link na sessão do portal da ficha, ou liberação do
+    owner em `/app/clientes`).
   - **Migração da T4:** nenhuma.
   - **Migração da T3:** nenhuma migration. Variável nova `PHONE_VERIFICATION_REQUIRED`, padrão **`true`**: quem tem o
     telefone pendente deixa de usar o sistema até confirmar. Antes de atualizar um projeto derivado, (1) promova o

@@ -116,6 +116,7 @@ describe("requirePortalAuth: telefone pendente (T3)", () => {
     routes.get("/api/portal/customer", guard, (c) => c.json({ ok: true }));
     routes.get("/api/portal/me/phone-verification", guard, (c) => c.json({ ok: true }));
     routes.patch("/api/portal/me", guard, (c) => c.json({ ok: true }));
+    routes.post("/api/portal/me/phone-change", guard, (c) => c.json({ ok: true }));
     return routes;
   }
 
@@ -130,8 +131,10 @@ describe("requirePortalAuth: telefone pendente (T3)", () => {
     expect(blocked.status).toBe(403);
     expect(await blocked.json()).toMatchObject({ code: "PHONE_UNVERIFIED" });
     expect((await call(routes, "/api/portal/me/phone-verification")).status).toBe(200);
-    expect((await call(routes, "/api/portal/me", "PATCH")).status).toBe(200);
-    expect(gate).toHaveBeenCalledOnce();
+    // Corrigir o número é pela troca; editar o perfil (`PATCH`) não passa mais.
+    expect((await call(routes, "/api/portal/me/phone-change", "POST")).status).toBe(200);
+    expect((await call(routes, "/api/portal/me", "PATCH")).status).toBe(403);
+    expect(gate).toHaveBeenCalledTimes(2);
   });
 
   it("o e-mail vem antes do telefone", async () => {

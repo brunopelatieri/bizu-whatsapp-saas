@@ -83,8 +83,11 @@ function StatusIcon({ status }: { status: Status }) {
   return <Clock className="size-4 shrink-0 text-muted-foreground" />;
 }
 
-/** Corrigir o número no portal: a rota de sempre (`PATCH /api/portal/me`), com o nome da sessão. */
-function PortalPhoneFix({ name, onSaved }: { name: string; onSaved: () => Promise<void> }) {
+/**
+ * Corrigir o número no portal: a troca pelo pedido (`POST /api/portal/me/phone-change`). A ficha
+ * fica com o número antigo até o link do número novo ser confirmado aqui, nesta sessão.
+ */
+function PortalPhoneFix({ onSaved }: { onSaved: () => Promise<void> }) {
   const [phone, setPhone] = useState("");
   const [saving, setSaving] = useState(false);
   const valid = phoneSchema.safeParse(phone).success;
@@ -92,11 +95,11 @@ function PortalPhoneFix({ name, onSaved }: { name: string; onSaved: () => Promis
   async function save() {
     setSaving(true);
     try {
-      await apiFetch("/api/portal/me", {
-        method: "PATCH",
-        body: JSON.stringify({ name, phone }),
+      await apiFetch("/api/portal/me/phone-change", {
+        method: "POST",
+        body: JSON.stringify({ phone }),
       });
-      toast.success("Número atualizado. Enviaremos o link para ele.");
+      toast.success("Pedido registrado. Enviaremos o link para o número novo.");
       setPhone("");
       await onSaved();
     } catch (error) {
@@ -271,7 +274,7 @@ export function PhoneVerificationPanel({
       )}
 
       {area === "portal" && portalName ? (
-        <PortalPhoneFix name={portalName} onSaved={reload} />
+        <PortalPhoneFix onSaved={reload} />
       ) : null}
       {area === "team" ? (
         <p className="border-t border-border pt-4 text-muted-foreground">

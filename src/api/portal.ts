@@ -21,6 +21,7 @@ import {
 import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
 import {
   confirmRateLimit,
+  phoneChangeRateLimit,
   optionalJson,
   resendRateLimit,
   tooManyLinks,
@@ -44,7 +45,9 @@ import {
   requestPortalSignup,
 } from "@/lib/portal/login";
 import {
+  cancelPortalPhoneChange,
   hasPortalPassword,
+  requestPortalPhoneChange,
   setPortalPassword,
   updatePortalProfile,
 } from "@/lib/portal/profile";
@@ -61,9 +64,11 @@ import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { acceptConsentSchema } from "@/lib/schemas/lgpd";
 import {
+  phoneChangeSchema,
   phoneVerificationTokenSchema,
   portalPhoneVerificationResendSchema,
 } from "@/lib/schemas/phone";
+import { phoneValues } from "@/lib/phone/columns";
 import { requestPhoneVerificationSend, sendLimitReached } from "@/lib/phone/dispatch";
 import {
   confirmPhoneVerificationByToken,
@@ -401,7 +406,13 @@ portalRoutes.get(
       pending: first
         ? { status: first.view.status, phoneHint: first.phoneHint }
         : null,
-      responsibles: records.map(({ view, phoneHint, enterable }) => ({ ...view, phoneHint, enterable })),
+      // `change`: a troca de número aberta da ficha (o número e a situação acima são do antigo).
+      responsibles: records.map(({ view, phoneHint, enterable, change }) => ({
+        ...view,
+        phoneHint,
+        enterable,
+        change,
+      })),
     });
   },
 );
@@ -446,7 +457,9 @@ portalRoutes.post(
     if (!body.ok) return body.response;
 
     const tenantId = body.data.tenantId ?? c.get("portalSession").activeTenantId;
-    const target = tenantId ? await portalResendTarget(c.get("portalUser").id, tenantId) : null;
+    const target = tenantId
+      ? await portalResendTarget(c.get("portalUser").id, tenantId, body.data.purpose)
+      : null;
     if (target && (await sendLimitReached({ type: "customer", id: target.customerId }))) {
       return tooManyLinks(c);
     }
@@ -469,14 +482,60 @@ portalRoutes.patch(
   requirePortalTenant,
   zValidator("json", portalProfileSchema, validationError),
   async (c) => {
-    const user = await updatePortalProfile(
+    // O número diferente do da ficha abre a troca pelo pedido (`phoneChangePending`); a ficha fica
+    // com o antigo até a confirmação.
+    const { user, phoneChangePending } = await updatePortalProfile(
       c.get("portalUser").id,
       c.get("customer"),
       c.req.valid("json"),
       clientKey(c),
     );
 
-    return c.json({ user });
+    return c.json({ user, phoneChangePending });
+  },
+);
+
+/**
+ * Troca do número da ficha da organização ativa (bloco T, "Contratos"). A ficha mantém o número
+ * antigo até o link do número novo ser confirmado na sessão desta pessoa (ou o owner liberar). A
+ * resposta é 202 esteja o número livre ou não: dizer que ele é de outro cliente seria um oráculo.
+ * Pedir de novo o mesmo número reenvia o link. Liberada com o telefone pendente: é como a pessoa
+ * corrige um número errado (`src/api/phone-gate.ts`).
+ */
+portalRoutes.post(
+  "/api/portal/me/phone-change",
+  authRateLimit,
+  requirePortalAuth,
+  requirePortalTenant,
+  phoneChangeRateLimit(
+    "portal-phone-change",
+    (c) => (c as Context<PortalTenantEnv>).get("portalUser").id,
+  ),
+  zValidator("json", phoneChangeSchema, validationError),
+  async (c) => {
+    const current = c.get("customer");
+    const subject = { type: "customer", id: current.id } as const;
+    const opened = await requestPortalPhoneChange(
+      c.get("portalUser").id,
+      current,
+      phoneValues(c.req.valid("json").phone),
+    );
+    if (opened.reason === "resend" && (await sendLimitReached(subject))) return tooManyLinks(c);
+    await requestPhoneVerificationSend(opened.requestId, subject, opened.reason);
+
+    return c.json({ ok: true }, 202);
+  },
+);
+
+/** Desiste da troca aberta da ficha da organização ativa. Sem troca aberta, também 204. */
+portalRoutes.delete(
+  "/api/portal/me/phone-change",
+  authRateLimit,
+  requirePortalAuth,
+  requirePortalTenant,
+  async (c) => {
+    await cancelPortalPhoneChange(c.get("portalUser").id, c.get("customer"));
+    return c.body(null, 204);
   },
 );
 

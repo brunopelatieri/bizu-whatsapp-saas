@@ -270,8 +270,13 @@ async function plan(job: PhoneVerifyJob, now: Date): Promise<Plan> {
       }
       if (request.subjectType === "user") {
         // D-12: a plataforma só manda o link sozinha a quem responde a ela. O membro comum
-        // recebe o da organização e pede o da plataforma quando quiser ("Reenviar").
-        if (!request.tenantId && !(await answersToPlatform(tx, request.subjectId))) {
+        // recebe o da organização e pede o da plataforma quando quiser ("Reenviar"). A troca de
+        // número não espera: foi pedida (pela pessoa, ou pelo proprietário no /admin).
+        if (
+          request.purpose === "signup" &&
+          !request.tenantId &&
+          !(await answersToPlatform(tx, request.subjectId))
+        ) {
           return { kind: "held" };
         }
         // Restrição (a): um link por número. O da plataforma sai primeiro; o da organização só
@@ -289,6 +294,17 @@ async function plan(job: PhoneVerifyJob, now: Date): Promise<Plan> {
         outcome: "limited",
       });
       return { kind: "limited" };
+    }
+
+    // A troca de número da ficha só se confirma pelo link na sessão do portal da ficha: sem conta no
+    // portal, o link não serviria a ninguém e seria só uma mensagem fria ao número novo. Vai direto
+    // para a liberação do owner (que é avisado).
+    if (request.subjectType === "customer" && request.purpose === "change") {
+      const [record] = await tx
+        .select({ portalUserId: customer.portalUserId })
+        .from(customer)
+        .where(eq(customer.id, request.subjectId));
+      if (!record?.portalUserId) return { kind: "go", request, candidates: [] };
     }
 
     const candidates = startingAt(await candidatesFor(tx, request), request.channelId, job.reason);
@@ -393,6 +409,7 @@ async function fallToManual(requestId: string, now: Date): Promise<DeliveryOutco
     const inQueue =
       request.tenantId !== null ||
       request.subjectType === "customer" ||
+      request.purpose === "change" ||
       (await answersToPlatform(tx, request.subjectId));
     const notify = inQueue && request.manualNotifiedAt === null;
 

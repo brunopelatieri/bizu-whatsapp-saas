@@ -267,6 +267,13 @@
       "when": 1794594859062,
       "tag": "0037_envio_verificacao_telefone",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794618085755,
+      "tag": "0038_troca_telefone",
+      "breakpoints": true
     }
   ]
 }

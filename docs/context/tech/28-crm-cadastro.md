@@ -473,8 +473,11 @@ T3-9 na SPEC ("T3: o que foi feito").
   método e pelo caminho **da requisição** (barra a mais não casa). Equipe: `GET /api/me/phone-verification`,
   `POST /api/me/phone-verification/resend`, `POST /api/me/phone-verification/confirm`,
   `POST /api/tenant/active`, `POST /api/invitations/:id/accept`, `POST /api/admin/stop-impersonating`.
+  `POST` e `DELETE /api/me/phone-change` (corrigir o número pela troca).
   Portal: `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
-  `PATCH /api/portal/me` (corrigir o número), `POST /api/portal/active-tenant`. Sair é do Better Auth.
+  `POST` e `DELETE /api/portal/me/phone-change` (corrigir o número pela troca),
+  `POST /api/portal/active-tenant`. `PATCH /api/portal/me` (nome e telefone) saiu da lista quando a
+  troca ganhou rota própria. Sair é do Better Auth.
   **Exclusão da própria conta (LGPD, T3-7):** `DELETE /api/me`, `GET /api/me/deletion`,
   `POST /api/me/deletion/cancel` e, no portal, `DELETE /api/portal/me`,
   `POST /api/portal/me/deletion/confirm`, `GET /api/portal/me/deletion` (com `needsPassword`) e
@@ -491,9 +494,10 @@ T3-9 na SPEC ("T3: o que foi feito").
   `PortalLayout` mostram só ela quando `/api/me` ou `/api/portal/me` responde `PHONE_UNVERIFIED`
   (`phoneBlocked` em `useAuth` e `usePortalAuth`). Mostra cada responsável de
   `GET …/phone-verification` (link enviado, aguardando liberação de quem, nenhum link), reenviar por
-  responsável, "Usar esta organização" onde o número já vale, a correção do número no portal, "Já
-  confirmei" e "Sair". A conta da equipe não tem rota para corrigir o próprio número (é o
-  `…/phone-change`, pendente): a tela manda à plataforma, que corrige em `/admin/usuarios/:id`.
+  responsável, "Usar esta organização" onde o número já vale, a correção do número no portal (pela
+  troca, `POST /api/portal/me/phone-change`), "Já confirmei" e "Sair". A rota da equipe para corrigir o
+  próprio número existe (`POST /api/me/phone-change`), mas a tela ainda manda à plataforma: o botão é
+  da fase de telas.
   Qualquer 403 `PHONE_UNVERIFIED` no meio da sessão faz `apiFetch` emitir `bizu:phone-unverified`, e
   o provider relê a conta. As páginas de login e de escolha do portal e `/portal/verificar-telefone`
   tratam a sessão sem `/api/portal/me`.
@@ -531,10 +535,62 @@ rotas da T2a; nada de servidor mudou. Decisões a confirmar: T4-1 a T4-4 na SPEC
   `errorMessage` para isso.
 - **Modelo de verificação** (Cloud): `VerificationTemplateCard` em "Gerenciar" do número
   (`tech/29-canais-whatsapp.md`); a leitura do canal passou a trazer `verificationTemplate`.
-- **Fica de fora:** troca de telefone e `claim` (rotas pendentes) e a ligação da ficha à equipe. Lista completa na SPEC.
+- **Fica de fora:** a tela da troca de telefone (as rotas já existem, seção seguinte), o `claim` e a ligação da
+  ficha à equipe. Lista completa na SPEC. A fila agora traz `purpose` (`signup` ou `change`); a tela ainda não
+  distingue a troca.
+
+## Troca de telefone pelo pedido (pré-produção)
+
+Código: `src/lib/phone/requests.ts` (seção "Troca de número"), `src/api/phone-verification.ts`
+(`/api/me/phone-change`), `src/api/portal.ts` e `src/lib/portal/profile.ts` (portal),
+`src/api/customers.ts` e `src/lib/tenant/customers.ts` (equipe sobre a ficha), `src/lib/admin/people.ts`
+(`/admin`), `src/lib/phone/delivery.ts` (envio). Migration `0038_troca_telefone`. Decisões a confirmar:
+TC-1 a TC-10 na SPEC ("Troca de telefone pelo pedido: o que foi feito").
+
+- **Regra:** o cadastro mantém o número antigo, **e a confirmação dele**, até a troca se confirmar. O
+  número novo vive só no pedido (`phone_verification` com `purpose = 'change'`, `phone` digitado,
+  `requested_by_type`/`requested_by_id`). Uma troca aberta por cadastro (índice
+  `phone_verification_open_change_idx`); a troca convive com o pedido do número atual (os índices de
+  pedido aberto incluem `purpose`). Quem chama sempre entra por `requests.ts`.
+- **Rotas:** `POST`/`DELETE /api/me/phone-change` (`userPhoneChangeSchema`, só WhatsApp, bloqueadas em
+  personificação), `POST`/`DELETE /api/portal/me/phone-change` (ficha da organização ativa) e
+  `POST`/`DELETE /api/customers/:id/phone-change` (`customer:update`). 202 / 204. Pedir de novo o mesmo
+  número reenvia; outro número substitui; o número que o cadastro já tem é 400 `PHONE_UNCHANGED`. 5 pedidos
+  por hora por cadastro. `PATCH /api/customers/:id` e `PATCH /api/portal/me` abrem a troca quando o número
+  muda (`phone_key` diferente) e gravam direto quando é o mesmo número escrito de outro jeito.
+- **Responsável:** ficha de cliente, a organização dela. Conta: a plataforma para quem responde a ela e
+  para quem já tem o número confirmado no sistema; a organização em uso (ou a primeira) para o membro comum
+  sem essa confirmação. Quem vira owner tem a troca da organização movida para a plataforma; quem sai da
+  organização responsável perde a troca.
+- **Unicidade:** a equipe recebe 409 `PHONE_IN_USE` ao pedir a troca da ficha para o número de outro
+  cliente. A conta e a pessoa do portal recebem sempre 202 (o pedido não é oráculo). Na confirmação, sob a
+  trava do número (conta) ou da ficha: conta pelo link da plataforma fica com o número e quem o tinha volta
+  a pendente (`demote`, como no cadastro); pelo link da organização ou à mão, 409; ficha, 409 (o `claim` não
+  existe ainda), com o índice único como rede (`phoneInUseOnUnique`).
+- **Confirmação** (`confirmUserChange`, `confirmCustomerChange`): grava o número do pedido com o estado do
+  responsável (conta pela plataforma: `whatsapp`/`manual`; conta pela organização: pendente no sistema e
+  `phone_tenant_vouch` só nela; ficha: `whatsapp` pelo link, `manual` pelo owner), fecha os outros pedidos
+  abertos (eram do número antigo), apaga as liberações de organização da conta e reabre o que a conta ainda
+  deve ao número novo (plataforma e outras organizações; envio depois do commit). A ligação
+  `customer.user_id` fica (é por id); a ficha que troca pelo link liga a pessoa da equipe e o contato do
+  número novo, como na confirmação do cadastro. **O contato e as conversas do número antigo continuam na
+  ficha** (P1). Na troca pedida pela pessoa do portal, a conta do portal recebe o número, só declarado.
+  Auditoria: `phone.change_requested`, `phone.change_canceled` e `phone.verified` com `purpose`.
+- **Envio:** o link sai ao número **novo**, pelo canal do responsável; a troca não espera a D-12. Ficha sem
+  conta no portal não recebe link (ninguém o confirmaria): vai à liberação do owner, que é avisado. A troca
+  da plataforma aparece na fila do proprietário também para o membro comum.
+- **`/admin`:** a edição do telefone de uma conta abre a troca e o proprietário a libera à mão na mesma
+  transação (`changeUserPhoneByPlatform`, `manual`; 409 se outra conta do grupo tem o número). A edição da
+  pessoa do portal continua gravando direto (`manual`), porque a conta do portal não tem pedido.
+- **Leitura:** `GET /api/me/phone-verification` → `change` (`status`, `phoneHint` do número novo,
+  `responsible`, `tenantId`, `tenantName`, `requestedAt`); portal → `responsibles[].change`;
+  `GET /api/customers/:id` → `phoneChange`; filas → `purpose`. Reenviar a troca:
+  `POST …/phone-verification/resend` com `{ purpose: "change" }`.
+- **Testes:** `tests/db/phone-change.test.ts` e o bloco "troca de número" de `tests/db/phone-delivery.test.ts`.
 
 ## O que a SPEC pede e ainda não existe
 
-Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe: o telefone
-da equipe entra no `/cadastro` e é editado pelo proprietário da plataforma em `/admin/usuarios/:id`.
+Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe (bloco F, F2): o
+telefone da equipe entra no `/cadastro`, a troca pela própria pessoa já tem rota
+(`POST /api/me/phone-change`) e o proprietário da plataforma edita em `/admin/usuarios/:id`.
 Filtro por campo adicional segue fora (decisão da SPEC).

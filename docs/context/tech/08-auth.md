@@ -213,6 +213,13 @@ pelo link é `POST /api/me/phone-verification/confirm`, só na sessão da própr
 no corpo (nunca em GET nem em rota pública) e bloqueada em personificação. Detalhe em
 `tech/28-crm-cadastro.md`, "Telefone verificado e único" e "Pedido de verificação e liberação".
 
+**Troca do número** (`POST`/`DELETE /api/me/phone-change`, bloqueadas em personificação): a conta
+mantém o número antigo, e a confirmação dele, até o link do número novo ser confirmado na sessão dela
+ou o responsável liberar. O responsável é a plataforma para quem responde a ela ou já tem o número
+confirmado no sistema; senão, a organização em uso. A edição do telefone em `/admin/usuarios/:id` abre a
+troca e o proprietário a libera à mão na mesma transação. Detalhe em `tech/28-crm-cadastro.md`, "Troca de
+telefone pelo pedido".
+
 O link que chega ao WhatsApp abre `/verificar-telefone?token=…` (rota de auth standalone, sem
 `loader`, `referrer: no-referrer`): sem sessão leva a `/login?next=…` e volta; com sessão, um
 botão faz o `POST`. Token de ficha de cliente (`c.`) segue para `/portal/verificar-telefone`, que
@@ -224,8 +231,9 @@ confirmação" em `tech/28-crm-cadastro.md`.
 
 **Bloqueio enquanto pendente (T3, `PHONE_VERIFICATION_REQUIRED`, padrão `true`):** a sessão existe
 (reenviar e confirmar exigem saber quem é), mas `requireAuth` responde 403 `PHONE_UNVERIFIED` a tudo,
-menos à lista fechada de `src/api/phone-gate.ts`: ler o próprio estado, reenviar, confirmar, trocar a
-organização ativa, aceitar convite, encerrar a personificação e pedir a exclusão da própria conta
+menos à lista fechada de `src/api/phone-gate.ts`: ler o próprio estado, reenviar, confirmar, corrigir o
+número pela troca (`POST`/`DELETE /api/me/phone-change`), trocar a organização ativa, aceitar convite,
+encerrar a personificação e pedir a exclusão da própria conta
 (LGPD: `DELETE /api/me`, `GET /api/me/deletion`, `POST /api/me/deletion/cancel`, com a senha de
 sempre). Sair (`/api/auth/sign-out`) é do Better Auth e não passa por `requireAuth`. O predicado (`src/lib/phone/gate.ts`) é o da T2a: a conta
 confirmada no sistema passa em tudo; o membro comum passa também na organização **ativa** que o

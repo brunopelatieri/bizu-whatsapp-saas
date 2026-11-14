@@ -31,8 +31,10 @@ impersonation_grant       consentimento do owner: expires_at, revoked_at, used_b
 tenant_payment_credential encrypted_secret bytea, key_version, sem tela (RLS)
 rate_limit_bucket         key em hash, window_start, count (RATE_LIMIT_STORE=postgres)
 login_throttle            falhas de login por e-mail (HMAC), janela e locked_until (LOGIN_*; sem RLS)
-phone_verification        pedido de confirmação de telefone: um aberto por (cadastro, responsável);
-                          tenant_id nulo = plataforma; token só em hash (scopedPolicy, RLS forçado)
+phone_verification        pedido de confirmação de telefone: um aberto por (cadastro, responsável,
+                          purpose); purpose signup ou change (troca: número novo no pedido, uma
+                          aberta por cadastro); tenant_id nulo = plataforma; token só em hash
+                          (scopedPolicy, RLS forçado)
 phone_tenant_vouch        liberação de uma organização para a conta de um membro, por
                           (user_id, tenant_id), presa à phone_key (tenantPolicy, RLS forçado)
 session                   token unique, user_id, expires_at, impersonated_by,

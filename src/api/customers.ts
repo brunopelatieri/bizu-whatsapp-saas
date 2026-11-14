@@ -24,12 +24,15 @@ import {
   customersQuerySchema,
   updateCustomerSchema,
 } from "@/lib/schemas/customer";
+import { phoneChangeSchema } from "@/lib/schemas/phone";
 import {
+  cancelCustomerPhoneChangeByTeam,
   createCustomer,
   deleteCustomer,
   getCustomer,
   inviteCustomer,
   listCustomers,
+  requestCustomerPhoneChange,
   updateCustomer,
 } from "@/lib/tenant/customers";
 
@@ -108,6 +111,48 @@ customerRoutes.patch(
     );
 
     return c.json({ customer });
+  },
+);
+
+/** Pedidos de troca de número por hora, por ficha (o job também limita os links por ficha). */
+const phoneChangeRateLimit = rateLimit({
+  name: "customer-phone-change",
+  limit: 5,
+  windowMs: 60 * MINUTE,
+  key: (c) => c.req.param("id") ?? "",
+});
+
+/**
+ * Troca do número da ficha (bloco T, P1): a ficha mantém o número antigo até o link do número novo
+ * ser confirmado na sessão do portal dela, ou o owner liberar. Número de outro cliente: 409, como no
+ * cadastro. Pedir de novo o mesmo número reenvia o link.
+ */
+customerRoutes.post(
+  "/api/customers/:id/phone-change",
+  requirePermission("customer", "update"),
+  validId,
+  phoneChangeRateLimit,
+  zValidator("json", phoneChangeSchema, validationError),
+  async (c) => {
+    await requestCustomerPhoneChange(
+      c.get("tenant").id,
+      c.req.valid("param").id,
+      c.req.valid("json").phone,
+      { ...teamActor(c), canRead: c.get("permissions").includes("customer:read") },
+    );
+
+    return c.json({ ok: true }, 202);
+  },
+);
+
+/** Desiste da troca aberta. Sem troca aberta, também 204. */
+customerRoutes.delete(
+  "/api/customers/:id/phone-change",
+  requirePermission("customer", "update"),
+  validId,
+  async (c) => {
+    await cancelCustomerPhoneChangeByTeam(c.get("tenant").id, c.req.valid("param").id, teamActor(c));
+    return c.body(null, 204);
   },
 );
 

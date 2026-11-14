@@ -40,8 +40,11 @@
   manual pelos números do responsável do pedido, falha do webhook passando ao próximo número, D-12,
   um link por número, reenvio com limite, modelo de verificação da Cloud com a URL conferida,
   página `/verificar-telefone`, confirmação do lead do portal, e-mails ao responsável e a quem
-  perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficaram de fora da T2b
-  e estão pendentes: a troca de telefone com pedido (`…/phone-change`) e o `claim` do portal (D-1).
+  perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficou de fora da T2b e
+  segue pendente o `claim` do portal (D-1). **Troca de telefone pelo pedido** implementada no servidor
+  (`…/phone-change` na equipe, no portal e na ficha pela equipe; `PATCH` e `/admin` passam pelo pedido; o
+  cadastro mantém o número antigo até a confirmação; migration `0038`), com as decisões TC-1 a TC-10 a
+  confirmar; a tela da troca fica para a fase de telas.
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
@@ -49,8 +52,8 @@
   confirmar pelo proprietário (SPEC, "T3: o que foi feito"). **T4 parcial**: telas das filas
   de liberação em `/admin/usuarios` (aba "Telefones", só o proprietário), `/app/equipe` e `/app/clientes`, modelo de
   verificação na tela do canal Cloud (a leitura do canal traz `verificationTemplate`) e acertos de texto da tela da
-  T3; roteiro manual com número real na SPEC. Pendentes: troca de telefone, `claim` e ligação da ficha à equipe (SPEC, "T4: o que
-  foi feito"). Os blocos S, B, T, F, E, L e R
+  T3; roteiro manual com número real na SPEC. Pendentes: a tela da troca de telefone, `claim` e ligação da ficha à
+  equipe (SPEC, "T4: o que foi feito"). Os blocos S, B, T, F, E, L e R
   seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09

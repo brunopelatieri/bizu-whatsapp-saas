@@ -38,7 +38,7 @@ import {
   seedQrChannel,
   tenantScope,
 } from "./channels-helpers";
-import { uniquePhone } from "./phone-helpers";
+import { makeCustomerPhonePending, uniquePhone } from "./phone-helpers";
 import { cleanUpPortal, createCustomer, inviteAndEnter } from "./portal-helpers";
 import {
   addMember,
@@ -156,12 +156,11 @@ async function giveTemplate(channelId: string, tenantId: string | null, url = VE
   return name;
 }
 
-/** Cliente com conta no portal que trocou o próprio telefone: ficha pendente e pedido aberto. */
+/** Cliente com conta no portal e número só declarado: ficha pendente e pedido aberto. */
 async function pendingPortalCustomer(boss: TestUser, phone = uniquePhone()) {
   const customer = await createCustomer(boss);
   const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
-  const changed = await call("PATCH", "/api/portal/me", { cookie, body: { name: "Cliente", phone } });
-  expect(changed.status).toBe(200);
+  await makeCustomerPhonePending(customer.id, phone);
   await waitForBackgroundTasks();
   return { customer, cookie, phone };
 }
@@ -393,6 +392,95 @@ describe("cascata Cloud → QR Code → liberação à mão", () => {
     expect(await drain()).toEqual(["manual"]);
     expect(sent).toEqual([]);
     expect((await openRequest(customer.id, tenant.id)).status).toBe("awaiting_manual");
+  });
+});
+
+describe("troca de número: o link vai ao número novo", () => {
+  it("troca pedida pela equipe numa ficha com portal: o link sai ao número novo e só confirma na sessão do portal", async () => {
+    const { boss, tenant, channels } = await tenantWith(["qr"]);
+    const customer = await createCustomer(boss);
+    const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
+    await drain();
+    sent.length = 0;
+
+    const next = uniquePhone();
+    const asked = await call("POST", `/api/customers/${customer.id}/phone-change`, {
+      cookie: boss.cookie,
+      body: { phone: next },
+    });
+    expect(asked.status).toBe(202);
+    expect(await drain()).toEqual(["sent"]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ channelId: channels.qr, to: phoneValues(next).phoneNormalized });
+    const token = tokenIn(sent[0]?.payload ?? "") as string;
+    expect(token).toMatch(/^c\./);
+
+    // A equipe, que pediu, não confirma; a pessoa do portal, sim.
+    expect(
+      (await call("POST", "/api/me/phone-verification/confirm", { cookie: boss.cookie, body: { token } }))
+        .status,
+    ).toBe(400);
+    const confirmed = await call("POST", "/api/portal/me/phone-verification/confirm", {
+      cookie,
+      body: { token },
+    });
+    expect(confirmed.status).toBe(200);
+    const [row] = await asPlatform(
+      owner,
+      (tx) => tx<{ phone_key: string; via: string | null; tenant_id: string }[]>`
+        select phone_key, phone_verified_via as via, tenant_id from customer where id = ${customer.id}
+      `,
+    );
+    expect(row).toMatchObject({ phone_key: phoneValues(next).phoneKey, via: "whatsapp", tenant_id: tenant.id });
+  });
+
+  it("ficha sem conta no portal: nenhum link (ninguém o confirmaria), vai à liberação do owner", async () => {
+    const { boss, tenant } = await tenantWith(["qr"]);
+    const customer = await createCustomer(boss);
+    await drain();
+
+    const asked = await call("POST", `/api/customers/${customer.id}/phone-change`, {
+      cookie: boss.cookie,
+      body: { phone: uniquePhone() },
+    });
+    expect(asked.status).toBe(202);
+    expect(await drain()).toEqual(["manual"]);
+    expect(sent).toEqual([]);
+    const [request] = await asPlatform(
+      owner,
+      (tx) => tx<{ status: string; tenant_id: string; manual_notified_at: Date | null }[]>`
+        select status, tenant_id, manual_notified_at from phone_verification
+        where subject_id = ${customer.id} and purpose = 'change'
+      `,
+    );
+    expect(request).toMatchObject({ status: "awaiting_manual", tenant_id: tenant.id });
+    expect(request?.manual_notified_at).not.toBeNull();
+  });
+
+  it("a troca da conta não espera a D-12: o membro comum confirmado no sistema recebe o link da plataforma no número novo", async () => {
+    const platformChannel = await platformQr();
+    const { tenant } = await tenantWith(["qr"]);
+    const person = await createUser(owner);
+    await addMember(owner, tenant.id, person, "member");
+    await asPlatform(
+      owner,
+      (tx) => tx`
+        update "user" set phone_verified_at = now(), phone_verified_via = 'manual' where id = ${person.id}
+      `,
+    );
+    await drain();
+    sent.length = 0;
+
+    const next = uniquePhone();
+    const asked = await call("POST", "/api/me/phone-change", {
+      cookie: person.cookie,
+      body: { phone: next },
+    });
+    expect(asked.status).toBe(202);
+    expect(await drain()).toEqual(["sent"]);
+    expect(sent.map(({ channelId, to }) => ({ channelId, to }))).toEqual([
+      { channelId: platformChannel, to: phoneValues(next).phoneNormalized },
+    ]);
   });
 });
 

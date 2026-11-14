@@ -31,7 +31,15 @@ import { purgeCustomerContacts } from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
 import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
-import { closeVerificationsOf, deleteVerificationsOf } from "@/lib/phone/requests";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import {
+  cancelCustomerPhoneChange,
+  customerPhoneChange,
+  deleteVerificationsOf,
+  type NewPhone,
+  openCustomerPhoneChange,
+  type PhoneChangeOpened,
+} from "@/lib/phone/requests";
 import { type PhoneVerifiedVia, verifiedPhone } from "@/lib/phone/verification";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 import {
@@ -203,12 +211,17 @@ export async function getCustomer(tenantId: string, customerId: string) {
       row,
       tags: await tagsOfCustomers(tx, [row.id]),
       roles: await teamRolesOf(tx, tenantId, [row.userId]),
+      phoneChange: await customerPhoneChange(tx, row.id),
     };
   });
 
   if (!found) throw notFound(NOT_FOUND);
 
-  return toCustomer(found.row, found.tags.get(found.row.id), found.roles);
+  // A troca de número em andamento: a ficha (e `phone`) segue com o número antigo até ela fechar.
+  return {
+    ...toCustomer(found.row, found.tags.get(found.row.id), found.roles),
+    phoneChange: found.phoneChange,
+  };
 }
 
 /**
@@ -296,6 +309,10 @@ export async function createCustomer(
 /**
  * Trocar o e-mail desfaz o vínculo com o portal: o endereço antigo perde o acesso, e o novo
  * só entra depois de um convite. Sair de `active` corta o acesso na hora.
+ *
+ * **Outro telefone não é gravado aqui:** abre a troca pelo pedido (P1), e a ficha segue com o número
+ * antigo até o link do número novo ser confirmado na sessão do portal da ficha ou o owner liberar.
+ * O mesmo número escrito de outro jeito (mesma `phone_key`) é gravado direto.
  */
 export async function updateCustomer(
   tenantId: string,
@@ -304,6 +321,7 @@ export async function updateCustomer(
   actor: CustomerActor,
 ) {
   let unlinkedUserId: string | null = null;
+  let opened: PhoneChangeOpened | null = null;
   const phone = patch.phone === undefined ? null : phoneOf(patch.phone);
 
   try {
@@ -324,7 +342,9 @@ export async function updateCustomer(
       if (!phone && !current.phoneKey) {
         throw new TenantRuleError(400, "PHONE_REQUIRED", "Informe o telefone do cliente.");
       }
-      if (phone && phone.phoneKey !== current.phoneKey) {
+      const phoneChanged = phone !== null && phone.phoneKey !== current.phoneKey;
+      if (phone && phoneChanged) {
+        // A equipe pode saber que o número é de outro cliente (vê a lista): 409 já no pedido.
         await assertPhoneFree(tx, tenantId, phone.phoneKey, actor, customerId);
       }
 
@@ -335,7 +355,8 @@ export async function updateCustomer(
       const status =
         patch.status ?? (emailChanged ? fallbackStatus : current.status);
 
-      const { tagIds, customFields: _customFields, ...fields } = patch;
+      // O telefone sai do `...fields`: ele só muda pelo pedido de troca (ou na mesma `phone_key`, abaixo).
+      const { tagIds, customFields: _customFields, phone: _phone, ...fields } = patch;
       // Merge por chave no mesmo `UPDATE`: `null` remove, ausente não muda. `required` vale
       // sobre o estado final, e só quando o corpo trouxe `customFields`.
       let customFieldsSet = {};
@@ -352,9 +373,7 @@ export async function updateCustomer(
         .update(customer)
         .set({
           ...fields,
-          ...(phone ?? {}),
-          // A equipe informou outro número: vale como o do cadastro (a troca com link é a T2).
-          ...(phone && phone.phoneKey !== current.phoneKey ? verifiedPhone("team") : {}),
+          ...(phone && !phoneChanged ? phone : {}),
           ...customFieldsSet,
           status,
           ...(emailChanged
@@ -366,9 +385,11 @@ export async function updateCustomer(
       if (!row) throw notFound(NOT_FOUND);
 
       if (tagIds) await replaceCustomerTags(tx, tenantId, customerId, tagIds);
-      // A equipe informou outro número, que já vale: o pedido do número antigo é encerrado.
-      if (phone && phone.phoneKey !== current.phoneKey) {
-        await closeVerificationsOf(tx, { type: "customer", id: customerId });
+      if (phone && phoneChanged) {
+        opened = await openCustomerPhoneChange(tx, tenantId, customerId, phone, {
+          type: "user",
+          id: actor.userId,
+        });
       }
 
       if (current.portalUserId && (emailChanged || status !== "active")) {
@@ -380,23 +401,90 @@ export async function updateCustomer(
         actor: { id: actor.userId },
         tenantId,
         target: { type: "customer", id: customerId },
-        metadata: { status, emailChanged },
+        metadata: { status, emailChanged, phoneChange: phoneChanged },
         ip: actor.ip,
       });
 
-      return toCustomer(
-        row,
-        (await tagsOfCustomers(tx, [row.id])).get(row.id),
-        await teamRolesOf(tx, tenantId, [row.userId]),
-      );
+      return {
+        ...toCustomer(
+          row,
+          (await tagsOfCustomers(tx, [row.id])).get(row.id),
+          await teamRolesOf(tx, tenantId, [row.userId]),
+        ),
+        phoneChange: await customerPhoneChange(tx, row.id),
+      };
     });
 
     if (unlinkedUserId) await dropOrphanPortalUser(unlinkedUserId);
+    await sendChangeLink(customerId, opened);
 
     return updated;
   } catch (error) {
     return translateUnique(error);
   }
+}
+
+/** Depois do commit: o link da troca de número da ficha (o job decide se ela tem como confirmar). */
+async function sendChangeLink(customerId: string, opened: PhoneChangeOpened | null) {
+  if (!opened) return;
+  await requestPhoneVerificationSend(
+    opened.requestId,
+    { type: "customer", id: customerId },
+    opened.reason,
+  );
+}
+
+/**
+ * `POST /api/customers/:id/phone-change`: a equipe pede a troca do número da ficha. O número novo
+ * já de outro cliente é 409 aqui (a equipe pode saber, como no cadastro). A ficha não muda: o link
+ * vai ao número novo e só confirma na sessão do portal da própria ficha; ficha sem conta no portal
+ * vai para a liberação do owner (`phone:confirm`), que vale como `manual` (não atrai conversas nem
+ * liga a ficha à pessoa da equipe com o número). Assim um colaborador não passa a ficha de um
+ * cliente para um número dele. Pedir de novo o mesmo número reenvia o link.
+ */
+export async function requestCustomerPhoneChange(
+  tenantId: string,
+  customerId: string,
+  raw: string,
+  actor: CustomerActor,
+) {
+  const phone: NewPhone = phoneOf(raw);
+
+  const opened = await withTenant(tenantId, async (tx) => {
+    const [current] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(byId(tenantId, customerId))
+      .for("update");
+    if (!current) throw notFound(NOT_FOUND);
+
+    await assertPhoneFree(tx, tenantId, phone.phoneKey, actor, customerId);
+    return openCustomerPhoneChange(tx, tenantId, customerId, phone, {
+      type: "user",
+      id: actor.userId,
+    });
+  });
+
+  await sendChangeLink(customerId, opened);
+  return opened;
+}
+
+/** `DELETE /api/customers/:id/phone-change`: desiste da troca aberta (a ficha não tinha mudado). */
+export async function cancelCustomerPhoneChangeByTeam(
+  tenantId: string,
+  customerId: string,
+  actor: CustomerActor,
+) {
+  await withTenant(tenantId, async (tx) => {
+    const [current] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(byId(tenantId, customerId))
+      .for("update");
+    if (!current) throw notFound(NOT_FOUND);
+
+    await cancelCustomerPhoneChange(tx, tenantId, customerId, { type: "user", id: actor.userId });
+  });
 }
 
 /**
