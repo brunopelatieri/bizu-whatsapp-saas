@@ -174,7 +174,7 @@ afterAll(async () => {
 
 describe("troca de número da conta da equipe", () => {
   it("a conta segue com o número antigo, confirmado, até o link do número novo ser confirmado na sessão dela", async () => {
-    const { user, key } = await confirmedOwner();
+    const { user, key, phone } = await confirmedOwner();
     const next = uniquePhone();
 
     const asked = await askChange(user.cookie, next);
@@ -195,7 +195,10 @@ describe("troca de número da conta da equipe", () => {
     expect(await overview.json()).toMatchObject({
       pending: null,
       confirmedGlobally: true,
-      phoneHint: phoneValues(key).phoneNormalized.slice(-4),
+      // Os 4 últimos dígitos do número da conta. Antes isto passava a `phone_key` por `phoneValues`,
+      // que só é telefone válido quando o número sorteado não começa com 1: o teste falhava por
+      // cerca de 2h47 a cada 25 h, conforme a hora (`uniquePhone` parte de `Date.now()`).
+      phoneHint: phone.slice(-4),
       change: { status: "awaiting_manual", phoneHint: next.slice(-4), responsible: "platform" },
     });
 
