@@ -134,8 +134,14 @@ function PhoneReleaseView({
                       className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <div className="min-w-0 space-y-1">
-                        <p className="truncate font-medium">{item.name}</p>
+                        <p className="flex flex-wrap items-center gap-2 font-medium">
+                          <span className="truncate">{item.name}</span>
+                          {item.purpose === "change" ? (
+                            <Badge variant="outline">Troca de número</Badge>
+                          ) : null}
+                        </p>
                         <p className="text-sm text-muted-foreground">
+                          {item.purpose === "change" ? "Número novo " : null}
                           <span className="break-all">{item.phone}</span> · pedido em{" "}
                           {formatWhen(item.createdAt)}
                         </p>
@@ -181,9 +187,14 @@ function PhoneReleaseView({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Liberar o telefone de {selected?.name}?</DialogTitle>
+            <DialogTitle>
+              {selected?.purpose === "change"
+                ? `Liberar a troca de telefone de ${selected.name}?`
+                : `Liberar o telefone de ${selected?.name}?`}
+            </DialogTitle>
             <DialogDescription>
-              Número <span className="break-all font-medium">{selected?.phone}</span>
+              {selected?.purpose === "change" ? "Número novo " : "Número "}
+              <span className="break-all font-medium">{selected?.phone}</span>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 text-sm">
@@ -191,6 +202,12 @@ function PhoneReleaseView({
               <strong>A liberação à mão não prova que o número é da pessoa.</strong> Só libere se
               você a conhece e confirmou o número por outro meio.
             </p>
+            {selected?.purpose === "change" ? (
+              <p className="text-muted-foreground">
+                Liberada a troca, o cadastro passa a ter o número novo no lugar do atual; até lá, o
+                número atual segue valendo.
+              </p>
+            ) : null}
             <p className="text-muted-foreground">{REACH_TEXT[reach]}</p>
             <p className="text-muted-foreground">
               Você não pode liberar o seu próprio telefone. A liberação fica registrada na
@@ -202,7 +219,11 @@ function PhoneReleaseView({
               Cancelar
             </Button>
             <Button disabled={pending} onClick={() => void confirm()}>
-              {pending ? "Liberando…" : "Liberar telefone"}
+              {pending
+                ? "Liberando…"
+                : selected?.purpose === "change"
+                  ? "Liberar a troca"
+                  : "Liberar telefone"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -230,8 +251,8 @@ export function TenantPhoneReleaseCard({ subject }: { subject: PhoneRelease["sub
       }
       description={
         subject === "user"
-          ? "Pessoas da equipe que ainda não confirmaram o WhatsApp. Se o link não chegou, você pode liberar à mão."
-          : "Clientes com conta no portal que ainda não confirmaram o WhatsApp. Se o link não chegou, você pode liberar à mão."
+          ? "Pessoas da equipe que ainda não confirmaram o WhatsApp ou pediram a troca do número. Se o link não chegou, você pode liberar à mão."
+          : "Clientes que ainda não confirmaram o WhatsApp ou tiveram a troca do número pedida (por eles ou pela equipe). Se o link não chegou, você pode liberar à mão."
       }
       reach={subject === "user" ? "team" : "customer"}
       subject={subject}
@@ -253,7 +274,7 @@ export function PlatformPhoneReleaseCard() {
   return (
     <PhoneReleaseView
       title="Telefones aguardando liberação"
-      description="Owners, equipe da plataforma e contas sem organização que não conseguiram confirmar o WhatsApp pelo link. Membros comuns são liberados pela organização deles."
+      description="Owners, equipe da plataforma e contas sem organização que não conseguiram confirmar o WhatsApp pelo link, ou que pediram a troca do número. Membros comuns são liberados pela organização deles."
       reach="platform"
       queue={queue}
       page={page}

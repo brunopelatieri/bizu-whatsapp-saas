@@ -8,6 +8,7 @@ import {
 } from "@/components/app/team/team-api";
 import { Can, useCan } from "@/components/auth/can";
 import { StartConversationButton } from "@/components/inbox/new-conversation-dialog";
+import { UserAvatar } from "@/components/profile/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,7 +64,12 @@ export function MembersTable({ members, roles }: MembersTableProps) {
           <TableBody>
             {members.map((member) => (
               <TableRow key={member.id}>
-                <TableCell className="font-medium">{member.name}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    <UserAvatar userId={member.userId} name={member.name} size="sm" />
+                    <span>{member.name}</span>
+                  </div>
+                </TableCell>
                 <TableCell className="break-all">{member.email}</TableCell>
                 <TableCell>
                   {can("member", "update") && canManage(member) ? (

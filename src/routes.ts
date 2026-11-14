@@ -49,6 +49,8 @@ export default [
       // Caixa de entrada (C3): o id da conversa é opcional na mesma rota.
       route("atendimento/:conversationId?", "routes/app.inbox.tsx"),
       route("equipe", "routes/app.team.tsx"),
+      // Perfil da própria conta (bloco F): o mesmo componente de `/admin/perfil`.
+      route("perfil", "routes/app.profile.tsx"),
       route("assinatura", "routes/app.subscription.tsx"),
       route("assinatura/faturas", "routes/app.subscription.invoices.tsx"),
       route("assinatura/retorno", "routes/app.subscription.return.tsx"),
@@ -72,6 +74,8 @@ export default [
       route("tenants", "routes/admin/tenants.tsx"),
       route("tenants/:id", "routes/admin/tenant.tsx"),
       route("usuarios", "routes/admin/users.tsx"),
+      // Perfil da própria conta da plataforma (bloco F): o mesmo componente de `/app/perfil`.
+      route("perfil", "routes/admin/profile.tsx"),
       // admin-crud C: detalhe de usuário de equipe e de pessoa do portal.
       route("usuarios/portal/:id", "routes/admin/portal-user.tsx"),
       route("usuarios/:id", "routes/admin/user.tsx"),

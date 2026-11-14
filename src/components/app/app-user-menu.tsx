@@ -1,6 +1,6 @@
-import { Link } from "react-router";
-import { ExternalLink, LogOut, Settings, ShieldCheck } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Link, useLocation } from "react-router";
+import { ExternalLink, LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,6 +39,8 @@ export function AppUserMenu({
   const displayName = getUserDisplayName(user);
   const initials = getUserInitials(user);
   const email = user?.email ?? "";
+  // O mesmo componente de perfil serve a `/app` e a `/admin`; o link fica na área em que a pessoa está.
+  const profileHref = useLocation().pathname.startsWith("/admin") ? "/admin/perfil" : "/app/perfil";
 
   const triggerButton = (
     <Button
@@ -50,6 +52,7 @@ export function AppUserMenu({
       )}
     >
       <Avatar size={collapsed ? "sm" : "default"}>
+        {user?.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
         <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
           {initials}
         </AvatarFallback>
@@ -78,6 +81,10 @@ export function AppUserMenu({
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuItem render={<Link to={profileHref} />}>
+          <UserRound />
+          Perfil
+        </DropdownMenuItem>
         <DropdownMenuItem render={<Link to="/app/configuracoes" />}>
           <Settings />
           Configurações

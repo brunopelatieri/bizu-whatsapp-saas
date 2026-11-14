@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
 import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { CustomerFormDialog } from "@/components/app/customers/customer-form-dialog";
+import { CustomerPhoneChangeCard } from "@/components/app/customers/customer-phone-change-card";
 import { CustomerStatusBadge } from "@/components/app/customers/customer-status-badge";
 import {
   type Customer,
@@ -232,6 +233,8 @@ export function CustomerDetailPage() {
             </Card>
 
             <CustomFieldsCard customer={customer} />
+
+            <CustomerPhoneChangeCard customer={customer} />
 
             <PortalAccessCard customer={customer} />
 

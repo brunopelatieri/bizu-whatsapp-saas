@@ -19,6 +19,11 @@ export type PhoneRelease = {
   status: "sent" | "awaiting_manual";
   subjectType: "user" | "customer";
   subjectId: string;
+  /**
+   * `signup`: o número do cadastro. `change`: a troca de número pedida; `phone` é então o número
+   * NOVO, e o cadastro segue com o antigo até a liberação ou o link.
+   */
+  purpose: "signup" | "change";
   phone: string;
   name: string;
   createdAt: string;

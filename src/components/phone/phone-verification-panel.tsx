@@ -1,13 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Clock, Loader2, MessageCircle, Send } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { toast } from "sonner";
-import { AuthShell, authLinkClassName } from "@/components/auth/auth-shell";
+import { AuthShell } from "@/components/auth/auth-shell";
 import {
   AccountDeletionCard,
   useDeletionStatus,
 } from "@/components/privacy/account-deletion-card";
+import { TeamPhoneChange } from "@/components/phone/team-phone-change";
+import { PortalPhoneChange } from "@/components/portal/portal-phone-change";
 import { ConfirmDeletionCard } from "@/components/privacy/confirm-deletion-card";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,9 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { PhoneField } from "@/components/ui/phone-field";
 import { apiFetch } from "@/lib/api/client";
-import { phoneSchema } from "@/lib/schemas/phone";
 import { useAuth } from "@/providers/auth-provider";
 import { usePortalAuth } from "@/providers/portal-auth-provider";
 
@@ -81,50 +81,6 @@ function StatusIcon({ status }: { status: Status }) {
   if (status === "confirmed") return <CheckCircle2 className="size-4 shrink-0 text-primary" />;
   if (status === "sent") return <MessageCircle className="size-4 shrink-0 text-primary" />;
   return <Clock className="size-4 shrink-0 text-muted-foreground" />;
-}
-
-/**
- * Corrigir o número no portal: a troca pelo pedido (`POST /api/portal/me/phone-change`). A ficha
- * fica com o número antigo até o link do número novo ser confirmado aqui, nesta sessão.
- */
-function PortalPhoneFix({ onSaved }: { onSaved: () => Promise<void> }) {
-  const [phone, setPhone] = useState("");
-  const [saving, setSaving] = useState(false);
-  const valid = phoneSchema.safeParse(phone).success;
-
-  async function save() {
-    setSaving(true);
-    try {
-      await apiFetch("/api/portal/me/phone-change", {
-        method: "POST",
-        body: JSON.stringify({ phone }),
-      });
-      toast.success("Pedido registrado. Enviaremos o link para o número novo.");
-      setPhone("");
-      await onSaved();
-    } catch (error) {
-      toast.error(message(error, "Não foi possível salvar o número."));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="grid gap-2 border-t border-border pt-4">
-      <p className="text-sm font-medium">Número errado?</p>
-      <PhoneField value={phone} onChange={setPhone} name="phone" />
-      <Button
-        type="button"
-        variant="outline"
-        className="w-fit"
-        disabled={!valid || saving}
-        onClick={() => void save()}
-      >
-        {saving ? <Loader2 className="animate-spin" /> : null}
-        Corrigir o número
-      </Button>
-    </div>
-  );
 }
 
 export function PhoneVerificationPanel({
@@ -273,17 +229,21 @@ export function PhoneVerificationPanel({
         </ul>
       )}
 
+      {/* Corrigir o número é pedir a troca: a conta mantém o número atual até o novo ser confirmado. */}
       {area === "portal" && portalName ? (
-        <PortalPhoneFix onSaved={reload} />
+        <div className="grid gap-2 border-t border-border pt-4">
+          <p className="font-medium">Número errado?</p>
+          <PortalPhoneChange
+            current={hint ? `WhatsApp terminado em ${hint}` : "não informado"}
+            onChanged={onChanged}
+          />
+        </div>
       ) : null}
       {area === "team" ? (
-        <p className="border-t border-border pt-4 text-muted-foreground">
-          Número errado? A correção do telefone da conta é feita pela plataforma:{" "}
-          <Link to="/contato" className={authLinkClassName}>
-            fale conosco
-          </Link>
-          .
-        </p>
+        <div className="grid gap-2 border-t border-border pt-4">
+          <p className="font-medium">Número errado?</p>
+          <TeamPhoneChange onChanged={onChanged} />
+        </div>
       ) : null}
 
       <Button type="button" variant="secondary" className="w-fit" onClick={() => void reload()}>

@@ -591,9 +591,18 @@ TC-1 a TC-10 na SPEC ("Troca de telefone pelo pedido: o que foi feito").
   `POST …/phone-verification/resend` com `{ purpose: "change" }`.
 - **Testes:** `tests/db/phone-change.test.ts` e o bloco "troca de número" de `tests/db/phone-delivery.test.ts`.
 
+### Telas da troca (F2, 2026-11-14)
+
+Só tela, sobre as rotas acima: `PhoneChangeSection` (`src/components/phone/phone-change-section.tsx`, textos e erros em
+`phone-change-api.ts`) serve ao Perfil da equipe e a "Confirme seu WhatsApp" (`team-phone-change.tsx`, chave
+`["phone-verification","team"]`, a mesma do painel), ao portal (`src/components/portal/portal-phone-change.tsx`) e à ficha
+(`src/components/app/customers/customer-phone-change-card.tsx`). A "Confirme seu WhatsApp" da equipe deixou de mandar
+falar com a plataforma. As filas (`phone-release-card.tsx`) distinguem `purpose = change` ("Troca de número", "Número
+novo", "Liberar a troca"). Decisões F2-1 a F2-8 a confirmar na SPEC ("F2 e telas da troca: o que foi feito").
+
 ## O que a SPEC pede e ainda não existe
 
-Nada do `crm-cadastro`: o programa fecha com a A4. Não existe tela de perfil da equipe (bloco F, F2): o
-telefone da equipe entra no `/cadastro`, a troca pela própria pessoa já tem rota
-(`POST /api/me/phone-change`) e o proprietário da plataforma edita em `/admin/usuarios/:id`.
+Nada do `crm-cadastro`: o programa fecha com a A4. O telefone da equipe entra no `/cadastro`, e a troca pela própria
+pessoa tem tela no Perfil (`/app/perfil`, `/admin/perfil`, bloco F, F2) e em "Confirme seu WhatsApp"; o proprietário
+da plataforma também edita em `/admin/usuarios/:id`.
 Filtro por campo adicional segue fora (decisão da SPEC).

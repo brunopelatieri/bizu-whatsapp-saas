@@ -478,7 +478,7 @@ mão").
 
 | Pendente | Por que ficou | O que destrava |
 |---|---|---|
-| Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` (e o perfil da equipe, F2) | As rotas passaram a existir em 2026-11-13 ("Troca de telefone pelo pedido") | Só a tela |
+| ~~Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` (e o perfil da equipe, F2)~~ **feito em 2026-11-14** ("F2 e telas da troca: o que foi feito") | As rotas passaram a existir em 2026-11-13 ("Troca de telefone pelo pedido") | Só a tela |
 | `claim` do portal (D-1) | Idem | O `purpose = claim` e a exclusão da ficha antiga |
 | Ligar e desligar a ficha de cliente à pessoa da equipe (D-9) | Não há rota (`customer.user_id` só é gravado pelo telefone confirmado e na exclusão) | Rota com `customer:update`, auditoria `customer.team_linked` e a restrição (a) da D-11 |
 | Filtro por tipo na fila da organização | A rota lista equipe e clientes juntos | `?subject=user\|customer` em `GET /api/phone-verifications` |
@@ -541,7 +541,7 @@ auditoria.
 
 ### Troca de telefone pelo pedido: o que foi feito (2026-11-13)
 
-Implementada no servidor, sem tela nova (a tela da troca fica para a próxima fase de telas). Detalhe em
+Implementada no servidor, sem tela nova (as telas entraram em 2026-11-14, "F2 e telas da troca: o que foi feito"). Detalhe em
 `docs/context/tech/28-crm-cadastro.md` ("Troca de telefone pelo pedido").
 
 - **Migration `0038_troca_telefone`:** `phone_verification` ganhou `purpose` (`signup` ou `change`; `claim` não
@@ -714,7 +714,8 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
 | T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
 | F1 (**implementada**; ver "F1: o que foi feito", no bloco F) | API do perfil: nome, foto (envio, troca, remoção, leitura autorizada) e LGPD | `tests/db/profile.test.ts` | Opus 5.5 + `/code-review` e `/security-review` |
-| T4 (**parcial**: filas, modelo de verificação na tela do canal e acertos de texto da T3 implementados; telas de troca de telefone, `claim` e ligação à equipe pendentes; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
+| F2 (**implementada**; ver "F2 e telas da troca: o que foi feito", no bloco F) | Página "Perfil" em `/app` e `/admin` (foto com recorte, nome, e-mail, telefone, senha), foto em membros e em quem atende, troca de telefone na ficha, em `/portal/conta` e em "Confirme seu WhatsApp", filas com `purpose = change` | `avatar-crop.test.ts`, `phone-change-api.test.ts` e conferência no navegador | Sonnet 5.5 |
+| T4 (**parcial**: filas, modelo de verificação na tela do canal, acertos de texto da T3 e telas de troca de telefone implementados; `claim` e ligação à equipe pendentes; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 
 ---
 
@@ -896,7 +897,7 @@ equipe da plataforma. Toda escrita é bloqueada em personificação.
 
 **Fases e LLM:** F1 API (nome, foto, rota de leitura, LGPD), com `tests/db` cobrindo tipo
 falso, tamanho, autorização da leitura e personificação: Opus 5.5 na leitura e no upload,
-com `/security-review`; F2 tela: Sonnet 5.5. Depende de S1 (medidor) e de T2 (troca de
+com `/security-review`; F2 tela (**feita**): Sonnet 5.5. Depende de S1 (medidor) e de T2 (troca de
 telefone).
 
 ### F1: o que foi feito (2026-11-13)
@@ -949,6 +950,51 @@ direto).
 | F1-3 | Leitura negada | 404, o mesmo de "sem foto" | 403 |
 | F1-4 | Foto e telefone pendente | Fechada (nada do perfil passa pelo bloqueio) | Deixar trocar foto e nome com o telefone pendente |
 | F1-5 | Recorte de 256 px | Fica na tela (F2); o servidor só confere tipo e tamanho, sem reprocessar a imagem | Redimensionar no servidor (biblioteca de imagem nova) |
+
+### F2 e telas da troca: o que foi feito (2026-11-14)
+
+Só tela sobre rota que já existe: nenhuma regra de servidor, permissão, migration, schema de entrada nem a lista de
+`src/api/phone-gate.ts` mudou. Detalhe em `tech/11-dashboard.md`, `tech/08-auth.md`, `tech/25-portal-clientes.md` e
+`tech/28-crm-cadastro.md`.
+
+- **Página "Perfil"** (`src/pages/profile-page.tsx`), o mesmo componente em `/app/perfil` e `/admin/perfil` (item "Perfil" no
+  menu do usuário): foto (escolher, recortar, enviar, remover), nome (2 a 120), `ChangeEmailCard`, telefone (troca pelo
+  pedido) e senha (`POST /api/auth/change-password` com o medidor do bloco S e `revokeOtherSessions`). Na personificação
+  nada é editável (a tela acompanha a API, que recusa).
+- **Foto:** diálogo de recorte (`avatar-crop-dialog.tsx`, regras puras em `src/lib/profile/avatar-crop.ts`): arrastar ou
+  setas, zoom, quadrado de 256 px em WebP (PNG se o navegador não gerar). Mensagem própria para 415, 413, 403 de
+  personificação e 429; tipo fora de PNG, JPEG e WebP e imagem ilegível são recusados antes do envio. A foto aparece no
+  menu do usuário e no topo (da própria conta), na lista de membros e em quem atende a conversa, com as iniciais como reserva.
+- **Troca de telefone** (`phone-change-section.tsx`, um componente para três usos): perfil da equipe (`/api/me/phone-change`),
+  `/portal/conta` (`/api/portal/me/phone-change`) e a ficha do cliente em `/app/clientes/:id` (cartão "Trocar o telefone",
+  `/api/customers/:id/phone-change`, `customer:update`). Mostra o número atual, a troca pendente (final do número novo,
+  link enviado ou aguardando liberação e de quem, data do pedido), reenvia (equipe e portal), cancela e substitui, e diz
+  que o número atual continua valendo até o novo ser confirmado. Na ficha o texto segue a TC-5 (vale quando o cliente
+  confirma o link no portal ou quem tem `phone:confirm` libera; liberada, a ficha volta a receber as conversas do número).
+  Mensagens próprias: `PHONE_UNCHANGED` (400), `PHONE_IN_USE` (409, com o nome da ficha que devolve a API), limite (429).
+- **Acertos:** "Confirme seu WhatsApp" da equipe troca o "fale conosco" pelo campo de corrigir o número, com a troca
+  pendente (rota que já passava pelo bloqueio); o portal usa o mesmo componente. As filas de liberação marcam
+  `purpose = change` ("Troca de número", "Número novo …", diálogo "Liberar a troca"). `/app/configuracoes` deixou o
+  `ChangeEmailCard` (agora no Perfil) e ganhou o link; em `/portal/conta` o telefone saiu do cartão "Perfil" e tem cartão próprio.
+- **Testes:** `avatar-crop.test.ts` (recorte, zoom, limites, tipos) e `phone-change-api.test.ts` (mensagens). As telas foram
+  conferidas num navegador, em desktop e em celular, com as contas do seed (a lista do que não foi aberto está no relatório
+  da fase: atendimento sem conversas no seed e aba "Telefones" do `/admin` com a troca).
+
+**Decisões da F2 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| F2-1 | Foto de outras pessoas (membros, quem atende): nenhuma rota devolve o endereço nem se há foto | A tela tenta `GET /api/avatars/:userId` sem `?v=`; sem foto o 404 cai nas iniciais (aparece como 404 no console). Trocar a foto de um colega pode levar até 5 min (`max-age`) para aparecer | Devolver `avatarUrl` em `GET /api/team`, `GET /api/inbox/assignees` e `assignedTo` (única mudança de servidor para fechar isso) |
+| F2-2 | Onde fica o `ChangeEmailCard` | Só no Perfil; `/app/configuracoes` aponta para ele | Manter nos dois lugares |
+| F2-3 | Número atual no perfil da equipe | Só o final (`phoneHint` de `GET /api/me/phone-verification`) e "ainda não confirmado" se há pedido do número atual: nenhuma rota devolve o número da conta | Devolver o número em `GET /api/me` |
+| F2-4 | Teto da foto na tela | O servidor decide (`AVATAR_MAX_KB`); a tela só impõe 20 MB para abrir a imagem escolhida e recorta antes. 413 tem mensagem própria | Expor `AVATAR_MAX_KB` em `GET /api/me` |
+| F2-5 | Portal: telefone e `PATCH /api/portal/me` | O cartão "Perfil" manda o número da ficha da organização ativa (`GET /api/portal/customer`) junto do nome, que o servidor grava direto por ser o mesmo; sem número guarda o campo | Rota só do nome |
+| F2-6 | Ficha: reenviar o link | Sem botão (a equipe não tem rota para isso): pedir de novo o mesmo número reenvia | Rota `…/phone-verification/resend` para a ficha |
+| F2-7 | Personificação na ficha do cliente | A troca fica liberada (a API de clientes não bloqueia a personificação; só o perfil bloqueia) | Travar também |
+| F2-8 | Tela de bloqueio do portal com duas fichas com troca | Mostra a primeira (a tela não conhece a organização ativa, porque `/api/portal/me` está bloqueado); em `/portal/conta` vale a ativa | Rota que devolva a ativa no bloqueio |
+
+**Não feito por falta de rota:** foto de outras pessoas com o endereço certo (F2-1); número completo da conta da equipe
+(F2-3); reenvio do link da ficha pela equipe (F2-6); filtro de fila por tipo (`?subject=`, já listado na T4).
 
 ---
 

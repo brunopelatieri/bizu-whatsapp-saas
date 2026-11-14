@@ -25,7 +25,10 @@ paths:
   - "src/components/auth/can.tsx"
   - "src/components/auth/protected-route.tsx"
   - "src/components/privacy/**"
-  - "src/components/phone/phone-release-*"
+  - "src/components/phone/**"
+  - "src/components/profile/**"
+  - "src/pages/profile-page.tsx"
+  - "src/lib/profile/avatar-crop.ts"
   - "src/components/legal/**"
 ---
 
@@ -45,6 +48,7 @@ paths:
 - `/portal/**` tem layout e sessão próprios (`PortalLayout`, `usePortalAuth()`), sem nada de `/app`: o tenant ativo vem de `GET /api/portal/me`, e o único `org` na URL é o do login. Nenhuma tela do portal consome token no GET.
 - Mantenha o layout responsivo: sidebar colapsável no desktop e `Sheet` no mobile.
 - Fila de liberação de telefone à mão (`src/components/phone/phone-release-*`): `/app/equipe` e `/app/clientes` com `<Can resource="phone" action="confirm">` (a rota que lista exige a permissão), `/admin/usuarios` (aba "Telefones") só para o proprietário; texto sempre diz que a liberação não prova a posse do número; a tela só consome rotas existentes e nunca reconstitui o número que a rota devolve.
+- Perfil da própria conta (`/app/perfil` e `/admin/perfil`, `src/pages/profile-page.tsx`, `src/components/profile/`): o mesmo componente nas duas áreas; foto recortada em 256 px no navegador, nada editável na personificação, `UserAvatar` com iniciais como reserva. Troca de telefone sempre por `PhoneChangeSection` (`src/components/phone/`): diz que o número atual vale até o novo ser confirmado e nunca reconstitui o número que a rota devolve.
 - Privacidade: `/app/configuracoes/privacidade` e a seção de `/portal/conta` usam `src/components/privacy/` e `ConsentGate`/`ConsentDialog`; sem loader no servidor, `<Can>` só esconde o botão de excluir a organização (quem decide é a API).
 
 Para entender este domínio, leia: docs/context/tech/11-dashboard.md e docs/context/tech/22-admin.md, docs/context/tech/27-lgpd-arquivos.md

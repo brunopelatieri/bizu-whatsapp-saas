@@ -95,7 +95,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     (multipart, PNG, JPEG ou WebP conferidos pelo conteúdo, até `AVATAR_MAX_KB`) e `DELETE /api/me/avatar`, servida
     por `GET /api/avatars/:userId` só para quem divide organização com a pessoa, a equipe da plataforma e a própria
     pessoa. `GET /api/me` traz `user.avatarUrl`. A exportação LGPD da equipe inclui a foto, e a exclusão da conta a
-    apaga. Escritas bloqueadas em personificação. Sem tela ainda (F2).
+    apaga. Escritas bloqueadas em personificação. A tela veio na F2 (abaixo).
+  - **Telas do perfil (F2) e da troca de telefone:** página "Perfil" em `/app/perfil` e `/admin/perfil` (mesmo componente; item
+    no menu do usuário): foto com recorte quadrado de 256 px no navegador, nome, e-mail (`ChangeEmailCard`, que saiu de
+    `/app/configuracoes`), telefone (troca pelo pedido, com troca pendente, reenvio e cancelamento) e senha (cartão sobre
+    `POST /api/auth/change-password`, com o medidor e as outras sessões encerradas); nada editável na personificação. A foto
+    aparece no menu do usuário, na lista de membros e em quem atende. A troca de telefone também está na ficha do cliente
+    (`/app/clientes/:id`), em `/portal/conta` e em "Confirme seu WhatsApp" (que deixou de mandar falar com a plataforma);
+    as filas de liberação marcam a troca de número. Só tela: nenhuma rota, permissão ou migration mudou.
   - **Migração da F1:** sem migration. Variável nova `AVATAR_MAX_KB` (padrão 1024). **`POST /api/auth/update-user` do
     Better Auth foi desligado** (404): integração que trocava nome ou `image` por ali passa a usar `PATCH /api/me` e
     `/api/me/avatar`.

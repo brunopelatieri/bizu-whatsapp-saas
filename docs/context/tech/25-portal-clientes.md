@@ -2,7 +2,7 @@
 
 - **Escopo:** Clientes e leads do tenant: `customer`, instância `portalAuth`, magic link, `/app/clientes` e `/portal/**`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-auth.md`, `spec-dados.md`, `spec-tenant-rbac.md`, `spec-rotas-api.md`, `spec-seguranca.md`
-- **Paths do código:** `src/lib/auth/portal.ts`, `src/lib/auth/portal-client.ts`, `src/lib/auth/portal-emails.ts`, `src/lib/portal/`, `src/lib/tenant/customers.ts`, `src/lib/tenant/customer-constants.ts`, `src/lib/schemas/{customer,portal}.ts`, `src/api/{portal,portal-auth,customers}.ts`, `src/db/schema/{portal-auth,customer}.ts`, `src/providers/portal-auth-provider.tsx`, `src/components/portal/`, `src/components/phone/`, `src/components/app/customers/`, `src/pages/portal/`, `src/pages/customer*-page.tsx`, `src/routes/portal/`, `src/lib/constants/portal-nav.ts`, `tests/db/{portal-auth,portal-isolation,customers}.test.ts`
+- **Paths do código:** `src/lib/auth/portal.ts`, `src/lib/auth/portal-client.ts`, `src/lib/auth/portal-emails.ts`, `src/lib/portal/`, `src/lib/tenant/customers.ts`, `src/lib/tenant/customer-constants.ts`, `src/lib/schemas/{customer,portal}.ts`, `src/api/{portal,portal-auth,customers}.ts`, `src/db/schema/{portal-auth,customer}.ts`, `src/providers/portal-auth-provider.tsx`, `src/components/portal/` (`portal-phone-change.tsx`), `src/components/app/customers/customer-phone-change-card.tsx`, `src/components/phone/`, `src/components/app/customers/`, `src/pages/portal/`, `src/pages/customer*-page.tsx`, `src/routes/portal/`, `src/lib/constants/portal-nav.ts`, `tests/db/{portal-auth,portal-isolation,customers}.test.ts`
 
 ## Modelo
 
@@ -100,6 +100,22 @@ a atual, salvo com sessão aberta há menos de 10 min: é assim que se recupera 
 por um magic link. Por isso o portal não tem reset próprio. A troca derruba as outras sessões
 e avisa por e-mail. A senha segue a política de `tech/08-auth.md` ("Política de senha"):
 o Zod da rota e, de novo, `setPortalPassword`, que grava o hash sem passar pelo Better Auth.
+
+## Troca de telefone nas telas (F2)
+
+- **`/portal/conta`:** o cartão "Telefone (WhatsApp)" (`PortalPhoneChange`, sobre `PhoneChangeSection`) mostra o número atual, pede a
+  troca (`POST /api/portal/me/phone-change`), mostra a troca pendente da ficha da organização ativa (`change` do
+  responsável em `GET /api/portal/me/phone-verification`), reenvia (`resend` com `purpose: "change"`) e cancela. O campo
+  de telefone saiu do cartão "Perfil", que só edita o nome (o `PATCH /api/portal/me` leva o número da **ficha** da
+  organização ativa, de `GET /api/portal/customer`, e não o da conta: o servidor compara com a ficha, e mandar o da conta
+  abriria uma troca que ninguém pediu quando os dois diferem; sem número da ficha nem da conta o campo continua).
+- **Tela "Confirme seu WhatsApp" do portal:** o "Número errado?" usa o mesmo componente. Como `/api/portal/me` está
+  bloqueado ali, a tela não sabe a organização ativa e mostra a primeira ficha com troca aberta.
+- **`/app/clientes/:id`:** o cartão "Trocar o telefone" (`CustomerPhoneChangeCard`, `customer:update`) pede e cancela a troca
+  da ficha (`phoneChange` de `GET /api/customers/:id`), com 409 `PHONE_IN_USE` pelo nome da ficha que tem o número. O
+  texto segue a TC-5: a ficha segue com o número atual; a troca vale quando o cliente confirma o link no portal ou
+  quem tem `phone:confirm` libera na fila de clientes (que marca "Troca de número"); liberada, a ficha volta a receber as
+  conversas do número. Sem botão de reenviar o link (não há rota para a equipe): pedir de novo o mesmo número reenvia.
 
 ## Autocadastro
 

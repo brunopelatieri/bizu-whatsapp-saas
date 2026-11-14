@@ -52,7 +52,11 @@ export function ChangeEmailCard() {
           E-mail atual: <span className="break-all text-foreground">{user?.email}</span>
         </p>
 
-        {requested ? (
+        {user?.impersonatedBy ? (
+          <p className="text-muted-foreground">
+            Durante o acesso de suporte o e-mail não pode ser trocado.
+          </p>
+        ) : requested ? (
           <p className="text-muted-foreground">
             Enviamos um link ao seu e-mail atual. Aprove a troca por lá; depois,
             confirme no novo endereço.

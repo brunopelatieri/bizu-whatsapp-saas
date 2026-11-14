@@ -70,6 +70,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 |---|---|
 | `/admin` | `pages/admin/overview-page.tsx` |
 | `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx` |
+| `/admin/perfil` | `pages/profile-page.tsx` (rota `routes/admin/profile.tsx`): a página "Perfil" da própria conta, o mesmo componente de `/app/perfil` (`tech/08-auth.md`, "Perfil da própria conta"); no menu do usuário |
 | `/admin/usuarios` | `users-page.tsx`; o nome leva ao detalhe |
 | `/admin/usuarios/:id`, `/admin/usuarios/portal/:id` | `user-detail-page.tsx`, `portal-user-detail-page.tsx` (rotas `routes/admin/user.tsx`, `portal-user.tsx`) |
 | `/admin/planos`, `/admin/planos/:id` | `plans-page.tsx`, `plan-detail-page.tsx`: arquivar/reativar em botão, "Excluir plano" (desabilitado com uso, pede arquivar) e excluir preço, ambos com `confirm-dialog.tsx` |
@@ -99,7 +100,7 @@ responde 403 e avisa os owners. A política se edita em `/admin/configuracoes` e
 
 `/admin/usuarios` tem uma terceira aba, **"Telefones"** (`?scope=telefones`, T4), só para o proprietário: a fila de
 liberação à mão de `GET /api/admin/phone-verifications` (owners, equipe da plataforma e contas sem organização), com
-a contagem de pendentes e o botão "Liberar" com confirmação (`POST …/:id/confirm`). O suporte não vê a aba: a rota
+a contagem de pendentes e o botão "Liberar" com confirmação (`POST …/:id/confirm`); o pedido de troca de número (`purpose = change`) aparece marcado "Troca de número", com o número novo. O suporte não vê a aba: a rota
 é `ownerOnly`. Componentes em `src/components/phone/` (`tech/28-crm-cadastro.md`, "Telas da liberação à mão").
 
 Além dela, `/admin/usuarios` tem duas abas. Clientes e leads são outra identidade (`portal_user`):

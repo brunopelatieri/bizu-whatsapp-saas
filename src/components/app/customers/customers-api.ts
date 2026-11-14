@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api/client";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 import { useAuth } from "@/providers/auth-provider";
 import type { TagRef } from "@/components/crm/tags-api";
+import type { PhoneChange } from "@/components/phone/phone-change-api";
 
 export type Customer = {
   id: string;
@@ -26,6 +27,8 @@ export type Customer = {
   /** A pessoa da equipe que também é este cliente, com o papel atual dela. */
   team: { userId: string; role: string } | null;
   createdAt: string;
+  /** A troca de número em aberto; só `GET /api/customers/:id` e o `PATCH` a trazem. A ficha segue com `phone` até ela fechar. */
+  phoneChange?: PhoneChange | null;
 };
 
 type CustomerPage = { items: Customer[]; total: number; pageSize: number };

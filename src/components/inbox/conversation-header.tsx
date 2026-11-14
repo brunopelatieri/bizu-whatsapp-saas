@@ -7,6 +7,7 @@ import {
   useInboxMutation,
 } from "@/components/inbox/inbox-api";
 import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
+import { UserAvatar } from "@/components/profile/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -107,7 +108,8 @@ export function ConversationHeader({ detail, onBack, onOpenPanel }: Conversation
           {CONVERSATION_STATUS_LABELS[conversation.status]}
         </Badge>
         {tenantMode ? (
-          <span className="text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {owner ? <UserAvatar userId={owner.id} name={owner.name} size="sm" /> : null}
             {owner ? (mine ? "Com você" : `Com ${owner.name}`) : "Na fila"}
           </span>
         ) : null}

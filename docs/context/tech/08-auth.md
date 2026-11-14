@@ -249,8 +249,12 @@ limites: `tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".
 é bloqueada em personificação, e nada do perfil passa pelo bloqueio de telefone (com o telefone pendente,
 só a lista de `src/api/phone-gate.ts`). **`/update-user` do Better Auth está em `disabledPaths`:** nome e foto só
 mudam pelas rotas do perfil (com auditoria), e `user.image` não vira um texto qualquer escolhido pelo
-cliente. O e-mail segue pelo `change-email` (`ChangeEmailCard`), a senha pelo `change-password` (tela na F2) e
-o telefone pela troca (`/api/me/phone-change`). `GET /api/me` traz `user.avatarUrl`
+cliente. O e-mail segue pelo `change-email` (`ChangeEmailCard`), a senha pelo `change-password` e o telefone pela troca
+(`/api/me/phone-change`); as telas estão na página "Perfil" (F2: `/app/perfil` e `/admin/perfil`,
+`src/pages/profile-page.tsx`, `src/components/profile/`: foto com recorte de 256 px no navegador, nome, senha com o
+medidor do bloco S e `revokeOtherSessions`; o telefone é `TeamPhoneChange`). Na personificação a tela só mostra (a API
+recusa a escrita). `ChangeEmailCard` mora no Perfil (não mais em `/app/configuracoes`) e esconde o formulário na
+personificação. `GET /api/me` traz `user.avatarUrl`
 (`/api/avatars/<id>?v=<arquivo>` ou `null`). Foto: `tech/27-lgpd-arquivos.md`, "Módulo de arquivos".
 
 ## Bloqueio de login por tentativas

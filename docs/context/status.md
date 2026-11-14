@@ -44,10 +44,13 @@
   segue pendente o `claim` do portal (D-1). **Troca de telefone pelo pedido** implementada no servidor
   (`…/phone-change` na equipe, no portal e na ficha pela equipe; `PATCH` e `/admin` passam pelo pedido; o
   cadastro mantém o número antigo até a confirmação; migration `0038`), com as decisões TC-1 a TC-10 a
-  confirmar; a tela da troca fica para a fase de telas. **F1 do bloco F** implementada (API do perfil:
+  confirmar (as telas entraram na F2). **F1 do bloco F** implementada (API do perfil:
   `PATCH /api/me` com o nome, foto em `POST`/`DELETE /api/me/avatar` e `GET /api/avatars/:userId`, variável
   `AVATAR_MAX_KB`, `update-user` do Better Auth desligado, foto na exportação e na anonimização), com as decisões
-  F1-1 a F1-5 a confirmar; a tela (F2) é a próxima.
+  F1-1 a F1-5 a confirmar. **F2 do bloco F e telas da troca de telefone** implementadas (2026-11-14): página "Perfil" em
+  `/app/perfil` e `/admin/perfil` (foto com recorte de 256 px, nome, e-mail, telefone, senha), foto em membros e em quem
+  atende, troca de telefone na ficha do cliente, em `/portal/conta` e em "Confirme seu WhatsApp", filas com
+  `purpose = change`; decisões F2-1 a F2-8 a confirmar (SPEC, "F2 e telas da troca: o que foi feito").
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
@@ -55,8 +58,8 @@
   confirmar pelo proprietário (SPEC, "T3: o que foi feito"). **T4 parcial**: telas das filas
   de liberação em `/admin/usuarios` (aba "Telefones", só o proprietário), `/app/equipe` e `/app/clientes`, modelo de
   verificação na tela do canal Cloud (a leitura do canal traz `verificationTemplate`) e acertos de texto da tela da
-  T3; roteiro manual com número real na SPEC. Pendentes: a tela da troca de telefone, `claim` e ligação da ficha à
-  equipe (SPEC, "T4: o que foi feito"). Os blocos S, B, T, F, E, L e R
+  T3; roteiro manual com número real na SPEC. Pendentes: `claim` e ligação da ficha à equipe (SPEC, "T4: o que foi feito"; a
+  tela da troca de telefone saiu na F2). Os blocos S, B, T, F, E, L e R
   seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09

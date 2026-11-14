@@ -65,6 +65,7 @@ export const appTitles: Record<string, string> = {
   "/app/assinatura/faturas": "Faturas",
   "/app/assinatura/retorno": "Pagamento",
   "/app/auditoria": "Auditoria",
+  "/app/perfil": "Perfil",
   "/app/configuracoes": "Configurações",
   "/app/configuracoes/seguranca": "Segurança",
   "/app/configuracoes/sessoes": "Sessões",

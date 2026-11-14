@@ -5,6 +5,7 @@ import { useSearchParams } from "react-router";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
+import { PortalPhoneChange } from "@/components/portal/portal-phone-change";
 import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { AccountDeletionCard } from "@/components/privacy/account-deletion-card";
 import { ConfirmDeletionCard } from "@/components/privacy/confirm-deletion-card";
@@ -20,6 +21,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { displayPhone } from "@/lib/phone/br";
 import { PhoneField, toPhoneFieldValue } from "@/components/ui/phone-field";
 import { ApiError, apiFetch } from "@/lib/api/client";
 import { passwordChecklist } from "@/lib/auth/password-checklist";
@@ -33,29 +35,49 @@ import {
 } from "@/lib/schemas/portal";
 import { usePortalAuth } from "@/providers/portal-auth-provider";
 
+/**
+ * O número da ficha da organização ativa (`GET /api/portal/customer`). É com ele que o servidor
+ * compara o `phone` do `PATCH /api/portal/me`: a conta global tem um número só, e as fichas podem
+ * ter outros (várias organizações, ou uma troca confirmada pela equipe). Mandar o da conta abriria
+ * uma troca que ninguém pediu.
+ */
+function useFichaPhone() {
+  const { active } = usePortalAuth();
+  const query = useQuery({
+    queryKey: ["portal-customer", active?.id],
+    queryFn: () =>
+      apiFetch<{ customer: { phone: string | null } }>("/api/portal/customer"),
+    retry: false,
+  });
+
+  return { pending: query.isPending, phone: query.data?.customer.phone ?? null };
+}
+
 function ProfileCard() {
+  const ficha = useFichaPhone();
+
+  // O formulário só nasce com o número da ficha em mãos (os valores iniciais não se refazem).
+  if (ficha.pending) return null;
+
+  return <ProfileForm fichaPhone={ficha.phone} />;
+}
+
+function ProfileForm({ fichaPhone }: { fichaPhone: string | null }) {
   const { user, refresh } = usePortalAuth();
   const form = useForm<PortalProfileValues, unknown, PortalProfileInput>({
     resolver: zodResolver(portalProfileSchema),
-    defaultValues: { name: user?.name ?? "", phone: toPhoneFieldValue(user?.phoneNormalized) },
+    defaultValues: {
+      name: user?.name ?? "",
+      phone: fichaPhone ?? toPhoneFieldValue(user?.phoneNormalized),
+    },
     mode: "onChange",
   });
 
   async function onSubmit(values: PortalProfileInput) {
     try {
-      const saved = await apiFetch<{ phoneChangePending?: boolean }>("/api/portal/me", {
-        method: "PATCH",
-        body: JSON.stringify(values),
-      });
+      await apiFetch("/api/portal/me", { method: "PATCH", body: JSON.stringify(values) });
       await refresh();
-      // Outro número não muda na hora: vira a troca pelo pedido, confirmada pelo link (bloco T).
-      if (saved?.phoneChangePending) {
-        toast.success(
-          "Dados salvos. Enviamos um link ao número novo: ele passa a valer quando você confirmar.",
-        );
-      } else {
-        toast.success("Dados atualizados.");
-      }
+      toast.success("Dados atualizados.");
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Não foi possível salvar.",
@@ -87,24 +109,28 @@ function ProfileCard() {
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="phone"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Telefone / WhatsApp *</FormLabel>
-                  <FormControl>
-                    <PhoneField
-                      value={field.value}
-                      onChange={field.onChange}
-                      onBlur={field.onBlur}
-                      name={field.name}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* O número tem cartão próprio (a troca pelo pedido). Sem número gravado (conta antiga),
+                o campo continua aqui, porque o `PATCH` o exige. */}
+            {fichaPhone || user?.phoneNormalized ? null : (
+              <FormField
+                control={form.control}
+                name="phone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Telefone / WhatsApp *</FormLabel>
+                    <FormControl>
+                      <PhoneField
+                        value={field.value}
+                        onChange={field.onChange}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <p className="text-sm text-muted-foreground">
               E-mail: <span className="break-all">{user?.email}</span>
             </p>
@@ -117,6 +143,31 @@ function ProfileCard() {
             </Button>
           </form>
         </Form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PhoneCard() {
+  const { user, active, refresh } = usePortalAuth();
+  const ficha = useFichaPhone();
+  // O número que vale é o da ficha desta organização (a troca age sobre ela).
+  const current = displayPhone(ficha.phone) ?? displayPhone(user?.phoneNormalized ? `+${user.phoneNormalized}` : null);
+
+  // Sem número gravado, o campo do perfil acima cadastra o primeiro.
+  if (ficha.pending || !current) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Telefone (WhatsApp)</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <PortalPhoneChange
+          current={current}
+          activeTenantId={active?.id}
+          onChanged={refresh}
+        />
       </CardContent>
     </Card>
   );
@@ -310,6 +361,7 @@ export function PortalAccountPage() {
         />
       ) : null}
       <ProfileCard />
+      <PhoneCard />
       <PasswordCard />
       <SessionsCard />
       <ExportCard endpoint="/api/portal/me/export" />
