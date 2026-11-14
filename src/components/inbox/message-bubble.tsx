@@ -10,6 +10,7 @@ import {
   LayoutTemplate,
   Reply,
   RotateCcw,
+  Star,
   User,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -238,6 +239,8 @@ export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps
     silent: true,
     conversationId: message.conversationId,
   });
+  // A estrela é um reflexo do banco: a tela só relê (nunca escreve no cache); erro vira aviso.
+  const favorite = useInboxMutation({ conversationId: message.conversationId });
   const failed = message.status === "failed";
   const label = message.sender?.name ?? (message.senderType === "device" ? "Celular" : null);
 
@@ -265,6 +268,13 @@ export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps
         ) : null}
         <Body message={message} />
         <div className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
+          {message.isFavorite ? (
+            <Star
+              className="size-3 fill-amber-400 text-amber-500"
+              role="img"
+              aria-label="Mensagem favorita"
+            />
+          ) : null}
           <time dateTime={message.createdAt}>{formatTime(message.createdAt)}</time>
           <DeliveryStatus message={message} />
         </div>
@@ -296,19 +306,52 @@ export function MessageBubble({ message, canReply, onReply }: MessageBubbleProps
           </div>
         ) : null}
       </div>
-      {canReply && onReply && quotable(message) ? (
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost"
-          aria-label="Responder esta mensagem"
-          title="Responder esta mensagem"
-          // Aparece ao passar o mouse ou focar; em tela de toque, sempre visível.
-          className="mt-1 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
-          onClick={() => onReply(message)}
-        >
-          <Reply />
-        </Button>
+      {canReply ? (
+        <div className="mt-1 flex shrink-0 flex-col gap-0.5">
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label={message.isFavorite ? "Remover dos favoritos" : "Favoritar esta mensagem"}
+            aria-pressed={message.isFavorite}
+            title={
+              message.isFavorite
+                ? "Remover dos favoritos"
+                : "Favoritar: a limpeza por retenção não apaga a mensagem favorita"
+            }
+            disabled={favorite.isPending}
+            // A favorita fica sempre à vista; as demais aparecem ao passar o mouse ou focar (em tela de toque, sempre).
+            className={cn(
+              "transition-opacity focus-visible:opacity-100",
+              message.isFavorite
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
+            )}
+            onClick={() =>
+              favorite.mutate({
+                path: `${api}/messages/${message.id}/favorite`,
+                method: "PUT",
+                body: { favorite: !message.isFavorite },
+              })
+            }
+          >
+            <Star className={cn(message.isFavorite && "fill-amber-400 text-amber-500")} />
+          </Button>
+          {onReply && quotable(message) ? (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label="Responder esta mensagem"
+              title="Responder esta mensagem"
+              // Aparece ao passar o mouse ou focar; em tela de toque, sempre visível.
+              className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+              onClick={() => onReply(message)}
+            >
+              <Reply />
+            </Button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

@@ -134,6 +134,9 @@ export type AuditAction =
   | "inbox.conversation_reopened"
   | "inbox.contact_linked"
   | "inbox.contact_saved_as_customer"
+  // retenção R3a: a estrela da mensagem; só ids em `metadata`, nunca o texto.
+  | "inbox.message_favorited"
+  | "inbox.message_unfavorited"
   | "platform.impersonation_requested"
   | "platform.impersonation_started"
   | "platform.impersonation_stopped"

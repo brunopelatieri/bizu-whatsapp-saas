@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e a fase R1 do bloco R (decisões R1-1 a R1-10 a confirmar; R2 e R3 pendentes) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e a fase R1 do bloco R (decisões R1-1 a R1-10 a confirmar; R2 pendente) e a fase R3a (decisões R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -788,7 +788,8 @@ conversa encerrada antiga perde as mensagens e permanece na lista.
 |---|---|---|---|
 | R1 (**implementada**; ver "R1: o que foi feito", com o contrato da R2 e da R3) | Migration `0039` com **todo** o schema do bloco, variáveis, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga; desligado nunca apaga; o piso vence. `tests/db/retention-schema.test.ts`: RLS, `CHECK`s, padrões | Sonnet 5.5 |
 | R2 | Serviço de limpeza, prévia, job; exclusão do arquivo | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
-| R3 | Estrela, aviso da conversa vazia, tela do `/admin` | Roteiro manual com o interruptor ligado em banco de teste | Sonnet 5.5 |
+| R3a (**implementada**; ver "R3a: o que foi feito") | Estrela na mensagem (`PUT .../favorite`, selo na bolha) e aviso da conversa esvaziada, no atendimento do tenant e no da plataforma | `tests/db/inbox-favorite.test.ts`; roteiro no navegador (estrela, tempo real, aviso, desktop e celular) | Sonnet 5.5 |
+| R3b | Tela de retenção do `/admin` (política por organização e tipo de canal, prévia e última execução); **depende da R2** (serviço, prévia e `/api/admin/retention/*`) | Roteiro manual com o interruptor ligado em banco de teste | Sonnet 5.5 |
 
 **Nenhuma fase depois da R1 gera migration** (o Postgres local é compartilhado e a numeração colidiria). Faltou coluna? Pare e fale com a sessão
 da R1: a `0040` é de quem a pedir, uma só, depois de combinar.
@@ -911,6 +912,57 @@ cru não leem, não gravam nem alteram as duas tabelas; a plataforma sim); `test
 | R1-8 | Tetos de cada limite | Só no `.env` e na rota do `/admin` (`RETENTION_LIMIT_MAX`: 10.000.000, 3650 e 1.000.000); o banco só exige `>= 0` | Teto também em `CHECK` |
 | R1-9 | Anonimizar a conta | Zera `favorited_by`, mantém a estrela | Deixar o id da conta anonimizada |
 | R1-10 | Compose | Limites sem padrão no `compose.prod.yml` (só o `.env.prod.example` traz 5000/90/200); `ENABLED` padrão `false` | Padrões também no compose |
+
+### R3a: o que foi feito (2026-11-14)
+
+A parte da R3 que **não depende do serviço de limpeza**: a estrela na mensagem e o aviso da conversa esvaziada. **Nenhuma migration** (o
+schema veio todo na R1) e **nenhum código apaga mensagem ou rebaixa favorita**. Fica para a **R3b** a tela de retenção do `/admin`, que
+depende da R2 (serviço, prévia e `/api/admin/retention/*`).
+
+- **`PUT /api/inbox/messages/:id/favorite`** (`src/api/inbox.ts`, serviço `src/lib/inbox/favorite.ts`, schema `favoriteMessageSchema`):
+  corpo `{ "favorite": boolean }`, resposta `{ message }` (a `MessageView` já relida). `inbox:reply` e `visibleConversation` (mensagem de
+  conversa que a pessoa não vê, de outro tenant ou inexistente: **404 igual**; id que não é UUID: 404, como toda rota com `validId`).
+  Favoritar grava `is_favorite`, `favorited_at = now()` e `favorited_by` = quem está na sessão; desfavoritar zera os três juntos (o `CHECK
+  message_favorite_stamp` exige). **Idempotente e atômica:** um único `UPDATE ... WHERE is_favorite <> alvo`; repetir não troca quem marcou
+  nem a data, e só a mudança real audita e avisa (pedidos simultâneos gravam uma vez). 60 por minuto por pessoa (o limite das escritas de
+  fila). Bloqueada em personificação (`blockMutationsWhileImpersonating`; no `it.each` de `impersonation.test.ts`) e, em `read_only`, pela
+  regra geral do `requireTenant`. **O teto de favoritas do escopo não recusa**: quem rebaixa a favorita acima do teto é a limpeza (R2).
+- **Auditoria:** `inbox.message_favorited` e `inbox.message_unfavorited`, alvo `{ type: "message", id }`, `metadata = { conversationId }`; nunca o
+  texto, o telefone nem o nome. **Aviso em tempo real:** `notifyInbox` na mesma transação, só ids (`s, c, k, m, a`), com `k = "status"`: a tela
+  relê **só as mensagens** da conversa (a lista e o detalhe não mudam com a estrela), em todas as abas de quem vê a conversa.
+- **Leitura:** `MessageView.isFavorite` (`views.ts`, por onde a tela já lê as mensagens: `GET .../conversations/:id/messages` e a mensagem
+  devolvida pelo envio e pelo `PUT`). A estrela é **da conversa**: quem tem acesso a ela vê a mesma marca (teste com owner, outro membro e
+  leitor sem `inbox:reply`, que vê o selo mas não o botão).
+- **Tela** (`message-bubble.tsx`): selo de estrela cheia ao lado da hora na bolha da favorita (para todos que leem) e o botão de estrela ao lado do
+  "Responder" (só com `inbox:reply`; a API decide). Aparece ao passar o mouse ou focar, e sempre em tela de toque; **a favorita fica sempre à vista**
+  (a estrela cheia e `aria-pressed`). Escrita pela API e **releitura** (`useInboxMutation`, método `PUT`); nunca escreve no cache.
+- **Aviso da conversa esvaziada** (`message-thread.tsx`, `format.ts`: `emptiedByRetention`, `RETENTION_EMPTY_NOTICE`): thread sem nenhuma
+  mensagem (nem envio em andamento) e `conversation.last_message_at` preenchido mostra "Mensagens antigas removidas pela política de retenção", sem números
+  e sem coluna nova. Conversa nova (sem `last_message_at`) segue com "Nenhuma mensagem ainda. Escreva a primeira abaixo." A R2 garante que a limpeza não
+  zera `last_message_at` (item 5 do contrato).
+- **Atendimento da plataforma:** `PUT /api/admin/inbox/messages/:id/favorite` (`src/api/admin-inbox.ts`), mesmo serviço com `Scope = platform`,
+  `PLATFORM_REPLY_ROLES` (`platform_owner` e `platform_support`) e a auditoria com `actor_type = platform` e sem `tenant_id`. A tela é a mesma
+  (`inbox-scope.tsx` já dá `api` e `can` do escopo). Ver a decisão R3a-1.
+
+**Testes:** `tests/db/inbox-favorite.test.ts` (13 casos: 401/403, 404 de outra pessoa, de outro tenant e inexistente, corpo inválido, os três campos
+gravados e zerados juntos, idempotência com outra pessoa repetindo, pedidos simultâneos, a mesma marca para quem tem acesso, o teto que não recusa,
+auditoria sem texto nem telefone, aviso só com ids, plataforma e o isolamento nos dois sentidos); a rota em `rbac.test.ts` (matriz de papéis) e no
+`it.each` de `impersonation.test.ts`; a da plataforma na matriz de acesso e na personificação de `inbox-platform.test.ts`; `format.test.ts`
+(`emptiedByRetention`). Conferência no navegador: estrela, selo, tempo real entre abas e aviso, em 1024 e 375 px de largura, no tenant e na plataforma.
+
+**Decisões da R3a a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R3a-1 | Estrela no atendimento da plataforma | **Vale também**: `PUT /api/admin/inbox/messages/:id/favorite` para `platform_owner` e `platform_support` (os que respondem). A limpeza também poda `tenant_id` nulo com os padrões do `.env` (SPEC, "Escopo conta × tipo de canal"), e a equipe da plataforma também guarda mensagens que quer poupar | Sem estrela na plataforma (a tela esconderia o botão) |
+| R3a-2 | Quem pode marcar | `inbox:reply` (como a SPEC), não `inbox:read`: o leitor vê o selo e não marca | `inbox:read` |
+| R3a-3 | Aviso em tempo real | `k = "status"` (só relê as mensagens da conversa), sem tipo novo de aviso e sem mexer no `use-inbox-events.ts` | Tipo `favorite` próprio, ou `k = "message"` (relê também a lista e o detalhe) |
+| R3a-4 | Auditar a estrela | Sim, uma ação para cada sentido (`inbox.message_favorited` e `inbox.message_unfavorited`), só quando muda de fato | Não auditar (marca da equipe, sem efeito fora a retenção) |
+| R3a-5 | Limite de taxa | 60/min por pessoa, o mesmo de assumir e mudar a situação (`queueLimit`) | Limite próprio mais baixo |
+
+**Limites conhecidos da R3a:** a prévia da conversa na lista (`last_message_preview`) fica em branco depois que a R2 a zera, e a R3a não
+mostra texto no lugar (o aviso só aparece dentro da conversa); a estrela não aparece nas mensagens do portal do cliente (não há atendimento
+lá); o texto de privacidade ainda não cita a favorita como marca que poupa a mensagem da retenção (bloco L, quando a R2 ligar a limpeza).
 
 ---
 
@@ -1357,7 +1409,7 @@ Comparação com a SPEC 059 da origem.
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
-| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1 implementada** (schema e precedência); R2 (limpeza) e R3 (estrela, aviso e tela) pendentes: **até a R2 nada apaga mensagem** |
+| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1 implementada** (schema e precedência) e **R3a** (estrela e aviso da conversa esvaziada); R2 (limpeza) e R3b (tela do `/admin`) pendentes: **até a R2 nada apaga mensagem** |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,

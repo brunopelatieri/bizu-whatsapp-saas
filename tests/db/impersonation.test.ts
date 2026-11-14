@@ -577,6 +577,7 @@ describe("personificação", () => {
       ["POST", `/api/inbox/messages/${anyId}/media/retry`],
       ["POST", `/api/inbox/conversations/${anyId}/messages`],
       ["POST", `/api/inbox/messages/${anyId}/retry`],
+      ["PUT", `/api/inbox/messages/${anyId}/favorite`],
       ["POST", "/api/inbox/conversations"],
       ["PATCH", `/api/inbox/contacts/${anyId}`],
       ["POST", `/api/inbox/contacts/${anyId}/link`],

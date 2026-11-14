@@ -155,6 +155,7 @@ Erros saem por `handleTenantError`.
 | `GET /api/inbox/conversations/:id/templates` | `inbox:reply` | `listConversationTemplates`: modelos aprovados do WABA do canal, já analisados |
 | `GET /api/inbox/media-out/:token` | **sem sessão**, token assinado | `openOutboundMedia` (só a Evolution chama; ver "Anexo de saída") |
 | `POST /api/inbox/messages/:id/retry` | `inbox:reply`, 60/min | `retryMessage` |
+| `PUT /api/inbox/messages/:id/favorite` | `inbox:reply`, 60/min | `setMessageFavorite` (`favorite.ts`): `{ favorite: boolean }`, idempotente; grava ou zera `is_favorite`, `favorited_at` e `favorited_by`; 404 fora da visibilidade; auditoria `inbox.message_favorited` e `inbox.message_unfavorited` (só ids); `notifyInbox` com `k = "status"` |
 | `GET /api/inbox/messages/:id/media` | `inbox:read` | `openMessageMedia` |
 | `POST /api/inbox/messages/:id/media/retry` | `inbox:read`, 20/min | `retryMessageMedia`: 202 |
 | `POST /api/inbox/conversations/:id/claim` | `inbox:reply` | `claimConversation` |
@@ -321,7 +322,9 @@ por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
 - **Conversa:** `message-thread` mostra da mais antiga para a mais nova, com separador por dia; ao rolar perto
   do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
   um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
-  (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar".
+  (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar". **Estrela (R3a):** selo de estrela
+  cheia na bolha da favorita (`MessageView.isFavorite`, para quem lê) e botão de estrela ao lado do "Responder" (só com `inbox:reply`; `PUT .../favorite` pela
+  API do escopo e releitura). Thread vazia com `last_message_at` mostra o aviso da conversa esvaziada (`emptiedByRetention`).
 - **Composer (C5):** além do texto, **anexo** (clipe e colar imagem; prévia, nome e tamanho, legenda no mesmo campo, sem legenda em áudio, 16 MB conferidos antes de subir), **citação** ("Responder" na bolha põe o chip "Respondendo ao contato / a você" acima do campo, com X; some ao enviar com sucesso e ao trocar de conversa) e **modelo** (`template-dialog.tsx`: aprovados do WABA, campos das variáveis, prévia pela mesma função do servidor, erro da API dentro do diálogo; botão no composer só em canal com `templates` e, com a janela fechada, o "Enviar modelo" da faixa). Anexo que falha volta ao composer com a legenda e reaproveita o `clientId`. A bolha "enviando" mostra a imagem local, o nome do arquivo ou o modelo. **Reenviar** vale para texto, anexo e modelo.
 - **Envio:** o texto vai como bolha "enviando" local e some quando a releitura traz a
   mensagem do servidor; erro devolve o texto ao campo, e o `clientId` é reaproveitado no reenvio depois de
@@ -416,7 +419,7 @@ leitura do envio JSON ou `multipart`, resposta da mídia).
 | `GET .../unread` | plataforma | `unreadCounts` (`{ queue, mine }`: a plataforma só usa `queue`, o total com não lidas) |
 | `GET .../events` | plataforma | `streamInboxEvents` com o ator da plataforma: só avisos `s = null`; batimento, 15 min, 3 por pessoa, 503 sem `LISTEN` |
 | `GET .../messages/:id/media` | plataforma | `openMessageMedia` (a mídia da mensagem aponta para `/api/admin/inbox/messages/:id/media`: `inboxBase(scope)`) |
-| `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
+| `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `PUT .../messages/:id/favorite`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setMessageFavorite`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
 
 Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-queue` 60/min, `-media-retry` 20/min.
 `claim`, `assign`, `assignees`, `candidates` e `customer` **não existem** (404, teste de matriz).
@@ -520,7 +523,9 @@ cascata com o arquivo órfão.
   - A conversa esvaziada **não ganha coluna**: o aviso "Mensagens antigas removidas pela política de retenção" nasce de a conversa
     ter `last_message_at` e nenhuma mensagem. Por isso a limpeza (R2) **não pode** zerar `last_message_at`, `last_inbound_at`
     (âncora da janela de 24 h) nem `last_message_direction`; só `last_message_preview`, que guarda o texto da última mensagem.
-  - O contrato inteiro para a R2 e a R3 está na SPEC, em "R1: o que foi feito".
+  - **R3a (feita):** a estrela (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, `favorite.ts`, selo e botão na bolha) e o aviso da conversa
+    esvaziada na thread (SPEC, "R3a: o que foi feito"). O teto de favoritas **não** recusa a marcação: quem rebaixa é a limpeza.
+  - O contrato inteiro para a R2 e a R3b está na SPEC, em "R1: o que foi feito".
 
 ## Testes
 

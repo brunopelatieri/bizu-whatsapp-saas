@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contactLabel,
   dayKey,
+  emptiedByRetention,
   formatDayLabel,
   formatFileSize,
   formatListTime,
@@ -77,5 +78,20 @@ describe("splitLinks", () => {
     const parts = splitLinks('<a href="https://x.com">x</a>');
     // O texto continua literal: quem renderiza (React) escapa.
     expect(parts.map((part) => part.value).join("")).toContain("<a href=");
+  });
+});
+
+describe("emptiedByRetention", () => {
+  it("sem mensagem e com movimento anterior: a conversa foi esvaziada", () => {
+    expect(emptiedByRetention(0, "2026-11-01T10:00:00.000Z")).toBe(true);
+  });
+
+  it("conversa nova, sem nada trocado, não é esvaziada", () => {
+    expect(emptiedByRetention(0, null)).toBe(false);
+  });
+
+  it("com mensagem (ou envio em andamento) não há aviso", () => {
+    expect(emptiedByRetention(1, "2026-11-01T10:00:00.000Z")).toBe(false);
+    expect(emptiedByRetention(3, null)).toBe(false);
   });
 });

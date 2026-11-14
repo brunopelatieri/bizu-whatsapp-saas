@@ -53,8 +53,9 @@
   `purpose = change`; decisões F2-1 a F2-8 a confirmar (SPEC, "F2 e telas da troca: o que foi feito"). **Bloco R, fase R1** implementada (2026-11-14): migration `0039` com
   todo o schema da retenção de mensagens (favorita em `message`, `retention_policy` e `message_retention_state`, só do proprietário da
   plataforma), variáveis `MESSAGE_RETENTION_*` (desligada por padrão; ligada em `docker/.env.prod.example`) e o módulo puro
-  `src/lib/inbox/retention-policy.ts` (precedência e piso de idade); **nenhum código apaga mensagem ainda** (a limpeza é a R2; estrela, aviso
-  e tela do `/admin`, a R3), com as decisões R1-1 a R1-10 a confirmar e o contrato da R2 e da R3 na SPEC ("R1: o que foi feito").
+  `src/lib/inbox/retention-policy.ts` (precedência e piso de idade); **nenhum código apaga mensagem ainda** (a limpeza é a R2; a tela do `/admin`, a R3b), com as decisões R1-1 a R1-10 a confirmar e o contrato da R2 e da R3 na SPEC ("R1: o que foi feito"). **R3a** implementada
+  (2026-11-14): estrela na mensagem (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, selo e botão na bolha, tempo real) e aviso da conversa
+  esvaziada, sem migration; decisões R3a-1 a R3a-5 a confirmar (SPEC, "R3a: o que foi feito").
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,

@@ -45,6 +45,10 @@ export const messagesQuerySchema = z.object({
 });
 export type MessagesQuery = z.infer<typeof messagesQuerySchema>;
 
+/** `PUT /api/inbox/messages/:id/favorite`: liga ou desliga a estrela da mensagem (idempotente). */
+export const favoriteMessageSchema = z.object({ favorite: z.boolean("Informe se é favorita.") });
+export type FavoriteMessageInput = z.infer<typeof favoriteMessageSchema>;
+
 /** Gerado pela tela a cada envio: repetir o envio com o mesmo id devolve a mesma mensagem. */
 export const clientIdSchema = z
   .string()

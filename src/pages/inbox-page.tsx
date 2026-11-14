@@ -197,6 +197,7 @@ function ConversationView({
         <MessageThread
           conversationId={conversationId}
           canReply={can("inbox", "reply")}
+          lastMessageAt={detail.conversation.lastMessageAt}
           sending={sending}
           onReply={setReplyTo}
         />

@@ -24,6 +24,16 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   - Anonimizar a conta zera `message.favorited_by` (a estrela fica).
   - **Migração:** rodar `npm run db:migrate`. Projeto derivado que usa `docker/.env.prod.example` passa a ter a retenção **ligada** quando a R2
     existir; hoje a variável não tem efeito.
+- **Retenção de mensagens, fase R3a: estrela e aviso da conversa esvaziada (bloco R de `docs/specs/pre-producao/spec.md`)**; sem migration e
+  **sem código que apague mensagem** (a limpeza é a R2; a tela de retenção do `/admin` é a R3b).
+  - `PUT /api/inbox/messages/:id/favorite` e `PUT /api/admin/inbox/messages/:id/favorite` (`{ favorite: boolean }`): liga ou desliga a estrela da
+    mensagem, com `inbox:reply` (na plataforma, `platform_owner` e `platform_support`) e a visibilidade por pessoa (fora dela, 404). Idempotente;
+    grava e zera `is_favorite`, `favorited_at` e `favorited_by` juntos. Auditada (`inbox.message_favorited` e `inbox.message_unfavorited`, só ids),
+    bloqueada em personificação, com aviso em tempo real só com ids. O teto de favoritas não recusa: quem rebaixa é a limpeza.
+  - A leitura das mensagens traz `isFavorite`. Na tela do atendimento, o selo de estrela na bolha (a estrela é da conversa) e o botão de marcar e
+    desmarcar ao lado do "Responder", só para quem pode responder.
+  - Conversa sem mensagem e com `last_message_at` mostra "Mensagens antigas removidas pela política de retenção" (sem coluna nova).
+  - **Migração:** nenhuma. A ação `inbox.message_favorited|unfavorited` entra na auditoria; nada a configurar.
 - **Pré-produção: senha forte, bloqueio de login e telefone verificado (blocos S, B e fase T1 de
   `docs/specs/pre-producao/spec.md`)**:
   - **Senha forte:** toda senha nova exige 10 a 128 caracteres, com maiúscula, minúscula, número e caractere especial,

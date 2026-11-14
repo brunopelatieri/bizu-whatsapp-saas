@@ -115,3 +115,16 @@ export function safeHref(value: string): string | null {
     return null;
   }
 }
+
+/** Aviso neutro da conversa esvaziada pela retenção: sem números (SPEC, bloco R, R3a). */
+export const RETENTION_EMPTY_NOTICE = "Mensagens antigas removidas pela política de retenção";
+
+/**
+ * A conversa foi esvaziada pela limpeza de retenção: não há nenhuma mensagem (nem envio em andamento)
+ * e ela já teve movimento (`last_message_at` preenchido). Conversa recém-criada, sem nada trocado,
+ * tem `last_message_at` nulo e segue com o convite "escreva a primeira". Sem coluna nova: a limpeza
+ * mantém `last_message_at` de propósito.
+ */
+export function emptiedByRetention(visibleMessages: number, lastMessageAt: string | null) {
+  return visibleMessages === 0 && lastMessageAt !== null;
+}
