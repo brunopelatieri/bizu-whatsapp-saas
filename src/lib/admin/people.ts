@@ -32,6 +32,7 @@ import { hasPortalPassword } from "@/lib/portal/profile";
 import type { UpdatePersonInput } from "@/lib/schemas/admin";
 import { WHATSAPP_PHONE_REQUIRED } from "@/lib/schemas/phone";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import { accountCustomerRecords } from "@/lib/tenant/team-customer-removal";
 import { findPendingDeletion } from "@/lib/lgpd/deletion";
 
 /**
@@ -154,6 +155,8 @@ export async function getUserDetail(userId: string) {
       state: billingState({ status, accessMode, subscriptionStatus }),
     })),
     deletion: await pendingDeletionOf({ type: "user", id: userId }),
+    // D-11: as fichas de cliente ligadas a esta conta saem com ela (o diálogo de exclusão avisa).
+    customerRecords: await accountCustomerRecords(userId),
   };
 }
 

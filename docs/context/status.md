@@ -101,7 +101,7 @@
   autoria e o vínculo (sem apagar conversa: o vínculo com `user` é telefone declarado); a exportação do portal ganha `conversas-whatsapp.json`; `CHANNEL_EVENT_RETENTION_DAYS`
   (padrão 30); editar papel tirando `inbox:reply` devolve as conversas à fila (`src/lib/inbox/privacy.ts`, `tech/30`, "LGPD (C7)").
   **Todas as fases C1 a C7 implementadas.** **Pendente:** smoke com Meta e Evolution reais (B0 simulada), o prazo de retenção de
-  conversas encerradas (decisão do proprietário, `lgpd.md`). O texto de `/legal/privacidade` e `/legal/termos` já cita o WhatsApp (bloco L).
+  conversas encerradas (decisão do proprietário, `lgpd.md`). O texto de `/legal/privacidade` e `/legal/termos` já cita o WhatsApp (bloco L). O bloco E também está feito: remover o membro ou excluir a conta apaga a ficha de cliente ligada à própria pessoa (D-11, só os contatos do telefone confirmado dela), a equipe pode desfazer a ligação (`DELETE /api/customers/:id/team-link`) e os diálogos de exclusão avisam com a contagem de conversas (`tech/28`).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

@@ -75,6 +75,14 @@ organização. Sair da equipe ou virar owner mexe nos pedidos e nas liberações
 chama `phoneAfterMemberLeft`, e a troca de papel e a criação de organização chamam
 `routeVerificationToPlatform`.
 
+**`removeMember` e a ficha de cliente da própria pessoa (D-11):** além de apagar `member`, apaga, na mesma
+transação, a ficha de cliente **ligada à pessoa** (`customer.user_id`) **naquela organização** e o conteúdo dela
+(contatos do telefone confirmado da pessoa, conversas, mensagens, arquivos); os outros contatos da ficha só perdem o
+vínculo. Nenhuma outra ficha é tocada, e trocar o papel não apaga nada. A equipe mantém a ficha desfazendo a ligação
+antes (`DELETE /api/customers/:id/team-link`, `customer:update`). `GET /api/team` devolve `customerRecord` por
+membro só a quem tem `member:delete`, para o diálogo de remoção avisar (`tech/28-crm-cadastro.md`, "Ficha de
+quem é da equipe: o que a remoção apaga").
+
 `inbox:read`, `inbox:reply`, `inbox:assign` e `inbox:supervise` são da caixa de entrada
 (`docs/specs/caixa-de-entrada/spec.md`, `tech/30-caixa-de-entrada.md`): owner e admin têm as quatro,
 membro `read` e `reply`; todas atribuíveis a papel personalizado; `supervise` sem `read` não tem

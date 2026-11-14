@@ -59,7 +59,9 @@ teamRoutes.get("/api/team", async (c) => {
   const { id } = c.get("tenant");
 
   return c.json({
-    members: await listMembers(id),
+    members: await listMembers(id, {
+      withCustomerRecord: c.get("permissions").includes("member:delete"),
+    }),
     invitations: await listInvitations(id, teamActor(c)),
     roles: Object.keys(c.get("roleCatalog")).map((name) => ({
       name,

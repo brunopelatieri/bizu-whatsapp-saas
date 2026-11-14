@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido e a F1 do bloco F (decisões T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10 e F1-1 a F1-5 a confirmar)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a F1 do bloco F e os blocos L e E (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10 e F1-1 a F1-5 a confirmar)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -842,6 +842,40 @@ telefone, hoje obrigatório.
 
 **LLM:** Sonnet 5.5.
 
+### E: o que foi feito (2026-11-14)
+
+- **Excluir cliente:** `GET /api/customers/:id` devolve `conversationCount` (todas as conversas dos contatos ligados, o
+  que `deleteCustomer` apaga) e o diálogo da ficha diz que as conversas, as mensagens e os arquivos do atendimento saem
+  sem volta, com a contagem. `deleteCustomer` virou `deleteCustomerIn` (na transação de quem chama) mais
+  `afterCustomerDeleted` (objetos e identidade órfã do portal, depois do commit), para o D-11 reaproveitá-lo.
+- **Remover membro e excluir conta (D-11, C-1):** `removeMember` apaga, na mesma transação, a ficha ligada à pessoa
+  (`customer.user_id`) **naquela organização**; `anonymizeUser` apaga as ligadas em **todas**, antes de zerar o
+  telefone da conta. Código em `src/lib/tenant/team-customer-removal.ts`; detalhe em `tech/28-crm-cadastro.md`.
+  - **(a)** `DELETE /api/customers/:id/team-link` (`customer:update`, auditada como `customer.team_unlinked`, recusada em
+    personificação, 204 idempotente, 404 de outra organização) e o cartão "Também é da equipe" na ficha. **Criar** a
+    ligação à mão ficou de fora.
+  - **(b)** só saem os contatos da ficha cujo `phone_key` é o do telefone **confirmado** da pessoa
+    (`purgeTeamCustomerContacts`); os outros só perdem o vínculo e a conversa fica. Sem telefone confirmado, a ficha
+    sai e nenhum contato é apagado.
+  - **(c)** o que decide é `customer.user_id`; `chat_contact.user_id` nunca. Outras fichas, outros contatos e outras
+    conversas não são tocados, e trocar o papel não apaga nada (testes em `tests/db/team-customer-delete.test.ts`).
+  - **Avisos:** diálogo de remoção do membro (`GET /api/team` traz `customerRecord` só a quem tem `member:delete`),
+    cartão e diálogo da exclusão da conta (`GET /api/me/deletion` traz `customerRecords`) e o diálogo de exclusão do
+    `/admin/usuarios/:id` (mesmo caminho `anonymizeUser`), todos com a contagem das conversas que seriam apagadas.
+- **Excluir organização (P6):** comportamento intacto. O cartão lista os números de WhatsApp que não estão desativados
+  (e cita os desativados, que também ficam cadastrados), pede a remoção antes e **não bloqueia** o pedido.
+- **Decisões minhas, a confirmar pelo proprietário (E-1 a E-6):** E-1: "telefone confirmado" é o do **sistema inteiro**
+  (`userPhoneConfirmedGlobally`), não a liberação de uma organização, o mesmo critério que liga a ficha sozinha;
+  E-2: pessoa sem telefone confirmado perde a ficha mas nenhum contato é apagado (a SPEC não fechava, e o caso não
+  escolhe a opção que apaga mais); E-3: o aviso da remoção conta só as conversas que seriam apagadas (contatos do número
+  confirmado), enquanto o da ficha de cliente conta todas; E-4: `customerRecord` não traz id nem nome da ficha, para
+  quem remove sem `customer:read`; E-5: a rota de desfazer fica em `customer:update` e sem corpo, e o `/admin` também
+  avisa na exclusão de usuário; E-6: a remoção do membro **não** zera autoria (a conta continua; `sender_user_id`,
+  `closed_by` e `file.created_by` só ficam nulos na anonimização da conta, que já os zerava).
+- **Não coberto:** o diálogo de exclusão da organização com número ativo em navegador real (ver relatório da sessão); o
+  caminho "ficha com conta no portal" na exclusão por D-11 usa o mesmo `dropOrphanPortalUser` do `deleteCustomer`, sem
+  teste próprio.
+
 ---
 
 ## Bloco S: senha forte (P8)
@@ -1151,7 +1185,7 @@ Comparação com a SPEC 059 da origem.
 |---|---|---|---|
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
-| 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real |
+| 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
 | 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 

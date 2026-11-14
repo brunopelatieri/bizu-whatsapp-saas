@@ -107,6 +107,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     número. Para manter o comportamento anterior, defina `PHONE_VERIFICATION_REQUIRED=false`. Os testes de banco
     rodam com `false` (`vitest.db.config.ts`), menos `tests/db/phone-gate.test.ts`.
 
+- **Exclusões (bloco E de `docs/specs/pre-producao/spec.md`)**: remover um membro da equipe apaga a **ficha de cliente
+  ligada à própria pessoa** naquela organização, e excluir a conta apaga as fichas ligadas em todas (D-11), com as
+  conversas, as mensagens e os arquivos do número **confirmado** da pessoa; os outros contatos ligados à ficha só
+  perdem o vínculo, e nenhuma outra ficha, contato ou conversa é tocada. Nova rota `DELETE
+  /api/customers/:id/team-link` desfaz a ligação (a ficha fica, `customer:update`, auditada, fora da
+  personificação) e a ficha ganha o cartão "Também é da equipe". `GET /api/customers/:id` devolve
+  `conversationCount`; `GET /api/team` (`customerRecord`, só a quem remove membros), `GET /api/me/deletion` e
+  `GET /api/admin/users/:id` (`customerRecords`) alimentam os avisos. Os diálogos de excluir cliente, remover
+  membro, excluir a conta e excluir o usuário no `/admin` dizem o que será apagado, com a contagem de conversas, e o
+  cartão de exclusão da organização lista os números de WhatsApp ainda cadastrados e pede a remoção antes (o pedido
+  não é bloqueado).
 - **Texto legal com o WhatsApp (bloco L de `docs/specs/pre-producao/spec.md`)**: `/legal/privacidade` e `/legal/termos`
   passam a citar o telefone, o atendimento por WhatsApp (dados, operadores Meta e servidor Evolution, retenção, a
   confirmação do telefone por link, o que cada exclusão apaga), a responsabilidade do owner pelos números e pelas

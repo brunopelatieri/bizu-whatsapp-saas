@@ -42,6 +42,8 @@ export type AuditAction =
   | "customer.invited"
   // A ficha de cliente ligada à pessoa da equipe (`customer.user_id`); `metadata.userId`.
   | "customer.team_linked"
+  // A equipe desfez a ligação (`DELETE /api/customers/:id/team-link`); `metadata.userId`.
+  | "customer.team_unlinked"
   // Telefone de um cadastro confirmado (link ou liberação manual). Só `via` e contagens.
   | "phone.verified"
   // A conta perdeu a confirmação: outra provou a posse do mesmo número (`metadata.reason`).

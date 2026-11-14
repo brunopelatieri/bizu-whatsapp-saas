@@ -37,6 +37,7 @@ import { hasPortalPassword } from "@/lib/portal/profile";
 import { getStorage } from "@/lib/storage";
 import { listMemberships } from "@/lib/tenant/membership";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import { accountCustomerRecords } from "@/lib/tenant/team-customer-removal";
 
 /**
  * Exportação e exclusão de dados pessoais (LGPD). Tudo é da própria pessoa: o sujeito vem
@@ -159,9 +160,11 @@ lgpdRoutes.get(
       .filter(({ role }) => isOwner(role))
       .map(({ id }) => id);
 
-    return c.json(
-      await listPendingDeletions({ type: "user", id: current.id }, owned),
-    );
+    return c.json({
+      ...(await listPendingDeletions({ type: "user", id: current.id }, owned)),
+      // D-11: o que a exclusão da conta apaga além dela (fichas de cliente ligadas à pessoa).
+      customerRecords: await accountCustomerRecords(current.id),
+    });
   },
 );
 

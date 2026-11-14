@@ -76,5 +76,7 @@ describe("markdown dos textos legais", () => {
     expect(privacidade).toContain("Meta");
     expect(privacidade).toContain("Evolution");
     expect(privacidade).toMatch(/Excluir um cliente/);
+    // D-11: a exclusão da conta de quem também é cliente apaga a ficha ligada a ela.
+    expect(privacidade).toMatch(/também é cliente da organização/);
   });
 });
