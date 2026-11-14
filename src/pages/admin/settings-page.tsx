@@ -10,6 +10,7 @@ import {
 } from "@/components/admin/admin-api";
 import { Field } from "@/components/admin/field";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
+import { PlatformRetentionCard } from "@/components/admin/retention-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -268,6 +269,8 @@ export function AdminSettingsPage() {
           </Link>
         </CardContent>
       </Card>
+
+      <PlatformRetentionCard />
 
       <QueryState
         isPending={settings.isPending || plans.isPending}

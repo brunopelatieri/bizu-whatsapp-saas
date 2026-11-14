@@ -546,7 +546,8 @@ cascata com o arquivo órfão.
     nada; sem retry e com expiração de 6 h (nunca duas passadas juntas); percorre `listRetentionTargets()` (pares distintos `tenant_id` × tipo de canal das conversas, a plataforma com `null`);
     escopo que falha vai a `logError` (sem texto de mensagem) e não impede os demais.
   - **Rotas `/api/admin/retention/*`** (`src/api/admin-retention.ts`, `tech/22-admin.md`): política efetiva por organização e
-    tipo, gravar a linha (só o proprietário), prévia e última execução. A tela é da R3b.
+    tipo, gravar a linha (só o proprietário), prévia e última execução.
+  - **R3b (feita):** a tela no `/admin` (`TenantRetentionCard` na organização e `PlatformRetentionCard` em `/admin/configuracoes`, `src/components/admin/retention-*.tsx`, textos em `src/lib/inbox/retention-format.ts`), só sobre estas rotas e sem apagar nada; ver `tech/22-admin.md` e, na SPEC `pre-producao`, "R3b: o que foi feito" (decisões R3b-1 a R3b-7 e o roteiro manual com a retenção ligada em banco de teste).
   - **R3a (feita):** a estrela (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, `favorite.ts`, selo e botão na bolha) e o aviso da conversa
     esvaziada na thread (SPEC, "R3a: o que foi feito"). O teto de favoritas **não** recusa a marcação: quem rebaixa é a limpeza.
 

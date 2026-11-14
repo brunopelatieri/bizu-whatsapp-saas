@@ -17,6 +17,7 @@ import {
   type ManualSubscription,
 } from "@/components/admin/manual-billing-card";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
+import { TenantRetentionCard } from "@/components/admin/retention-card";
 import { ReasonDialog } from "@/components/admin/reason-dialog";
 import {
   type OrganizationAnnotation,
@@ -276,6 +277,14 @@ export function AdminTenantDetailPage() {
                 ) : null}
               </CardContent>
             </Card>
+
+            {/* bloco R, R3b: retenção de mensagens (some na organização excluída: a rota responde 404) */}
+            {detail.tenant.status === "deleted" ? null : (
+              <TenantRetentionCard
+                tenantId={id}
+                canWrite={owner && detail.tenant.status !== "deleting"}
+              />
+            )}
 
             <Card>
               <CardHeader>

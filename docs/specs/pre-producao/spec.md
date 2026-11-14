@@ -789,7 +789,7 @@ conversa encerrada antiga perde as mensagens e permanece na lista.
 | R1 (**implementada**; ver "R1: o que foi feito", com o contrato da R2 e da R3) | Migration `0039` com **todo** o schema do bloco, variáveis, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga; desligado nunca apaga; o piso vence. `tests/db/retention-schema.test.ts`: RLS, `CHECK`s, padrões | Sonnet 5.5 |
 | R2 (**implementada**; ver "R2: o que foi feito", com o contrato das rotas para a R3b) | Serviço de limpeza, prévia, job; exclusão do arquivo; rotas `/api/admin/retention/*` | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
 | R3a (**implementada**; ver "R3a: o que foi feito") | Estrela na mensagem (`PUT .../favorite`, selo na bolha) e aviso da conversa esvaziada, no atendimento do tenant e no da plataforma | `tests/db/inbox-favorite.test.ts`; roteiro no navegador (estrela, tempo real, aviso, desktop e celular) | Sonnet 5.5 |
-| R3b | Tela de retenção do `/admin` (política por organização e tipo de canal, prévia e última execução); **depende da R2** (serviço, prévia e `/api/admin/retention/*`) | Roteiro manual com o interruptor ligado em banco de teste | Sonnet 5.5 |
+| R3b (**implementada**; ver "R3b: o que foi feito", com o roteiro manual) | Tela de retenção do `/admin` (política por organização e tipo de canal, prévia e última execução); **depende da R2** (serviço, prévia e `/api/admin/retention/*`) | `retention-format.test.ts`, `retention-scope.test.ts`; roteiro manual com o interruptor ligado em banco de teste; conferência no navegador | Sonnet 5.5 |
 
 **Nenhuma fase depois da R1 gera migration** (o Postgres local é compartilhado e a numeração colidiria). Faltou coluna? Pare e fale com a sessão
 da R1: a `0040` é de quem a pedir, uma só, depois de combinar.
@@ -1071,6 +1071,111 @@ auditoria sem texto nem telefone, aviso só com ids, plataforma e o isolamento n
 **Limites conhecidos da R3a:** a prévia da conversa na lista (`last_message_preview`) fica em branco depois que a R2 a zera, e a R3a não
 mostra texto no lugar (o aviso só aparece dentro da conversa); a estrela não aparece nas mensagens do portal do cliente (não há atendimento
 lá); o texto de privacidade ainda não cita a favorita como marca que poupa a mensagem da retenção (bloco L, quando a R2 ligar a limpeza).
+
+### R3b: o que foi feito (2026-11-14)
+
+A tela de retenção do `/admin`, **só sobre rotas que já existiam** (`/api/admin/retention/*`, ver "R2: o que foi feito"). Nenhuma migration,
+nenhuma regra de servidor, permissão, schema Zod de entrada nem serviço de limpeza foi alterado. A tela **não apaga nada**: a prévia é `GET` e a
+limpeza de verdade só roda no job diário, com `MESSAGE_RETENTION_ENABLED=true`.
+
+**Onde fica**
+
+| Onde | O quê |
+|---|---|
+| `/admin/tenants/:id` (`TenantRetentionCard`, `src/components/admin/retention-card.tsx`) | Cartão "Retenção de mensagens", entre "Assinatura" e "Membros": um bloco por tipo de canal. Some na organização `deleted` (a rota responde 404); em `deleting` é só leitura |
+| `/admin/configuracoes` (`PlatformRetentionCard`) | "Retenção de mensagens da plataforma": os padrões do `.env` que valem para o atendimento da própria plataforma e a prévia; **só leitura**, até para o proprietário (não há linha de política da plataforma) |
+
+**O que cada bloco mostra** (`retention-scope.tsx`; textos e decisões em `src/lib/inbox/retention-format.ts`, módulo puro):
+
+- **Aviso de estado**, uma vez no topo (`RetentionStateNotice`): desligada, "A política fica gravada, mas nenhuma mensagem é apagada até a retenção ser
+  ligada (`MESSAGE_RETENTION_ENABLED`). A prévia mostra o que aconteceria."; ligada, "A limpeza roda uma vez por dia e apaga mensagens sem volta.
+  Mensagem favorita e mensagem mais nova que o piso de idade, de N horas, não são apagadas."
+- **O que vale hoje** em cada limite (mensagens, dias, favoritas), tirado de `effective`, e de onde vem, tirado de `sources`: "fixado para esta
+  organização" (`policy`, inclusive o `0` fixado, que aparece como "sem limite"), "padrão do sistema" (`default`) ou "nenhum limite definido"
+  (`unlimited`: nem a política nem o `.env` definem um). Na plataforma o rótulo nunca fala em organização.
+- **Piso de idade** (`floorHours`, "72 horas (3 dias)") e **última limpeza**: "Nunca rodou." ou quando rodou, as quatro contagens (por idade, por
+  contagem, favoritas rebaixadas, arquivos), o estado depois dela e, se o lote foi cortado, que o resto fica para o dia seguinte.
+- **Formulário da política** (só `platform_owner`; o suporte e a plataforma veem tudo sem ele): cada limite tem **três opções distintas**, em
+  `radio`: "Herdar o padrão do sistema (X)" (o X é o padrão que seria herdado, de `defaults`; manda `null`), "Sem limite" (manda `0`) e "Definir um
+  valor" (campo numérico de 1 até `RETENTION_LIMIT_MAX`, que só habilita nessa opção). Em "Definir um valor", vazio, `0`, negativo, fracionário e
+  acima do teto são recusados na tela com frase própria (o `0` manda escolher "Sem limite"), antes do `PUT`; o corpo sai com os três campos e passa
+  no `retentionPolicySchema`. "Salvar política" só habilita com alteração; "Descartar alterações" volta ao gravado. Voltar a herdar tudo é salvar
+  com as três opções em "Herdar" (R2-8).
+- **Prévia** (botão "Ver prévia", depois "Atualizar prévia"; `GET .../preview`): as contagens do que a limpeza faria agora e os totais do escopo.
+  O texto diz que **não apaga nada** e que **usa a política já gravada, não o que está digitado**; com alteração não salva, diz para salvar antes.
+  Depois de salvar, a prévia aberta é relida sozinha (a escrita invalida as consultas do `/admin`). Com o lote cortado, avisa o limite por dia.
+
+**Arquivos novos:** `src/lib/inbox/retention-format.ts` (modos de cada limite, rascunho ↔ corpo da API, rótulos de origem, resumos da prévia e da
+última limpeza, aviso de estado), `src/components/admin/retention-scope.tsx` (apresentação, sem busca) e `src/components/admin/retention-card.tsx`
+(busca, grava e abre a prévia sob demanda, com `useAdminQuery` e `useAdminMutation`). Os nomes dos tipos de canal vêm de `CHANNEL_KINDS`
+(`components/channels/channel-kinds.tsx`), o mesmo das telas de canal; a tela não escreve nome de módulo. Sem `loader`.
+
+**Testes:** `src/lib/inbox/retention-format.test.ts` (as três opções, `0` ≠ vazio ≠ herdar, tetos, corpo montado passando no Zod da rota, "tem
+alteração", rótulos de origem, resumo da última limpeza e da prévia, avisos de estado) e `src/components/admin/retention-scope.test.ts` (renderiza
+o componente: aviso de ligada e de desligada, as nove opções do proprietário, o suporte e a plataforma sem formulário, última limpeza e prévia).
+Não há teste de banco novo: a R3b não toca servidor.
+
+**Conferência no navegador** (servidor de desenvolvimento e contas do seed; dados locais de teste criados e removidos): proprietário em 1872 px e em
+375 px (sem rolagem horizontal), suporte (sem formulário, com prévia; o `PUT` direto responde 403), erro de campo vazio e de `0`, salvar um valor,
+"sem limite" fixado e voltar a herdar (`0` e `null` aparecem diferentes), prévia com contagens diferentes de zero, última limpeza preenchida e
+"Nunca rodou." e o cartão da plataforma. O aviso de **ligada** foi conferido por teste do componente e também, em 1872 e 375 px, num servidor de
+desenvolvimento **à parte, sobre um banco descartável** com a retenção ligada (o roteiro abaixo).
+
+**Roteiro manual da R3 (retenção ligada, só em banco de teste).** Nunca ligue `MESSAGE_RETENTION_ENABLED` no `.env.local` nem rode a limpeza
+contra um banco com dados que importam: ela apaga sem volta. O roteiro usa um banco descartável no mesmo Postgres do Docker e variáveis do
+terminal (o `dotenv` do projeto não sobrescreve variável já definida, então o `.env.local` não é alterado). Foi executado em 2026-11-14 nos passos 1 a 3, 5 a 7 e 10, com a tela do
+`/admin` aberta com a retenção ligada **depois** do primeiro ciclo (aviso de ligada, última limpeza e prévia vazia). **Não foram executados**: a prévia do
+passo 4 antes do ciclo (os 47, 0 e 3 vêm da conta e do resultado do primeiro ciclo: 151 → 104 e favoritas 5 → 2), o passo 8 (a tela do atendimento; no
+banco a conversa ficou sem mensagem, com `last_message_at` e sem prévia do texto) e o passo 9. Confira esses três na primeira vez.
+
+1. **Banco descartável.** Como superusuário (`docker exec -i <container do postgres> psql -U postgres`): `CREATE DATABASE bizu_retencao OWNER bizu_owner;`
+   e, conectado nele (`-d bizu_retencao`), os mesmos privilégios de `docker/postgres/init.sql`: `REVOKE CREATE ON SCHEMA public FROM PUBLIC;`,
+   `GRANT CONNECT ON DATABASE bizu_retencao TO bizu_app;`, `GRANT USAGE ON SCHEMA public TO bizu_app;` e os dois `ALTER DEFAULT PRIVILEGES FOR ROLE
+   bizu_owner IN SCHEMA public` (tabelas e sequências) do arquivo. Sem eles o seed falha com `42501`.
+2. **Variáveis do terminal** (troque só o nome do banco nas URLs do `.env.local`): `DIRECT_URL`, `DATABASE_URL` e `REALTIME_DATABASE_URL` com
+   `/bizu_retencao`, `MESSAGE_RETENTION_ENABLED=true`, `JOBS_MODE=off` e, se subir em outra porta, `APP_URL=http://localhost:<porta>`. Nesse mesmo
+   terminal: `npm run db:migrate` e `npm run db:seed`.
+3. **Dados** (SQL como superusuário no banco descartável; `acme` é a organização do seed): um canal `whatsapp_cloud`, dois contatos, uma conversa com
+   150 mensagens, uma por dia, de 1 a 150 dias atrás, e uma segunda conversa com **uma só mensagem de 200 dias** (`last_message_at` de 200 dias atrás e
+   `last_message_preview` preenchido); cinco mensagens da primeira, de 141 a 145 dias, marcadas favoritas (`is_favorite = true`,
+   `favorited_at = now()`); e uma linha em `retention_policy` da `acme` para `whatsapp_cloud` com `max_messages = 0`, `retention_days = 100` e
+   `max_favorites = 2`.
+4. **Tela** (servidor de desenvolvimento no mesmo terminal, `npx react-router dev --port <porta>`; entre como `owner@bizu.local`):
+   `/admin/tenants/<id da acme>` mostra o aviso de **ligada** ("roda uma vez por dia e apaga sem volta"), "sem limite" e "100 dias" e "2 favoritas",
+   todos "fixado para esta organização", e "Nunca rodou.". Em "Ver prévia": **47 por idade** (as 46 não favoritas de mais de 100 dias e a de
+   exatamente 100 dias, que já passou do corte quando a conta roda), **0 por contagem** e **3 favoritas rebaixadas** (as acima do teto de 2).
+5. **Rodar a limpeza uma vez**, em vez de esperar o cron das 04:45 UTC: crie na raiz do projeto, sem versionar, `tmp-retencao.mts` com
+   `import { config } from "dotenv"; config({ path: ".env.local", quiet: true }); const { runRetentionCycle } = await import("@/lib/inbox/retention"); try { console.log(await runRetentionCycle()); } finally { process.exit(0); }`
+   e rode `node_modules/.bin/tsx --tsconfig tsconfig.app.json tmp-retencao.mts` no mesmo terminal (saída `{ scopes: 1, ran: 1, failed: 0, truncated: 0 }`).
+   Apague o arquivo no fim.
+6. **Primeiro ciclo** (conferir no banco descartável): 151 mensagens passam a **104** (47 apagadas por idade). As favoritas passam de 5 para **2**:
+   as 3 acima do teto perderam a estrela mas **continuam lá**, porque favorita nunca é apagada, só rebaixada. A segunda conversa fica **sem
+   mensagem**, com `last_message_at` intacto e `last_message_preview` nulo. No `/admin`, "Última limpeza" mostra a data e as contagens.
+7. **Segundo ciclo:** as 3 rebaixadas, mais velhas que 100 dias, **saem agora** (104 → **101**, favoritas continuam 2). É o "ciclo seguinte" da regra.
+8. **Aviso da conversa esvaziada:** entre como `acme.owner@bizu.local` em `/app/atendimento` (o canal do passo 3 precisa estar visível à pessoa) e abra a
+   segunda conversa: "Mensagens antigas removidas pela política de retenção", sem números. A primeira segue com as mensagens e as duas favoritas com a
+   estrela cheia.
+9. **Piso e desligar:** reinicie o servidor sem `MESSAGE_RETENTION_ENABLED`: o aviso volta a "desligada" e rodar o ciclo de novo não apaga nada
+   (`ran: 0`). Mensagem de menos de 72 horas nunca sai, qualquer que seja a política.
+10. **Limpar:** pare o servidor, apague `tmp-retencao.mts` e rode `DROP DATABASE bizu_retencao;`. O `.env.local` e o banco de desenvolvimento não são tocados.
+
+**Decisões da R3b a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R3b-1 | Onde fica | Cartão na página da organização e cartão da plataforma em `/admin/configuracoes`, sem rota nem item de menu novos | Página própria `/admin/retencao` com seletor de organização |
+| R3b-2 | Forma do campo | Três opções em `radio` (herdar, sem limite, definir) e número só em "definir", que recusa vazio e `0` | Campo único com vazio = herdar e `0` = sem limite (mais curto, mas confunde) |
+| R3b-3 | Prévia | Sob demanda (botão), usa a política gravada, relida sozinha depois de salvar | Prévia ao vivo do que está digitado (pediria rota que aceite política no corpo) |
+| R3b-4 | Salvar com a retenção ligada | Salva direto; o aviso do topo já diz que a limpeza roda uma vez por dia e apaga sem volta | Diálogo de confirmação quando a política nova apaga mais |
+| R3b-5 | Aviso de estado | Um só, no topo do cartão, citando `MESSAGE_RETENTION_ENABLED` | Um aviso por tipo de canal |
+| R3b-6 | Organização `deleting` | Cartão visível e só leitura (como etiquetas e campos); `deleted` não mostra o cartão | Esconder também em `deleting` |
+| R3b-7 | Horário da última limpeza | No fuso do navegador, `dd/mm/aaaa, hh:mm` | UTC, como o cron |
+
+**O que faltou no servidor (nada bloqueou a tela):** (1) nenhuma rota informa **quando será a próxima limpeza**; a tela diz só "uma vez por dia" (o
+cron é 04:45 UTC, `src/jobs/queues.ts`). Menor mudança: um campo `nextRunAt` em `RetentionView`, derivado do cron. (2) `lastRun` não distingue "rodou
+e não havia nada" de "nunca rodou" (R2-3: a execução sem efeito não grava): a tela mostra "Nunca rodou." nos dois casos. Menor mudança: gravar
+`message_retention_state` também na execução sem efeito, ou devolver um `lastCheckedAt`. (3) A prévia não lista **quais** conversas seriam afetadas
+(só contagens, por decisão da R2): se o proprietário quiser ver, seria uma rota nova.
 
 ---
 
@@ -1517,7 +1622,7 @@ Comparação com a SPEC 059 da origem.
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
-| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2 e R3a implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem e aviso da conversa esvaziada); R3b (tela de retenção do `/admin`) pendente. Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
+| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2, R3a e R3b implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem, aviso da conversa esvaziada e tela de retenção do `/admin`); falta a revisão jurídica do texto de privacidade (ver "R3b: o que foi feito", com o roteiro manual). Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,

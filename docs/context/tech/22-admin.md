@@ -73,7 +73,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | Rota | Arquivo |
 |---|---|
 | `/admin` | `pages/admin/overview-page.tsx` |
-| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx` |
+| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx`; cartão "Retenção de mensagens" (`TenantRetentionCard`, `components/admin/retention-card.tsx`, bloco R, R3b; ver "Retenção de mensagens" abaixo) |
 | `/admin/perfil` | `pages/profile-page.tsx` (rota `routes/admin/profile.tsx`): a página "Perfil" da própria conta, o mesmo componente de `/app/perfil` (`tech/08-auth.md`, "Perfil da própria conta"); no menu do usuário |
 | `/admin/usuarios` | `users-page.tsx`; o nome leva ao detalhe |
 | `/admin/usuarios/:id`, `/admin/usuarios/portal/:id` | `user-detail-page.tsx`, `portal-user-detail-page.tsx` (rotas `routes/admin/user.tsx`, `portal-user.tsx`) |
@@ -83,7 +83,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | `/admin/configuracoes/etiquetas`, `/admin/configuracoes/campos` | `routes/admin/crm-tags.tsx`, `crm-fields.tsx`: `TagManager` e `CustomFieldManager` com a API da plataforma por props (suporte só lê); links em `/admin/configuracoes` |
 | `/admin/configuracoes/canais` | `routes/admin/channels.tsx`: `ChannelManager` de `src/components/channels/` com `basePath = /api/admin/channels` (suporte só lê) e o aviso das variáveis que faltam no servidor; link em `/admin/configuracoes` e item "Canais" no menu |
 | `/admin/auditoria` | `routes/admin/audit.tsx`: log global, por ação, nome da organização (`tenantQ`, `ilike` em `organization.name`) e pessoa |
-| `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte |
+| `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte e o cartão "Retenção de mensagens da plataforma" (`PlatformRetentionCard`, só leitura) |
 | `/admin/configuracoes/seguranca` | `routes/admin/security.tsx`: 2FA de quem administra |
 
 Reaproveitam o shell de `/app`: `AppSidebar`, `AppNav` e `AppTopbar` recebem o menu
@@ -91,6 +91,25 @@ Reaproveitam o shell de `/app`: `AppSidebar`, `AppNav` e `AppTopbar` recebem o m
 escrita só aparece para `platform_owner` (`useIsPlatformOwner`). Listagem que cita organização usa `components/admin/org-list.tsx` (nome com link, "+N") sobre `lib/admin/org-links.ts`, que lê `member`, `customer` e `subscription` com função de janela em `withPlatformScope`: uma consulta por página, sem N+1. O menu do usuário mostra
 "Administração" para quem tem papel de plataforma. Formulários validam com os schemas de
 `src/lib/schemas/admin.ts`; `limits` vazio vira `null` (ilimitado).
+
+## Retenção de mensagens (bloco R, R3b)
+
+Tela sobre `/api/admin/retention/*` (acima), sem rota de servidor própria e **sem apagar nada**: a prévia é `GET` e a limpeza é só o job diário
+`inbox.retention`, com `MESSAGE_RETENTION_ENABLED=true`.
+
+- **Onde:** `TenantRetentionCard` em `/admin/tenants/:id` (um bloco por tipo de canal; some na organização `deleted`, só leitura em `deleting`) e
+  `PlatformRetentionCard` em `/admin/configuracoes` (os padrões do `.env` da plataforma, só leitura, até para o proprietário).
+- **Peças:** `components/admin/retention-card.tsx` (busca com `useAdminQuery`, grava com `useAdminMutation`, prévia sob demanda),
+  `retention-scope.tsx` (apresentação, sem hooks de dados; testável com `renderToStaticMarkup`) e `src/lib/inbox/retention-format.ts` (módulo puro: modos
+  de cada limite, rascunho ↔ corpo do `PUT`, rótulos de origem, resumos da prévia e da última limpeza, aviso de estado). Nome do tipo de canal vem de
+  `CHANNEL_KINDS`; a tela não escreve nome de módulo.
+- **Cada limite tem três opções distintas:** "Herdar o padrão do sistema (X)" (`null`), "Sem limite" (`0`) e "Definir um valor" (1 até
+  `RETENTION_LIMIT_MAX`; vazio e `0` são recusados na tela). Mostra o que vale (`effective`) e de onde vem (`sources`: "fixado para esta organização",
+  "padrão do sistema", "nenhum limite definido"), o piso de idade e a última limpeza ("Nunca rodou." ou as contagens).
+- **Avisos:** retenção desligada, "a política fica gravada, mas nenhuma mensagem é apagada"; ligada, "roda uma vez por dia e apaga sem volta; favorita e
+  mensagem mais nova que o piso não saem". A prévia diz que não apaga e que usa a política **gravada**, não o que está digitado.
+- Só `platform_owner` vê o formulário; o suporte lê e vê a prévia (o `PUT` direto é 403). Roteiro manual com a retenção ligada em banco de teste:
+  SPEC `pre-producao`, "R3b: o que foi feito".
 
 ## Personificação
 

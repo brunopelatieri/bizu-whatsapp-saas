@@ -10,6 +10,18 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Retenção de mensagens, fase R3b: tela do `/admin` (bloco R de `docs/specs/pre-producao/spec.md`)**; só tela sobre as rotas da R2, sem migration e
+  **sem código que apague mensagem** (a limpeza continua só no job diário, com `MESSAGE_RETENTION_ENABLED=true`). Fecha o bloco R.
+  - Cartão "Retenção de mensagens" em `/admin/tenants/:id` (`TenantRetentionCard`): para cada tipo de canal, o que vale em cada limite (mensagens, dias,
+    favoritas) e de onde vem ("fixado para esta organização", "padrão do sistema" ou "nenhum limite definido"), o piso de idade e a última limpeza
+    (quando rodou e as contagens, ou "Nunca rodou.").
+  - Edição da política, só para o `platform_owner` (o suporte lê): cada limite tem três opções distintas, herdar o padrão (`null`), sem limite (`0`) ou um
+    número de 1 até o teto (`RETENTION_LIMIT_MAX`); vazio e `0` em "definir" são recusados na tela.
+  - Prévia sob demanda do que a limpeza faria agora (idade, contagem, favoritas rebaixadas, arquivos, lote cortado): não apaga nada e usa a política já
+    gravada. Aviso de estado: retenção desligada (política gravada, nada é apagado) ou ligada (roda uma vez por dia e apaga sem volta; favorita e piso não saem).
+  - Cartão "Retenção de mensagens da plataforma" em `/admin/configuracoes`: só leitura, com os padrões do sistema e a prévia.
+  - Arquivos novos: `src/lib/inbox/retention-format.ts` (módulo puro), `src/components/admin/retention-scope.tsx` e `retention-card.tsx`.
+  - **Migração:** nenhuma.
 - **Retenção de mensagens, fase R2 (bloco R de `docs/specs/pre-producao/spec.md`)**: a limpeza. **Com `MESSAGE_RETENTION_ENABLED=true`, mensagens são
   apagadas sem volta.**
   - Serviço `src/lib/inbox/retention.ts`: por organização (e plataforma) e tipo de canal, nas fases idade, contagem (o teto vale para o escopo
@@ -19,7 +31,7 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   - Job diário `inbox.retention` (04:45 UTC, fila `exclusive` com `singletonKey`); uma organização que falha não impede as outras.
     `scheduleDefinitions` aceita `singletonKey`.
   - Rotas `/api/admin/retention/*`: política efetiva por organização e tipo de canal, gravar a política (só `platform_owner`, auditada como
-    `admin.retention_policy_updated`), prévia e última execução. A tela é da R3.
+    `admin.retention_policy_updated`), prévia e última execução. A tela é a R3b.
   - Texto de privacidade (seção 6): mensagens e arquivos passam a ter limpeza automática; contatos e conversas seguem sem prazo. `LEGAL_VERSIONS`
     continua `2026-11`.
   - **Migração:** nenhuma migration. Projeto derivado com `MESSAGE_RETENTION_ENABLED=true` (o padrão de `docker/.env.prod.example`) passa a apagar

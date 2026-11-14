@@ -60,7 +60,9 @@
   **R3a** implementada
   (2026-11-14): estrela na mensagem (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, selo e botão na bolha, tempo real) e aviso da conversa
   esvaziada, sem migration; decisões R3a-1 a R3a-5 a confirmar (SPEC, "R3a: o que foi feito").
-  Falta a R3b (tela de retenção do `/admin`; contrato das rotas em "R2: o que foi feito").
+  **R3b** implementada (2026-11-14): tela de retenção no `/admin` (cartão na página da organização e cartão só de leitura da plataforma em
+  `/admin/configuracoes`: o que vale e de onde vem, três opções por limite, prévia, última limpeza e avisos de ligada e desligada), só sobre as rotas da R2,
+  sem migration; decisões R3b-1 a R3b-7 a confirmar, roteiro manual com a retenção ligada em banco de teste na SPEC ("R3b: o que foi feito"). **Bloco R completo.**
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
