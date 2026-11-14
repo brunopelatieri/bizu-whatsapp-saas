@@ -38,6 +38,13 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Leitura de planilha para a importação de clientes (bloco I de `docs/specs/pre-producao/spec.md`, fase I1)**.
+  - `src/lib/spreadsheet/`: leitor de CSV (delimitador `,` `;` ou tab, UTF-8 ou Windows-1252, aspas e quebra de linha dentro de aspas, apóstrofo preservado) e de XLSX
+    (aba com coluna de telefone), modelo para baixar e a lista das colunas (`phone`, `name`, `email`, `document`, `tags`, `notes`, com apelidos em português). Roda no navegador;
+    célula com fórmula é só texto; tetos de 10 MB, 10.000 linhas e 2.000 caracteres por célula; bomba de zip recusada antes de descomprimir.
+  - Dependência nova: `read-excel-file` `9.3.14` (versão fixada), só em import dinâmico. Rota e tela são da fase I2.
+  - **Migração:** nenhuma. Rode `npm install`.
+
 - **Telefone que já existe: `claim` do autocadastro do portal (bloco T de `docs/specs/pre-producao/spec.md`, P3, D-1)**.
   - O autocadastro com o número de uma ficha que já existe responde como sempre e abre o pedido `purpose = claim`, com os dados da
     ficha nova em `payload`. **Confirmado o link na sessão do portal de quem se cadastrou, a ficha antiga é apagada** (contatos,

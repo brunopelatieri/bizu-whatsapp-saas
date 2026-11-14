@@ -1671,6 +1671,66 @@ Não existe importador nem dependência de planilha. O cadastro valida com `cust
 **Fases:** I1 `src/lib/spreadsheet/` com os casos A a K da origem como teste; I2 rota e tela;
 I3 Google Planilhas. **LLM:** Sonnet 5.5; Opus 5.5 na guarda de SSRF da I3.
 
+### I1: o que foi feito (2026-11-14)
+
+A leitura da planilha, **no navegador e sem tocar em banco, rota nem tela**: `src/lib/spreadsheet/` (puro, com 76 testes). Sem migration. A
+dependência nova é só `read-excel-file`, **fixada em `9.3.14`** (MIT, mantida por catamphetamine; publicada em 2026-10-29, mais de duas semanas
+antes; a origem usava a `9.3.5`; a `9.3.17` tinha menos de dois dias). Ela só entra por `import("read-excel-file/browser")`, então quem usa só CSV
+nunca baixa esse pedaço, e descompacta e lê o XML em segundo plano (Web Worker), fora da thread da tela.
+
+| Arquivo | Faz |
+|---|---|
+| `types.ts` | Tetos (`MAX_SPREADSHEET_BYTES` 10 MB, `MAX_IMPORT_ROWS` 10.000, `MAX_CELL_CHARS` 2.000, `MAX_COLUMNS` 100), `SpreadsheetParseError` (código estável e mensagem legível em português), `RawImportRow` e `ParsedTable` |
+| `columns.ts` | `IMPORT_COLUMNS`: **fonte única** das colunas e dos apelidos (o leitor, o modelo e a referência da tela leem daqui); `normalizeHeader` (sem BOM, acento e caixa) e `mapColumns` |
+| `parse-csv.ts` | Tokenizador RFC 4180 de um passo (sem backtracking): delimitador `,` `;` ou tab detectado **só no cabeçalho**, aspas e `""`, quebra de linha dentro de aspas, BOM, `\r\n` `\n` `\r`, dica `sep=;` do Excel, apóstrofo nunca removido |
+| `rows.ts` | `parseTagCell` e a montagem das linhas (`tableFromRecords`), comuns ao CSV e ao XLSX |
+| `parse-xlsx.ts` | `parseXlsxSheets` (puro, escolhe a aba que tem coluna de telefone) e `readXlsxBytes` (a biblioteca, em import dinâmico; números chegam como texto, sem ponto flutuante) |
+| `zip-guard.ts` | Lê o diretório central do `.xlsx` e recusa, **antes de descomprimir**, a soma declarada acima de 64 MB, mais de 2.000 entradas ou ZIP64 (bomba de zip) |
+| `read-file.ts` | `readSpreadsheetFile(file)`: tamanho, extensão, o **conteúdo** manda (um `.xlsx` renomeado para `.csv` abre), decodificação (UTF-8 estrito, senão Windows-1252, que é o "CSV" do Excel em português; UTF-16 com marca de ordem) |
+| `template-file.ts` | `buildTemplateCsv`: o modelo, gerado de `IMPORT_COLUMNS` (`;`, BOM e CRLF, para abrir em colunas no Excel em português) |
+| `customer-row.ts` | `customerFieldsFromRow`: os campos para `customerSchema`; **sem `name`, o telefone formatado vira o nome** |
+| `testing/xlsx-builder.ts` | Só para teste: monta um `.xlsx` de verdade (zip sem compressão) |
+
+**Entrada hostil (tudo com teste):** o leitor nunca executa nem altera conteúdo (célula que começa com `=`, `+`, `-` ou `@` é só texto; o
+valor guardado é o digitado, e **qualquer exportação futura em CSV ou XLSX precisa neutralizar esses prefixos**: hoje o projeto não exporta
+clientes em planilha); célula acima de 2.000 caracteres vira linha recusada com motivo (o leitor guarda só 2.001 caracteres dela, então uma
+célula de 5 MB não pesa); milhões de delimitadores ou de aspas terminam em milissegundos; aspas sem fechar são o erro `unclosed_quote` com a
+linha (não engolem o arquivo); arquivo acima de 10 MB é recusado **pelo tamanho declarado, antes de ler**, e de novo pelos bytes lidos; binário
+com nome `.csv`, `.xls` antigo e arquivo vazio têm mensagem própria; mensagem de erro nunca carrega conteúdo do arquivo.
+
+**Os casos A a K da SPEC 052 da origem** (`docs/spec-052-importacao-de-contatos-multiformato.md`, §2.2 e §9.1) viraram teste
+(`parse-csv.test.ts`, `parse-xlsx.test.ts` e `template-file.test.ts`):
+
+| Caso | O que confere | Teste |
+|---|---|---|
+| A | CSV `,` com `vip,lead` sem aspas na última coluna guarda só `vip` (documenta a perda; a defesa é recomendar `;`) | `parseCsv: casos A a K › A` |
+| B | `"vip, lead"` entre aspas guarda as duas | `… › B` |
+| C | `vip;lead` guarda as duas sem aspas | `… › C` |
+| D | Etiquetas no meio sem aspas deslocam as colunas seguintes (documenta) | `… › D` |
+| E, E2, E3 | CSV `;` reconhece as colunas; `"vip, lead"` com `;`; vírgula dentro de campo entre aspas não muda o delimitador. **E4 (novo):** tab | `… › E`, `E2`, `E3`, `E4` |
+| F | `Maria D'Ávila` e `O'Brien & Co` preservados | `… › F` |
+| G | `"Maria ""Bibi"" Souza"` vira `Maria "Bibi" Souza` | `… › G` |
+| H | XLSX, célula `vip, lead` sem aspas vira duas etiquetas | `parseXlsxSheets › H` (e a leitura real em `readXlsxBytes`) |
+| I | XLSX, telefone como número e como texto `'0 19 99249-6598'` chegam ao normalizador e dão `5519992496598` | `parseXlsxSheets › I` |
+| J | Telefone com DDD 10, sem DDI, estrangeiro, legado de 8 dígitos, conferidos contra `normalizePhone` **deste projeto** | `template-file.test.ts › caso J` |
+| K | Só `;` e `,` separam etiquetas (`\|` e `/` não), sem repetir e sem diferenciar a caixa | `… › K` |
+
+**Onde esta SPEC difere da origem (decisões da I1 a confirmar pelo proprietário):**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I1-1 | **Etiquetas: `;` e `,` separam**, com `;` recomendado no modelo e na tela. A SPEC fala em "separador `;`", mas os casos B, E2 e H da origem dependem de a vírgula separar dentro da célula (um `"vip, lead"` virar uma etiqueta só seria pior para quem segue o guia da origem) | Só `;` separar |
+| I1-2 | **Caso J, `999999999999`:** na origem era `invalid_ddd`; aqui entra como número estrangeiro (12 dígitos, DDI 99), porque o projeto só aplica a regra do Brasil ao DDI 55 e o resto passa pelo tamanho do E.164. É regra do telefone (`src/lib/phone/br.ts`), fora desta SPEC; o teste registra o comportamento | Mudar `normalizePhone` (fora do escopo) |
+| I1-3 | **Apóstrofo nunca é removido**, nem o par que envolve a célula (a origem tirava o par: `'Zé'` virava `Zé`). Alterar o que a pessoa digitou em silêncio é pior que um nome com aspas simples; o normalizador de telefone já ignora o que não é dígito | Tirar o par envolvente, como a origem |
+| I1-4 | **O modelo usa `;`** (abre em colunas no Excel em português; em Excel configurado para inglês abre numa coluna só, mas o leitor entende os dois). A origem usava `,` | `,` |
+| I1-5 | O CSV é lido **em UTF-8 ou, se não for UTF-8 válido, em Windows-1252** (o "CSV" do Excel em português), e em UTF-16 com marca de ordem. A origem só lia UTF-8 | Só UTF-8 (acentos viram lixo no CSV padrão do Excel) |
+| I1-6 | **Fórmula não é alterada nem recusada:** vira texto como veio (ver "Entrada hostil"). Neutralizar com apóstrofo na entrada mudaria dado válido (telefone com `+`, observação com `-`) | Prefixar `'` nas células de texto que começam com `=`, `+`, `-`, `@` |
+| I1-7 | `.xls` antigo é recusado com mensagem; o conteúdo manda sobre a extensão | Aceitar só pela extensão |
+
+**O que não foi testado:** a leitura de um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade (os testes montam o arquivo à mão, com
+texto em linha e sem estilos; células mescladas e datas formatadas ficaram sem arquivo real) e o desempenho da biblioteca com 10 MB reais no
+navegador (a etapa de navegador da I2 confere um arquivo de milhares de linhas).
+
 ---
 
 ## Bloco X: atendimento (P11)

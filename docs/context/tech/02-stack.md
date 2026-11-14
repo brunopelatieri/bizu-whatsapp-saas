@@ -52,6 +52,7 @@
 | React Hook Form | Formularios performaticos |
 | Zod | Validacao compartilhavel front/back |
 | `@hookform/resolvers` | Integracao React Hook Form + Zod |
+| `read-excel-file` (`9.3.14`, versao fixada) | Leitura de `.xlsx` na importacao de clientes (bloco I), so no navegador e em import dinamico (`read-excel-file/browser`); descompacta e le o XML num Web Worker. Unica biblioteca de planilha do projeto |
 
 ### Backend / API / Banco
 

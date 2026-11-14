@@ -65,7 +65,7 @@
   sem migration; decisões R3b-1 a R3b-7 a confirmar, roteiro manual com a retenção ligada em banco de teste na SPEC ("R3b: o que foi feito"). **Bloco R completo.**
   **Q1** implementada (2026-11-14): trava por organização e métrica (`pg_advisory_xact_lock`) na conferência e na gravação de `customers` e `members`
   (`withinLimit`, `src/lib/billing/limits.ts`): cadastro pela equipe, "salvar como cliente", autocadastro do portal, convite e aceite; sem migration e sem
-  mudança de regra, mensagem ou código; decisões Q1-1 a Q1-5 a confirmar (SPEC, "Q1: o que foi feito"). Q2 a Q4 e o bloco I seguem pendentes.
+  mudança de regra, mensagem ou código; decisões Q1-1 a Q1-5 a confirmar (SPEC, "Q1: o que foi feito"). **Bloco I, fase I1** implementada (2026-11-14): leitura de planilha no navegador (`src/lib/spreadsheet/`, CSV e XLSX com `read-excel-file` `9.3.14`, modelo, colunas e tetos), com as decisões I1-1 a I1-7 a confirmar (SPEC, "I1: o que foi feito"). Q2 a Q4 e as fases I2 (rota e tela) e I3 seguem pendentes.
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,

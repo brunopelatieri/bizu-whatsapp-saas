@@ -694,6 +694,26 @@ Toda ficha nova passa pela trava `customers` do plano (`withinLimit`, `src/lib/b
 `claim` (`confirmPortalSignup`). A **confirmação do `claim`** não confere: apaga a ficha que tinha o número e cria a nova na mesma transação, o
 total não sobe (CL-12). Contato que chega por mensagem (`chat_contact`) não conta como cliente. A importação (bloco I, ainda não feita) deve criar fichas pelo mesmo caminho.
 
+## Importação de clientes (pré-produção, bloco I)
+
+**I1 (leitura da planilha) implementada; a rota e a tela são da I2.** `src/lib/spreadsheet/` é puro e roda no navegador: o arquivo nunca vai
+ao servidor, só as linhas (I2).
+
+- **Colunas** (`IMPORT_COLUMNS`, `columns.ts`, fonte única do leitor, do modelo e da tela): `phone` obrigatória (`telefone`, `celular`,
+  `whatsapp`, `numero`), `name` (`nome`), `email` (`e-mail`), `document` (`documento`, `cpf`, `cnpj`), `tags` (`etiquetas`; `;` recomendado,
+  `,` também separa), `notes` (`observacoes`). Cabeçalho sem acento nem caixa; coluna desconhecida é ignorada; campos adicionais ficam fora.
+  Sem `name`, o telefone formatado vira o nome (`customerFieldsFromRow`).
+- **Leitura:** CSV (delimitador `,` `;` ou tab detectado no cabeçalho; UTF-8, Windows-1252 ou UTF-16; aspas, `""` e quebra de linha dentro de
+  aspas; apóstrofo preservado) e XLSX (`read-excel-file` `9.3.14`, em import dinâmico; a aba com coluna de telefone é a escolhida). O conteúdo
+  manda sobre a extensão. `.xls` é recusado com mensagem.
+- **Tetos:** 10 MB (conferido antes de ler), 10.000 linhas de dados, 2.000 caracteres por célula, 100 colunas; `.xlsx` com mais de 64 MB
+  declarados descompactados (bomba de zip) é recusado antes de descomprimir (`zip-guard.ts`).
+- **Nada é executado nem alterado:** célula com `=`, `+`, `-` ou `@` no começo é texto. O valor entra como foi digitado, então **uma
+  exportação futura em CSV ou XLSX precisa neutralizar esses prefixos**.
+- **Erros** (`SpreadsheetParseError`, código estável e mensagem em português sem conteúdo do arquivo): `file_too_large`, `too_many_rows`,
+  `missing_phone_column`, `empty_file`, `unreadable`, `unsupported_format`, `unclosed_quote`.
+- **Testes:** `src/lib/spreadsheet/*.test.ts` (os casos A a K da SPEC 052 da origem estão mapeados na SPEC, "I1: o que foi feito").
+
 ## O que a SPEC pede e ainda não existe
 
 Nada do `crm-cadastro`: o programa fecha com a A4. O telefone da equipe entra no `/cadastro`, e a troca pela própria
