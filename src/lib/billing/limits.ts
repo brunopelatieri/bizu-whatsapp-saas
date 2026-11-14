@@ -1,9 +1,9 @@
-import { and, count, eq, gt, ne } from "drizzle-orm";
+import { and, count, eq, gt, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { channel, customer, invitation, member, organizationRole } from "@/db/schema";
 import type { PlanLimits } from "@/db/schema/billing";
 import { LIMIT_LABELS, type LimitMetric } from "@/lib/billing/constants";
-import { withTenant } from "@/db/rls";
+import { type Tx, withTenant } from "@/db/rls";
 import { TenantRuleError } from "@/lib/tenant/errors";
 import { storageUsedBytes } from "@/lib/files";
 import { loadTenantPlan } from "@/lib/billing/subscription";
@@ -42,6 +42,12 @@ export function evaluateLimit(
 export type UsageOptions = {
   ignoreInvitationId?: string;
   ignoreInvitationEmail?: string;
+  /**
+   * Transação de tenant (`withTenant`) em que contar. `members` e `customers` leem por ela: na
+   * trava de `withinLimit` a contagem enxerga o que a transação já gravou e não ocupa outra
+   * conexão do pool enquanto segura a trava.
+   */
+  tx?: Tx;
 };
 
 export type LimitOptions = UsageOptions & { source?: LimitSource };
@@ -61,10 +67,13 @@ export const databaseLimitSource: LimitSource = {
     return (await loadTenantPlan(tenantId))?.plan.limits ?? {};
   },
 
-  async used(tenantId, metric, { ignoreInvitationId, ignoreInvitationEmail }) {
+  async used(tenantId, metric, { ignoreInvitationId, ignoreInvitationEmail, tx: given }) {
+    const inTenant = <T>(read: (tx: Tx) => Promise<T>) =>
+      given ? read(given) : withTenant(tenantId, read);
+
     switch (metric) {
       case "members":
-        return withTenant(tenantId, async (tx) => {
+        return inTenant(async (tx) => {
           const [members] = await tx
             .select({ total: count() })
             .from(member)
@@ -97,9 +106,7 @@ export const databaseLimitSource: LimitSource = {
         return row?.total ?? 0;
       }
       case "customers": {
-        const [row] = await withTenant(tenantId, (tx) =>
-          tx.select({ total: count() }).from(customer),
-        );
+        const [row] = await inTenant((tx) => tx.select({ total: count() }).from(customer));
 
         return row?.total ?? 0;
       }
@@ -145,7 +152,19 @@ export async function checkLimit(
   return evaluateLimit(metric, limit, used);
 }
 
-/** Lança 403 `PLAN_LIMIT_REACHED` se não couber mais um. */
+function limitReached(check: LimitCheck) {
+  return new TenantRuleError(
+    403,
+    "PLAN_LIMIT_REACHED",
+    `Seu plano permite até ${check.limit} ${LIMIT_LABELS[check.metric]}. Mude de plano para continuar.`,
+  );
+}
+
+/**
+ * Lança 403 `PLAN_LIMIT_REACHED` se não couber mais um. **Só confere**: não impede que duas
+ * requisições simultâneas passem juntas pela última vaga. Quem cria `members` ou `customers`
+ * usa `withinLimit`.
+ */
 export async function assertWithinLimit(
   tenantId: string,
   metric: LimitMetric,
@@ -153,13 +172,68 @@ export async function assertWithinLimit(
 ) {
   const check = await checkLimit(tenantId, metric, options);
 
-  if (!check.allowed) {
-    throw new TenantRuleError(
-      403,
-      "PLAN_LIMIT_REACHED",
-      `Seu plano permite até ${check.limit} ${LIMIT_LABELS[metric]}. Mude de plano para continuar.`,
-    );
-  }
+  if (!check.allowed) throw limitReached(check);
 
   return check;
+}
+
+/**
+ * Quanto uma requisição espera pela trava de limite antes de desistir. O dono da trava ainda
+ * pode precisar de uma conexão do pool (o Better Auth grava convite e membro por outra
+ * conexão); sem prazo, uma fila de esperas que ocupasse o pool inteiro o travaria para sempre.
+ */
+const LIMIT_LOCK_TIMEOUT = "15s";
+
+/** A chave da trava de uma métrica de um tenant (os testes a seguram por ela). */
+export const limitLockKey = (tenantId: string, metric: LimitMetric) =>
+  `limit:${tenantId}:${metric}`;
+
+/**
+ * Trava (até o fim da transação) a métrica do tenant. **Ordem de travas do projeto:** esta é
+ * sempre a mais externa. `withinLimit` abre a própria transação e a toma antes de qualquer
+ * outra trava (o número, `lockPhoneKey`; a conta ou a ficha; o pedido) e nunca é chamada
+ * dentro de uma transação que já segura uma delas, então não fecha ciclo com nenhuma.
+ * O prazo de espera volta a `0` (o padrão do Postgres; o projeto não define outro) depois.
+ */
+async function lockLimit(tx: Tx, tenantId: string, metric: LimitMetric) {
+  await tx.execute(sql`select set_config('lock_timeout', ${LIMIT_LOCK_TIMEOUT}, true)`);
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${limitLockKey(tenantId, metric)}, 0))`,
+  );
+  // O prazo vale só para esta espera: as demais travas da transação seguem como eram.
+  await tx.execute(sql`select set_config('lock_timeout', '0', true)`);
+}
+
+/**
+ * Confere o limite e deixa o chamador gravar **sob uma trava por organização e métrica**
+ * (`pg_advisory_xact_lock`): duas requisições simultâneas esperam uma pela outra, e a segunda já
+ * conta a primeira. A mesma regra de `assertWithinLimit` (403 `PLAN_LIMIT_REACHED`), sem mudar o
+ * que conta nem a mensagem. `run` recebe a transação de tenant: quem grava o cliente grava nela
+ * e o `COMMIT` solta a trava. Quem grava por outra conexão (`members`: o Better Auth) só pode
+ * devolver depois de a gravação confirmar, como em `createOrganizationWithinLimit`.
+ *
+ * O limite é lido **antes** de abrir a transação: ler o plano por outra conexão, já segurando
+ * uma, esgotaria o pool sob concorrência. Plano sem limite na métrica não trava nada.
+ * Trava por métrica: `customers` não segura `members`, nem um tenant segura outro.
+ */
+export async function withinLimit<T>(
+  tenantId: string,
+  metric: LimitMetric,
+  options: LimitOptions,
+  run: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  const source = options.source ?? databaseLimitSource;
+  const limit = (await source.limits(tenantId))[metric] ?? null;
+
+  return withTenant(tenantId, async (tx) => {
+    if (limit !== null) {
+      await lockLimit(tx, tenantId, metric);
+
+      const used = await source.used(tenantId, metric, { ...options, tx });
+      const check = evaluateLimit(metric, limit, used);
+      if (!check.allowed) throw limitReached(check);
+    }
+
+    return run(tx);
+  });
 }

@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, o `claim` do portal, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-2 a TL-6, CL-2, CL-4 a CL-6 e CL-8 a CL-14, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, o `claim` do portal, as fases F1 e F2 do bloco F, os blocos L e E, as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) e a fase Q1 do bloco Q (trava dos limites de `customers` e `members`; decisões Q1-1 a Q1-5 a confirmar) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-2 a TL-6, CL-2, CL-4 a CL-6 e CL-8 a CL-14, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -1742,7 +1742,7 @@ Comparação com a SPEC 059 da origem.
 | Enforcement no banco por trigger | Só na aplicação | **Não portar.** Na origem o navegador grava direto no banco; aqui toda escrita passa pela API |
 | Interruptor global de quotas | Não existe | **Não portar.** O plano gratuito com limites nulos cumpre o papel |
 | Contador de uso | `count(*)` na hora | **Não portar** agora; reavaliar se a contagem de `customers` pesar |
-| Garantia contra corrida | Só em canais e organizações | **Q1:** `pg_advisory_xact_lock` por tenant e métrica em `assertWithinLimit` para `customers` e `members` (a importação torna a corrida real) |
+| Garantia contra corrida | Em canais, organizações e, **desde a Q1 (implementada)**, `customers` e `members` | **Q1:** `pg_advisory_xact_lock` por tenant e métrica, em `withinLimit` (`src/lib/billing/limits.ts`), para `customers` e `members` (a importação torna a corrida real). Ver "Q1: o que foi feito" |
 | Tela "Plano e uso" com barras | Não existe; `/api/me` devolve limites sem uso | **Q2:** `GET /api/billing/usage` e barras em `/app/assinatura` (aviso a partir de 80%) |
 | Exceção de limite por conta (`limit_overrides`) | Não existe | **Q3:** `subscription.limit_overrides` (jsonb), aplicado em `checkLimit`, editado em `/admin` com motivo e auditoria |
 | Recurso por plano (`plan_feature`) | `plan.features` existe, sem `hasFeature` | **Q4**, opcional: `hasFeature` no servidor e na tela; primeiro uso natural é a importação |
@@ -1750,6 +1750,84 @@ Comparação com a SPEC 059 da origem.
 | Limite por papel (admin × agente) | Não existe | Fora |
 
 **LLM:** Sonnet 5.5 em Q1, Q2 e Q4; Opus 5.5 em Q3 (toca cobrança) com `/security-review`.
+
+### Q1: o que foi feito (2026-11-14)
+
+A garantia contra corrida nos limites de `customers` e `members`. **Sem migration e sem mudança de regra:** o que conta em cada métrica, o
+que o plano permite, a mensagem e o código (403 `PLAN_LIMIT_REACHED`) são os de antes. Não portado, como a tabela manda: trigger,
+interruptor global e contador de uso. Q2, Q3 e Q4 não foram tocadas.
+
+**Como funciona**
+
+- `withinLimit(tenantId, metric, options, run)` (`src/lib/billing/limits.ts`): lê o limite do plano, abre a transação do tenant, toma
+  `pg_advisory_xact_lock(hashtextextended('limit:<tenant>:<métrica>', 0))`, conta **na mesma transação** e, se couber, executa `run(tx)`.
+  O `COMMIT` solta a trava. Duas requisições simultâneas esperam uma pela outra, e a segunda já enxerga a primeira.
+- A trava é por organização **e** por métrica: a de `customers` não segura `members`, nem um tenant segura outro. Plano sem limite na métrica
+  (chave ausente ou `null`) nem toma a trava.
+- O limite é lido **antes** de abrir a transação: ler o plano por outra conexão, já segurando uma, esgotaria o pool (10 conexões) sob
+  concorrência. Enquanto espera a trava, a requisição segura uma conexão; por isso a espera tem `lock_timeout` de 15 s (Q1-1), restaurado a
+  `0` assim que a trava é obtida, para não alterar as demais travas da transação.
+- `assertWithinLimit` continua, para o que não corre: `custom_roles` (teto fixo de 20 do plugin) e canais (que já têm `lockScopeType`).
+  A doc dele diz que só confere.
+
+**Os caminhos que criam ficha de cliente ou ocupam vaga de membro**
+
+| Caminho | Onde | O que foi feito |
+|---|---|---|
+| Cadastro de cliente pela equipe (`POST /api/customers`) | `createCustomer`, `src/lib/tenant/customers.ts` | Entra: a transação do cadastro **é** a de `withinLimit`; conferência e `INSERT` sob a trava. A conferência continua antes de `phoneOf`, `assertPhoneFree` e do resto (plano cheio responde 403 antes de qualquer outra recusa) |
+| "Salvar contato como cliente" no atendimento | `saveContactAsCustomer` → `createCustomer` | Entra por `createCustomer` (mesma transação, `afterCreate` dentro dela); perdeu a vaga ou a corrida do vínculo, nada é criado |
+| Autocadastro do portal (e-mail confirmado) | `confirmPortalSignup`, `src/lib/portal/login.ts` | Entra: o `checkLimit` que ficava **antes** da transação virou `withinLimit` ao redor dela. Plano cheio devolve a mesma resposta neutra (nenhuma ficha, nenhum `claim`, nenhum lead ligado), como antes |
+| Abertura do `claim` | `confirmPortalSignup` → `openPortalClaim` | Entra, pela mesma conferência do autocadastro (CL-12: o limite é conferido só na abertura) |
+| Confirmação do `claim` | `applyCustomerClaim`, `src/lib/phone/claim.ts` | **Fora, de propósito.** Apaga a ficha que tinha o número e cria a nova na mesma transação: o total de fichas não sobe, então não há vaga a disputar. Se a ficha antiga sumiu antes da confirmação, a nova entra sem conferir; é o que a CL-12 já registra, e conferir ali seria regra nova (Q1-3) |
+| Convite (`POST /api/team/invitations`) | `src/api/team.ts` | Entra: a conferência e o `createInvitation` do Better Auth correm sob a trava de `members`; o convite só é devolvido depois de gravado, e a trava cai no fim |
+| Aceite do convite (`POST /api/invitations/:id/accept`) | `src/api/invitations.ts` | Entra, na mesma trava de `members`, com `ignoreInvitationId`; o convite pendente segue ocupando a vaga |
+| Reenvio do convite (`/resend`) | `src/api/team.ts` | **Fora:** renova o prazo do mesmo convite, não ocupa assento novo e hoje já não confere o limite |
+| Remover membro, cancelar convite, mudar papel | `src/lib/tenant/team.ts` | **Fora:** só liberam ou mantêm vaga. Quem concorre com um convite no máximo é recusado por instantes que a remoção ainda não confirmou |
+| Primeiro owner da organização | `createOrganizationWithinLimit` | Fora: a organização é nova e o limite que vale é o de organizações por dono (já travado) |
+| Seed e fixtures de teste | `src/db/seed.ts`, `addMember` dos testes | Fora: não são caminhos de produto |
+
+Nenhum outro `INSERT` em `customer`, `member` ou `invitation` existe fora desses (conferido por busca no código).
+
+**Ordem das travas (sem ciclo)**
+
+1. **Limite do plano (`withinLimit`)**: sempre a mais externa. Abre a própria transação e a toma antes de qualquer outra; ninguém a pede
+   dentro de uma transação que já segure outra trava.
+2. O número (`lockPhoneKey`).
+3. A conta ou a ficha (`for update`: `lockMembers` e depois a ficha em `removeMember`, `lockUser`).
+4. O pedido (`phone_verification`).
+
+Quem toma a trava de limite nunca a pede depois de ter o número, a conta, a ficha ou o pedido; o `claim` confirmado, que segura o número e
+a ficha, **não** pede a de limite. Por isso não fecha ciclo com `lockPhoneKey`, `lockMembers` nem com a ordem dos membros antes da ficha na
+remoção. Dentro da trava de `customers` rodam o `INSERT`, as etiquetas e o vínculo do contato (`afterCreate`); dentro da de `members`, só o
+`createInvitation` ou o `acceptInvitation` (o que vem depois do aceite, como ligar a ficha, a ativação do tenant e o pedido de telefone, roda
+fora, depois de a trava cair).
+
+**Testes** (`tests/db/limit-lock.test.ts`, mais um caso em `tests/db/inbox-contacts.test.ts`)
+
+- `customers`, uma vaga e seis pedidos simultâneos: um `201`, cinco `403 PLAN_LIMIT_REACHED`, uma ficha no banco; três vagas com pedidos de
+  sobra nunca passam do limite.
+- Autocadastro do portal (dois) e equipe disputando uma vaga: fica uma ficha. Plano cheio: o autocadastro não abre ficha nem `claim`.
+- "Salvar como cliente" com dois contatos e uma vaga: um cria, o outro recebe 403 e segue sem vínculo.
+- `members`, uma vaga e seis convites: um `201`, cinco `403`, um convite no banco. Convite pendente continua ocupando a vaga (o aceite dele passa e
+  um convite novo, não, ao mesmo tempo); aceite e cinco convites novos nunca fazem membros + convites passar do limite.
+- A trava de uma organização não segura outra; a de `customers` não segura o convite, e a de `members` não segura o cliente; plano sem
+  limite na métrica não toma a trava. A trava é segurada numa transação à parte, para o teste não depender de tempo.
+- Conferido à mão que, com a trava desligada, 7 dos 10 testes de `limit-lock` falham.
+- Os testes de limite que já existiam (`billing`, `customers`, `inbox-contacts`, `team`, `limits.test.ts`) passam sem mudar expectativa.
+
+**Decisões da Q1 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| Q1-1 | A espera pela trava dura no máximo 15 s (`lock_timeout`); passou disso, o Postgres devolve erro e a requisição responde 500. Só acontece sob fila longa na mesma organização e métrica; evita que uma fila de esperas esgote o pool e trave tudo | Esperar sem prazo (arrisca travar o pool) |
+| Q1-2 | Plano sem limite na métrica não toma a trava (nada a proteger, e a importação de quem não tem limite não paga a fila) | Travar sempre |
+| Q1-3 | A confirmação do `claim` não confere o limite (CL-12): não aumenta o total quando a ficha antiga existe. Quando ela sumiu antes do link, a ficha nova entra sem conferir | Conferir também na confirmação (muda a regra: o `claim` poderia ser recusado depois de o link ser aceito) |
+| Q1-4 | Reenvio, remoção e cancelamento de convite não tomam a trava | Tomar em todos os caminhos de membro |
+| Q1-5 | A trava de limite é a mais externa (limite, número, conta ou ficha, pedido) | Outra posição na ordem |
+
+**O que não foi testado:** o esgotamento do pool com o `lock_timeout` (Q1-1); a confirmação do `claim` com a ficha antiga já apagada e o
+plano cheio; várias instâncias do servidor (a trava é do Postgres, não do processo, e os testes rodam num processo só); e o desempenho da
+contagem de `customers` com muitas fichas (a SPEC deixa o contador de uso para depois).
 
 ---
 
@@ -1761,7 +1839,7 @@ Comparação com a SPEC 059 da origem.
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
 | 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2, R3a e R3b implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem, aviso da conversa esvaziada e tela de retenção do `/admin`); falta a revisão jurídica do texto de privacidade (ver "R3b: o que foi feito", com o roteiro manual). Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
-| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
+| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito") |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
 `npm run build` e `/code-review`; `/security-review` onde a tabela de fases indica.
@@ -1771,7 +1849,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") e Q1-1 a Q1-5 da trava dos limites (em "Q1: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

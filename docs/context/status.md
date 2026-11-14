@@ -63,6 +63,9 @@
   **R3b** implementada (2026-11-14): tela de retenção no `/admin` (cartão na página da organização e cartão só de leitura da plataforma em
   `/admin/configuracoes`: o que vale e de onde vem, três opções por limite, prévia, última limpeza e avisos de ligada e desligada), só sobre as rotas da R2,
   sem migration; decisões R3b-1 a R3b-7 a confirmar, roteiro manual com a retenção ligada em banco de teste na SPEC ("R3b: o que foi feito"). **Bloco R completo.**
+  **Q1** implementada (2026-11-14): trava por organização e métrica (`pg_advisory_xact_lock`) na conferência e na gravação de `customers` e `members`
+  (`withinLimit`, `src/lib/billing/limits.ts`): cadastro pela equipe, "salvar como cliente", autocadastro do portal, convite e aceite; sem migration e sem
+  mudança de regra, mensagem ou código; decisões Q1-1 a Q1-5 a confirmar (SPEC, "Q1: o que foi feito"). Q2 a Q4 e o bloco I seguem pendentes.
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,

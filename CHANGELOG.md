@@ -10,6 +10,15 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Alterado
 
+- **Trava contra corrida nos limites de clientes e membros (bloco Q de `docs/specs/pre-producao/spec.md`, Q1)**.
+  - A conferência do limite e a gravação de `customers` e `members` correm na mesma transação, sob `pg_advisory_xact_lock` por
+    organização e métrica (`withinLimit`, `src/lib/billing/limits.ts`): com uma vaga só e pedidos simultâneos, passa um e os outros
+    recebem o 403 `PLAN_LIMIT_REACHED` de sempre. Vale para o cadastro pela equipe, "salvar contato como cliente", o autocadastro do
+    portal (e a abertura do `claim`), o convite e o aceite. A confirmação do `claim`, o reenvio, o cancelamento e a remoção não tomam a
+    trava (não ocupam vaga). Plano sem limite na métrica não toma a trava; a espera tem prazo de 15 s.
+  - `assertWithinLimit` segue só conferindo (`custom_roles`); canais e organizações por dono mantêm as travas que já tinham. Ordem das
+    travas do projeto: limite, número, conta ou ficha, pedido (`docs/context/tech/23-billing-planos.md`).
+  - Sem mudança de regra, mensagem nem código de erro. **Migração:** nenhuma.
 - **Ajustes do proprietário no bloco T (2026-11-14)** sobre a ligação manual e o `claim` de `docs/specs/pre-producao/spec.md`:
   - O link do `claim` segue a mesma cascata dos outros pedidos (Cloud, depois QR Code), também depois de falha e no reenvio
     (CL-3 revista; risco aceito como na D-13).

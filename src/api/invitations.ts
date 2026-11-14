@@ -9,7 +9,7 @@ import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
-import { assertWithinLimit } from "@/lib/billing/limits";
+import { withinLimit } from "@/lib/billing/limits";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { ensureUserVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
@@ -73,15 +73,18 @@ invitationRoutes.post(
       );
     }
 
-    // O assento do próprio convite já estava reservado; o plano pode ter encolhido.
-    await assertWithinLimit(invitation.tenantId, "members", {
-      ignoreInvitationId: invitationId,
-    });
-
-    const { member } = await getAuth().api.acceptInvitation({
-      headers: c.req.raw.headers,
-      body: { invitationId },
-    });
+    // O assento do próprio convite já estava reservado; o plano pode ter encolhido. Conferência e
+    // aceite sob a trava de `members` (`withinLimit`), a mesma do convite.
+    const { member } = await withinLimit(
+      invitation.tenantId,
+      "members",
+      { ignoreInvitationId: invitationId },
+      () =>
+        getAuth().api.acceptInvitation({
+          headers: c.req.raw.headers,
+          body: { invitationId },
+        }),
+    );
 
     await activateTenant(c.get("session").id, user.id, invitation.tenantId);
     // Quem já era cliente da organização segue com a ficha, agora ligada à conta da equipe.

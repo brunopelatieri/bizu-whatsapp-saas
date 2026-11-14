@@ -34,7 +34,7 @@ Rotas atuais:
 | POST | `/api/admin/impersonate`, `/api/admin/stop-impersonating` | Personificação com consentimento, fora de `adminRoutes` (`src/api/impersonation.ts`) |
 | POST | `/api/csp-report` | Relatório de CSP: 16 KB, sempre 204, sem URL completa no log |
 | GET, POST, PUT, PATCH | `/api/admin/*` | Plataforma: visão geral, tenants (suspender, trocar plano), planos e preços, configurações, usuários (banir; `?scope=portal` lista clientes e `POST /api/admin/portal-users/:id/revoke-sessions` derruba as sessões deles). Só `requirePlatform`; escrita só `platform_owner` (`tech/22-admin.md`) |
-| GET, POST, PATCH, DELETE | `/api/customers`, `/:id` | Clientes do tenant, com `customer:*`; `POST` passa por `assertWithinLimit(tenantId, "customers")`; fora do tenant responde 404; e-mail repetido responde 409 `CUSTOMER_EMAIL_TAKEN` |
+| GET, POST, PATCH, DELETE | `/api/customers`, `/:id` | Clientes do tenant, com `customer:*`; `POST` confere e grava sob a trava do limite (`withinLimit(tenantId, "customers", …)`); fora do tenant responde 404; e-mail repetido responde 409 `CUSTOMER_EMAIL_TAKEN` |
 | POST | `/api/customers/:id/invite` | `customer:invite`: cria `portal_user`, promove a `active`, grava `invited_at` e envia `portal-invite`; 409 `CUSTOMER_BLOCKED` |
 | — | (bloco T, `claim`) | Nenhuma rota nova: o autocadastro do portal abre o `claim` em `POST /api/portal/auth/verify-email`, `POST /api/portal/me/phone-verification/confirm` o fecha na sessão de quem se cadastrou, e `POST /api/phone-verifications/:id/confirm` responde 409 `CLAIM_LINK_ONLY` para ele (`tech/28`) |
 | PUT | `/api/customers/:id/team-link` | `customer:update` + `blockWhileImpersonating`, corpo `teamLinkSchema { userId }`: liga a ficha à pessoa da equipe **desta** organização com o telefone confirmado no sistema, à mão (200 `{ team: { userId, role } }`; idempotente; 403 `SELF_LINK`; 404 para ficha ou pessoa de outra organização; 409 `TEAM_MEMBER_NOT_LINKABLE` sem telefone confirmado; 409 `CUSTOMER_ALREADY_LINKED` ou `TEAM_MEMBER_HAS_CUSTOMER`; auditoria `customer.team_linked` com `via: manual`). A ligação decide o que a remoção da pessoa apaga (D-11, `tech/28`) |
@@ -75,7 +75,7 @@ Autenticacao:
   (`src/api/permissions.ts`). Regras e tabela de rotas em `tech/21-tenant-rbac.md`.
 - Essas rotas nao importam `@/db`: o Biome recusa (`biome.json`), e os dados passam por
   `src/lib/tenant/`. Erros saem por `handleTenantError`.
-- Limite do plano recusado: 403 `PLAN_LIMIT_REACHED` (`assertWithinLimit`, `tech/23-billing-planos.md`). `requireTenant` responde 403 `TENANT_SUSPENDED` (suspenso ou `locked`), 403 `TENANT_READ_ONLY` (mutação com `read_only`, exceto `/api/billing/*`) e 403 `TENANT_2FA_REQUIRED` (`settings.require_2fa`, membro sem 2FA).
+- Limite do plano recusado: 403 `PLAN_LIMIT_REACHED` (`withinLimit` e `assertWithinLimit`, `tech/23-billing-planos.md`). `requireTenant` responde 403 `TENANT_SUSPENDED` (suspenso ou `locked`), 403 `TENANT_READ_ONLY` (mutação com `read_only`, exceto `/api/billing/*`) e 403 `TENANT_2FA_REQUIRED` (`settings.require_2fa`, membro sem 2FA).
 - `rateLimit({ name, limit, windowMs })`: `name` é único por limite; sem o store, responde 503.
 - Id de rota usa `validId`: malformado responde 404 sem chegar ao banco.
 - Toda rota privada usa `authRateLimit` (60 por minuto) antes de `requireAuth`, porque

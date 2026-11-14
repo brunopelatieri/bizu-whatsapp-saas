@@ -13,7 +13,8 @@ import { PENDING_SIGNUP_TTL_MS } from "@/lib/auth/pending-signup";
 import { getPortalAuth } from "@/lib/auth/portal";
 import type { PortalLinkContext } from "@/lib/auth/portal-emails";
 import { type ConsentMeta, withSignupConsent } from "@/lib/lgpd/consent";
-import { checkLimit } from "@/lib/billing/limits";
+import { withinLimit } from "@/lib/billing/limits";
+import { TenantRuleError } from "@/lib/tenant/errors";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { ensurePortalUser } from "@/lib/portal/access";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
@@ -173,10 +174,10 @@ export async function confirmPortalSignup(email: string, org: string) {
     .where(eq(portalUser.email, email));
   if (!person?.emailVerified) return;
 
-  const { allowed } = await checkLimit(tenant.id, "customers");
-  if (!allowed) return;
-
-  const opened = await withTenant(tenant.id, async (tx) => {
+  // O limite é conferido na mesma transação da ficha, sob a trava de `customers`
+  // (`withinLimit`): dois autocadastros, ou um autocadastro e a equipe, não passam juntos pela
+  // última vaga. A conferência vale também para o `claim` e para ligar o lead (como antes).
+  const opened = await withinLimit(tenant.id, "customers", {}, async (tx) => {
     // O número do autocadastro já é de uma ficha desta organização, e nenhuma ficha tem o e-mail
     // (o e-mail decide antes: a ficha `lead` com ele é ligada abaixo, como sempre). Quem verifica
     // fica com o número (D-1): abre o `claim`, e a ficha nova só nasce quando o link do número for
@@ -253,6 +254,8 @@ export async function confirmPortalSignup(email: string, org: string) {
     // único). Responder diferente (500) viraria um oráculo de quem é cliente do tenant: sem linha
     // de cliente, a resposta é a mesma de sempre.
     if (isUniqueViolation(error)) return null;
+    // Plano sem vaga: nada é gravado, e a resposta é a mesma (autocadastro não derruba o limite).
+    if (error instanceof TenantRuleError && error.code === "PLAN_LIMIT_REACHED") return null;
     throw error;
   });
 

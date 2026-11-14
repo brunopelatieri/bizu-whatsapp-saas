@@ -125,7 +125,9 @@ ainda sem tela.
 1. `POST /api/portal/auth-ext/sign-up` responde `{ ok: true }` em qualquer caso.
 2. Com o tenant aberto, chama `api.signUpEmail`; o e-mail leva a `/portal/confirmar`.
 3. O POST da página confirma e cria o `customer` `lead`, se o plano tiver vaga. A linha nasce
-   depois da prova do e-mail: cadastro em massa não consome o limite de quem paga.
+   depois da prova do e-mail: cadastro em massa não consome o limite de quem paga. A conferência do limite e a
+   gravação da ficha (ou a abertura do `claim`) correm na mesma transação, sob a trava de `customers`
+   (`withinLimit`, `tech/23-billing-planos.md`); sem vaga, a resposta é a mesma e nada é gravado.
 4. Só o owner promove a `active`, e a confirmação nunca liga a identidade a uma linha ativa.
 5. **Número que já é de outra ficha (D-1, `claim`):** sem ficha com o e-mail, a confirmação não cria a linha: abre o
    pedido `claim` e o link vai ao número (Cloud primeiro, QR Code sem Cloud apta). A ficha com conta no portal, ligada

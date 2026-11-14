@@ -687,6 +687,13 @@ Decisões CL-1 a CL-14 na SPEC.
   no `claim` aberto). A exclusão da conta do portal apaga os `claim` dela; a manutenção encerra o de conta que sumiu.
 - **Testes:** `tests/db/phone-claim.test.ts`.
 
+## Limite de clientes do plano (Q1)
+
+Toda ficha nova passa pela trava `customers` do plano (`withinLimit`, `src/lib/billing/limits.ts`; detalhes em
+`tech/23-billing-planos.md`): cadastro pela equipe e "salvar contato como cliente" (`createCustomer`), autocadastro do portal e abertura do
+`claim` (`confirmPortalSignup`). A **confirmação do `claim`** não confere: apaga a ficha que tinha o número e cria a nova na mesma transação, o
+total não sobe (CL-12). Contato que chega por mensagem (`chat_contact`) não conta como cliente. A importação (bloco I, ainda não feita) deve criar fichas pelo mesmo caminho.
+
 ## O que a SPEC pede e ainda não existe
 
 Nada do `crm-cadastro`: o programa fecha com a A4. O telefone da equipe entra no `/cadastro`, e a troca pela própria

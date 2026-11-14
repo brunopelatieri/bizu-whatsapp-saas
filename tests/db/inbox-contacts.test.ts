@@ -327,6 +327,35 @@ describe("/api/inbox: contato e início de conversa", () => {
       }
     });
 
+    it("uma vaga e dois \"salvar como cliente\" simultâneos: um cria, o outro recebe 403 e o contato segue sem vínculo", async () => {
+      const plan = await createPlanRow(owner, { isFree: false, limits: { customers: 1 } });
+      await ensureSubscription(owner, tenantId, plan.id);
+      const first = await seedConversation(scope(), channelId);
+      const second = await seedConversation(scope(), channelId);
+
+      try {
+        const responses = await Promise.all(
+          [first, second].map((q) =>
+            call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+              cookie: as("memberA"),
+              body: { name: "Simultâneo" },
+            }),
+          ),
+        );
+
+        expect(responses.map((response) => response.status).sort()).toEqual([201, 403]);
+        const linked = await Promise.all([first, second].map((q) => contactRow(q.contactId)));
+        expect(linked.filter((row) => row?.customerId)).toHaveLength(1);
+        const rows = await readAll((tx) => tx.select().from(customer).where(eq(customer.tenantId, tenantId)));
+        expect(rows).toHaveLength(1);
+      } finally {
+        await owner.begin(async (tx) => {
+          await tx`select set_config('app.bypass_tenant', 'on', true)`;
+          await tx`delete from subscription where tenant_id = ${tenantId}`;
+        });
+      }
+    });
+
     it("sem customer:create: 403", async () => {
       const q = await seedConversation(scope(), channelId);
       const response = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {

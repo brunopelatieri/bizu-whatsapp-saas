@@ -6,7 +6,7 @@ import { escapeLike } from "@/lib/admin/tenants";
 import { auditInTransaction } from "@/lib/audit";
 import { getPortalAuth } from "@/lib/auth/portal";
 import type { PortalLinkContext } from "@/lib/auth/portal-emails";
-import { assertWithinLimit } from "@/lib/billing/limits";
+import { withinLimit } from "@/lib/billing/limits";
 import {
   dropOrphanPortalUser,
   ensurePortalUser,
@@ -249,11 +249,11 @@ export async function createCustomer(
     phoneVerifiedVia?: Extract<PhoneVerifiedVia, "team" | "inbound">;
   } = {},
 ) {
-  await assertWithinLimit(tenantId, "customers");
-  const phone = phoneOf(input.phone);
-
   try {
-    return await withTenant(tenantId, async (tx) => {
+    // Limite e gravação na mesma transação, sob a trava de `customers` (`withinLimit`).
+    return await withinLimit(tenantId, "customers", {}, async (tx) => {
+      // Depois do limite, como antes: plano cheio responde 403 antes de um telefone inválido.
+      const phone = phoneOf(input.phone);
       await assertPhoneFree(tx, tenantId, phone.phoneKey, actor);
 
       const { tagIds, customFields, ...fields } = input;
