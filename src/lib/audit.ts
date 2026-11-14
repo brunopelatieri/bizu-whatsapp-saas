@@ -49,6 +49,10 @@ export type AuditAction =
   // Troca de número pedida e desistida (`metadata.responsible`). O número nunca vai para cá.
   | "phone.change_requested"
   | "phone.change_canceled"
+  // Perfil da própria conta da equipe (bloco F): o nome (`metadata.name`) e a foto.
+  | "user.profile_updated"
+  | "user.avatar_updated"
+  | "user.avatar_removed"
   | "portal.signed_up"
   | "portal.profile_updated"
   | "portal.password_set"

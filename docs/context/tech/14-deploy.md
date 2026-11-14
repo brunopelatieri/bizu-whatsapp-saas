@@ -145,7 +145,8 @@ Runtime (a lista completa está em `.env.example`; a validação, em `src/lib/en
 - `CSP_REPORT_ONLY`: `true` relata em `/api/csp-report`; `false` bloqueia
 - `EMAIL_VERIFICATION_REQUIRED`: `false` (padrão) o cadastro entra direto; `true` exige o link
 - `LOG_LEVEL` (`info`), `SENTRY_DSN` (opcional), `STORAGE_PROVIDER` (`local` ou `s3`),
-  `STORAGE_LOCAL_DIR`, `S3_*`, `MAX_UPLOAD_MB`, `PAYMENT_PROVIDERS` (vazio = sem cobrança)
+  `STORAGE_LOCAL_DIR`, `S3_*`, `MAX_UPLOAD_MB`, `AVATAR_MAX_KB` (opcional, padrão 1024: teto da foto de
+  perfil da equipe, que fica no mesmo `StorageProvider`), `PAYMENT_PROVIDERS` (vazio = sem cobrança)
 - Verificação de telefone: `PHONE_VERIFICATION_REQUIRED` (opcional, padrão `true`: a conta com
   WhatsApp pendente só vê "Confirme seu WhatsApp"; `false` deixa entrar com um aviso),
   `PHONE_VERIFICATION_TTL_MINUTES` (opcional, padrão 30: validade do link) e `PHONE_VERIFICATION_CHANNELS` (ordem dos tipos de canal que enviam o link, ex.: `whatsapp_cloud,whatsapp_qr`; vazio = todo pedido espera a liberação à mão). O job `phone.verify` precisa de um consumidor da fila (`JOBS_MODE=inline` ou o worker)

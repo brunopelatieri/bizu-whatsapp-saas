@@ -16,7 +16,7 @@ estão nas rules e no cabeçalho de cada arquivo.
 | Rota, loader, `meta`, SSR, blog | `tech/05-react-router.md` |
 | Endpoint `/api/*`, `requireAuth` | `tech/06-hono-api.md` |
 | Schema, migration, query, RLS, escopo de plataforma (`Scope`, `withScope`, `withPlatformData`, `scopedPolicy`) | `tech/07-banco-drizzle.md` |
-| Login, sessão, provedor de autenticação, verificação de e-mail opcional | `tech/08-auth.md` |
+| Login, sessão, provedor de autenticação, verificação de e-mail opcional; perfil da própria conta (`PATCH /api/me`, foto em `/api/me/avatar` e `/api/avatars/:userId`, `src/lib/profile/avatar.ts`, `AVATAR_MAX_KB`) | `tech/08-auth.md` (foto: `tech/27-lgpd-arquivos.md`) |
 | 2FA, sessões, personificação, CSP, CSRF, rate limit, criptografia de credenciais, leitura da auditoria | `tech/26-seguranca.md` |
 | LGPD: consentimento, `/legal/*`, exportação, exclusão com carência (inclusive das conversas da caixa de entrada), retenção (`CHANNEL_EVENT_RETENTION_DAYS`), arquivos (`StorageProvider`), logs, Sentry, backup | `tech/27-lgpd-arquivos.md`, `lgpd.md` |
 | Canais WhatsApp: `src/lib/channels/`, módulos `whatsapp_cloud` e `whatsapp_qr`, `channel_event`, webhooks de canal, jobs `channel.*`, limites por plano | `tech/29-canais-whatsapp.md` e `docs/specs/whatsapp-canais/spec.md` |

@@ -53,6 +53,8 @@ export type AuthUser = {
     permissions: string[];
   } | null;
   impersonatedBy: string | null;
+  /** A foto de perfil (`/api/avatars/:id?v=`), só em `GET /api/me`; `null` sem foto (bloco F). */
+  avatarUrl?: string | null;
 };
 
 type SessionData = {

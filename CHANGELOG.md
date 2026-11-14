@@ -90,6 +90,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     `phone_verification`, índices de pedido aberto por finalidade e uma troca aberta por cadastro). Integração que
     trocava o telefone da ficha pelo `PATCH` precisa confirmar a troca (link na sessão do portal da ficha, ou liberação do
     owner em `/app/clientes`).
+  - **Perfil da equipe, API (bloco F, F1):** `PATCH /api/me { name }`; foto de perfil em `POST /api/me/avatar`
+    (multipart, PNG, JPEG ou WebP conferidos pelo conteúdo, até `AVATAR_MAX_KB`) e `DELETE /api/me/avatar`, servida
+    por `GET /api/avatars/:userId` só para quem divide organização com a pessoa, a equipe da plataforma e a própria
+    pessoa. `GET /api/me` traz `user.avatarUrl`. A exportação LGPD da equipe inclui a foto, e a exclusão da conta a
+    apaga. Escritas bloqueadas em personificação. Sem tela ainda (F2).
+  - **Migração da F1:** sem migration. Variável nova `AVATAR_MAX_KB` (padrão 1024). **`POST /api/auth/update-user` do
+    Better Auth foi desligado** (404): integração que trocava nome ou `image` por ali passa a usar `PATCH /api/me` e
+    `/api/me/avatar`.
   - **Migração da T4:** nenhuma.
   - **Migração da T3:** nenhuma migration. Variável nova `PHONE_VERIFICATION_REQUIRED`, padrão **`true`**: quem tem o
     telefone pendente deixa de usar o sistema até confirmar. Antes de atualizar um projeto derivado, (1) promova o

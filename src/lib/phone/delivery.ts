@@ -371,7 +371,9 @@ async function tryChannel(request: Request, target: ChannelRow, now: Date): Prom
     return "skipped";
   }
 
-  const token = await issueVerificationToken(request.id, now);
+  // O escopo é conferido de novo na emissão: o pedido pode ter mudado de responsável depois do
+  // `plan()` (a troca de quem virou owner vai para a plataforma), e o link não sai pelo canal errado.
+  const token = await issueVerificationToken(request.id, now, request.tenantId);
   if (!token) return "closed";
 
   try {

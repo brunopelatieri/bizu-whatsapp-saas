@@ -3,6 +3,7 @@ paths:
   - "src/lib/lgpd/**"
   - "src/lib/legal/**"
   - "src/lib/files/**"
+  - "src/lib/profile/**"
   - "src/lib/storage/**"
   - "src/lib/logger.ts"
   - "src/lib/observability.ts"
@@ -22,7 +23,7 @@ paths:
 - Exportação (`lgpd.export`) e exclusão (`lgpd.delete`) são jobs idempotentes que recarregam o estado do banco; o link de download é assinado **e** exige a sessão do dono.
 - Exclusão anonimiza, não apaga a linha: `invoice`, `audit_log` e `consent_log` ficam sem apontar para ninguém. Tudo em transação com `withPlatformScope("lgpd")`.
 - Último owner de organização ativa ou suspensa não exclui a conta; a organização tem carência de 30 dias e `DELETE /api/tenant` encerra a cobrança no provedor antes de agendar.
-- Arquivos passam pelo `StorageProvider` (`getStorage()`), com chave aleatória e confinada; upload só com MIME da lista, `bodyLimit` e `assertStorageAvailable`; download sempre como anexo.
+- Arquivos passam pelo `StorageProvider` (`getStorage()`), com chave aleatória e confinada; upload só com MIME da lista, `bodyLimit` e `assertStorageAvailable`; download sempre como anexo. Exceção: a foto de perfil da equipe (`src/lib/profile/avatar.ts`), `file` com `owner_type = 'user_avatar'` e `tenant_id` nulo, tipo pela assinatura (PNG, JPEG, WebP; nunca SVG), teto `AVATAR_MAX_KB`, servida `inline` só por `GET /api/avatars/:userId` a quem divide organização com a pessoa ou é da plataforma; nunca procure a foto por `user.image` nem aceite `user_avatar` com `tenant_id`. A anonimização da conta apaga a foto e a exportação a inclui.
 - Retenção vive em `src/jobs/maintenance.ts` e em `docs/context/lgpd.md`: mude os dois juntos.
 - Nenhum dado pessoal em log: pino com `redact`, `logError` sem mensagem de erro do Drizzle. Sentry (`src/lib/monitoring/sentry/`) é módulo removível.
 - Teste que lê `deletion_request` ou `data_export` com `bizu_owner` usa o bypass do RLS; teste que enfileira registra as filas antes.

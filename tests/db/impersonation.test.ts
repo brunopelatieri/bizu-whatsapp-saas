@@ -583,6 +583,12 @@ describe("personificação", () => {
       // Verificação de telefone: a sessão de suporte não confirma nem libera o número de ninguém.
       ["POST", "/api/me/phone-verification/confirm"],
       ["POST", `/api/phone-verifications/${anyId}/confirm`],
+      // Troca de telefone e perfil da própria conta (bloco T e F1).
+      ["POST", "/api/me/phone-change"],
+      ["DELETE", "/api/me/phone-change"],
+      ["PATCH", "/api/me"],
+      ["POST", "/api/me/avatar"],
+      ["DELETE", "/api/me/avatar"],
     ])("%s %s responde IMPERSONATION_BLOCKED e audita", async (method, path) => {
       const response = await call(method, path, {
         cookie,

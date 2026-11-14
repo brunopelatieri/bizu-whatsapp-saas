@@ -43,12 +43,19 @@ function ProfileCard() {
 
   async function onSubmit(values: PortalProfileInput) {
     try {
-      await apiFetch("/api/portal/me", {
+      const saved = await apiFetch<{ phoneChangePending?: boolean }>("/api/portal/me", {
         method: "PATCH",
         body: JSON.stringify(values),
       });
       await refresh();
-      toast.success("Dados atualizados.");
+      // Outro número não muda na hora: vira a troca pelo pedido, confirmada pelo link (bloco T).
+      if (saved?.phoneChangePending) {
+        toast.success(
+          "Dados salvos. Enviamos um link ao número novo: ele passa a valer quando você confirmar.",
+        );
+      } else {
+        toast.success("Dados atualizados.");
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Não foi possível salvar.",

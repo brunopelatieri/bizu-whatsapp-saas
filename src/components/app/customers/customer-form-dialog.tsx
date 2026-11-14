@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
 import {
   type Customer,
@@ -101,7 +102,17 @@ export function CustomerFormDialog({
         method: customer ? "PATCH" : "POST",
         body: values,
       })
-      .then(onClose)
+      .then((saved) => {
+        // Outro número abre a troca pelo pedido: a ficha fica com o antigo até a confirmação.
+        const change = (saved as { customer?: { phoneChange?: unknown } } | undefined)?.customer
+          ?.phoneChange;
+        if (customer && change) {
+          toast.info(
+            "O telefone novo vale depois do link de verificação (na conta do cliente no portal) ou da liberação do proprietário.",
+          );
+        }
+        onClose();
+      })
       .catch((error: unknown) => {
         // Número de outro cliente: o erro vai para o campo, onde a pessoa corrige.
         if (error instanceof ApiError && error.code === "PHONE_IN_USE") {

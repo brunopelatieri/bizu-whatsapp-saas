@@ -23,6 +23,9 @@ Rotas atuais:
 | GET | `/api/me/invitations` | Convites abertos para o e-mail da sessão |
 | GET, POST, DELETE | `/api/me/sessions`, `/:id`, `/revoke-others` | Sessões da própria pessoa, com auditoria e sem token (`tech/26-seguranca.md`) |
 | GET, POST | `/api/me/phone-verification`, `/resend`, `/confirm` | Telefone da própria conta: situação por responsável e `change` (troca aberta), reenvio (`{ responsible?, purpose? }`, 3/h), confirmação pelo link com o token no corpo (`tech/28-crm-cadastro.md`) |
+| PATCH | `/api/me` | Perfil: `{ name }` (2 a 120), audita `user.profile_updated`, bloqueada em personificação (`src/api/profile.ts`). O `update-user` do Better Auth está desligado |
+| POST, DELETE | `/api/me/avatar` | Foto de perfil (multipart, campo `file`): PNG, JPEG ou WebP pela assinatura, até `AVATAR_MAX_KB` (413 acima; 415 outro tipo); a troca apaga a anterior; `DELETE` 204. Bloqueadas em personificação |
+| GET | `/api/avatars/:userId` | A foto, só para a própria pessoa, a equipe da plataforma e quem divide organização com ela (senão 404); tipo do registro, `nosniff`, cache privado |
 | POST, DELETE | `/api/me/phone-change` | Troca do número da própria conta pelo pedido (`userPhoneChangeSchema`): 202 / 204, bloqueada em personificação, passa pelo portão de telefone |
 | GET, POST, PATCH | `/api/tenant`, `/api/tenant/active` | Criar (aplica plano padrão e trial), ler, editar e trocar o tenant ativo |
 | PATCH | `/api/tenant/security` | `require2fa`: só owner, que já precisa ter 2FA |

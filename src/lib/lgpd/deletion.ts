@@ -54,6 +54,7 @@ import {
   purgeCustomerContacts,
   purgeTenantInbox,
 } from "@/lib/inbox/privacy";
+import { deleteAvatarsOf } from "@/lib/profile/avatar";
 import { getStorage } from "@/lib/storage";
 import { TenantRuleError, notFound } from "@/lib/tenant/errors";
 import { soleOwnerTenants } from "@/lib/tenant/ownership";
@@ -784,8 +785,10 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await tx.update(customer).set({ userId: null }).where(eq(customer.userId, id));
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
+  // A foto de perfil (bloco F): o registro sai aqui e o objeto depois do commit.
+  const avatarKeys = await deleteAvatarsOf(tx, [id]);
 
-  return { storageKeys: await exportKeysOf(tx, "user", id) };
+  return { storageKeys: [...avatarKeys, ...(await exportKeysOf(tx, "user", id))] };
 }
 
 const anonymizedCustomer = {

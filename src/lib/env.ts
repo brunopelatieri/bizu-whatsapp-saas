@@ -229,6 +229,11 @@ export const envSchema = z
       emptyToUndefined,
       z.coerce.number().int().min(1).max(100).default(10),
     ),
+    // Teto da foto de perfil (`POST /api/me/avatar`, bloco F), em KB: também o `bodyLimit` da rota.
+    AVATAR_MAX_KB: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(16).max(10240).default(1024),
+    ),
 
     CSP_REPORT_ONLY: booleanString(true),
     SEED_PASSWORD: optionalString,

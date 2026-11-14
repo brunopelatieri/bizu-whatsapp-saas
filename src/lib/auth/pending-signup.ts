@@ -2,6 +2,7 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { account, user } from "@/db/schema";
 import { deleteUserVerifications } from "@/lib/phone/requests";
+import { removeAvatarsOfDeleted } from "@/lib/profile/avatar";
 
 export const PENDING_SIGNUP_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -37,4 +38,6 @@ export async function purgeExpiredPendingSignup(email: string) {
 
   // `phone_verification.subject_id` não tem FK: sem isto o pedido ficaria na fila para sempre.
   await deleteUserVerifications(removed.map(({ id }) => id));
+  // Nem `file.owner_id`: a foto de perfil (bloco F) sairia sem dono, no banco e no armazenamento.
+  await removeAvatarsOfDeleted(removed.map(({ id }) => id));
 }

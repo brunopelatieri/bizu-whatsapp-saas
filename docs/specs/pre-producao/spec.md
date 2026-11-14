@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial) e a troca de telefone pelo pedido (decisões T3-1 a T3-9, T4-1 a T4-4 e TC-1 a TC-10 a confirmar)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido e a F1 do bloco F (decisões T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10 e F1-1 a F1-5 a confirmar)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -710,6 +710,7 @@ gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `
 | T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
 | T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
 | T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
+| F1 (**implementada**; ver "F1: o que foi feito", no bloco F) | API do perfil: nome, foto (envio, troca, remoção, leitura autorizada) e LGPD | `tests/db/profile.test.ts` | Opus 5.5 + `/code-review` e `/security-review` |
 | T4 (**parcial**: filas, modelo de verificação na tela do canal e acertos de texto da T3 implementados; telas de troca de telefone, `claim` e ligação à equipe pendentes; ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
 
 ---
@@ -894,6 +895,57 @@ equipe da plataforma. Toda escrita é bloqueada em personificação.
 falso, tamanho, autorização da leitura e personificação: Opus 5.5 na leitura e no upload,
 com `/security-review`; F2 tela: Sonnet 5.5. Depende de S1 (medidor) e de T2 (troca de
 telefone).
+
+### F1: o que foi feito (2026-11-13)
+
+Implementada no servidor, sem tela (F2). Detalhe em `tech/08-auth.md` ("Perfil da própria conta") e
+`tech/27-lgpd-arquivos.md` ("Módulo de arquivos").
+
+- **Nome:** `PATCH /api/me { name }` (`profileNameSchema`, `src/lib/schemas/profile.ts`: 2 a 120 caracteres, sem
+  campo a mais), audita `user.profile_updated` com `{ name: true }` (o nome não vai para a auditoria).
+- **Foto:** `POST /api/me/avatar` (multipart, campo `file`) e `DELETE /api/me/avatar` (`src/api/profile.ts`,
+  `src/lib/profile/avatar.ts`). PNG, JPEG ou WebP pela assinatura do conteúdo; SVG, tipo falso e vazio recusados
+  (415, 400); acima de `AVATAR_MAX_KB` (variável nova, padrão 1024) 413, também no `bodyLimit` antes da sessão. Guardada
+  pelo `StorageProvider` (`avatars/<userId>/…`) como `file` com `owner_type = 'user_avatar'` e `tenant_id` nulo;
+  `user.image` guarda o id. A troca apaga a anterior (conta travada na transação; objeto depois do commit). Auditoria
+  `user.avatar_updated` e `user.avatar_removed`.
+- **Leitura:** `GET /api/avatars/:userId`, com `requireAuth`, para a própria pessoa, a equipe da plataforma e quem
+  divide uma organização com ela; fora disso, ou sem foto, 404 (não diz se a conta existe). Tipo do registro (só os
+  três), `nosniff`, `inline`, `private, max-age=300` e CSP `sandbox`. `GET /api/me` traz `user.avatarUrl`.
+- **LGPD:** a anonimização da conta apaga a foto (registro e objeto); a exportação traz `foto-de-perfil.<ext>`.
+- **Bloqueios:** toda escrita (nome e foto) recusa a personificação (`IMPERSONATION_BLOCKED`); a leitura não. Nada do
+  perfil entrou na lista do bloqueio de telefone: com o telefone pendente, nome, foto e leitura de foto respondem 403
+  `PHONE_UNVERIFIED`.
+- **Better Auth:** `/update-user` entrou em `disabledPaths` (nome e foto passavam por ali sem auditoria, e `image`
+  aceitava qualquer texto).
+- **Testes:** `tests/db/profile.test.ts` (nome; PNG/JPEG/WebP, troca e remoção; tipo falso, SVG e vazio; teto; leitura
+  por colega, plataforma, outra organização e sem sessão; arquivo de organização marcado `user_avatar`; personificação;
+  bloqueio de telefone; LGPD) e o `DELETE /api/me/avatar` e o envio multipart sobre o servidor Node em
+  `tests/db/tenant-http.test.ts`.
+
+**Revisões (troca de telefone e F1, 2026-11-13).** `/code-review` (alto): 8 achados, 7 corrigidos: as telas
+`/portal/conta` e "Editar cliente" passaram a dizer que o número novo só vale depois do link ou da liberação (antes
+diziam "atualizado"); o expurgo do cadastro pendente (`purgeExpiredPendingSignup`) apaga a foto de perfil, que
+ficaria órfã; a detecção de tipo da foto reaproveita `matchesSignature`; a visão do portal traz a troca na mesma
+consulta (era uma por ficha); o parâmetro de `GET /api/avatars/:userId` usa `avatarParamSchema`; a troca que cai
+quando a pessoa sai da organização responsável é auditada (`phone.change_canceled`, `left_tenant`). Ficou sem
+mudança a consulta extra de foto em `GET /api/me` (custo pequeno; `user.image` não é fonte confiável). As rotas
+novas bloqueadas em personificação entraram no `it.each` de `tests/db/impersonation.test.ts`. `/security-review`:
+nenhum achado com confiança 8 ou mais; como defesa extra, `issueVerificationToken` passou a conferir o escopo
+esperado pelo canal (a troca movida para a plataforma entre a decisão e a emissão não sai pelo canal da
+organização). Abaixo do critério e registrado: o colaborador pode pedir a troca da ficha para um número dele e
+convencer o cliente a abrir o link logado no portal (exige a vítima agir; antes o colaborador gravava o número
+direto).
+
+**Decisões da F1 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| F1-1 | `update-user` do Better Auth | Desligado: nome e foto só pelas rotas do perfil | Deixar aberto e validar `image` num hook |
+| F1-2 | Quem lê a foto | Também a própria pessoa (a SPEC cita só colegas e a plataforma) | Só colegas e plataforma |
+| F1-3 | Leitura negada | 404, o mesmo de "sem foto" | 403 |
+| F1-4 | Foto e telefone pendente | Fechada (nada do perfil passa pelo bloqueio) | Deixar trocar foto e nome com o telefone pendente |
+| F1-5 | Recorte de 256 px | Fica na tela (F2); o servidor só confere tipo e tamanho, sem reprocessar a imagem | Redimensionar no servidor (biblioteca de imagem nova) |
 
 ---
 
@@ -1088,8 +1140,8 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
-que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito") e TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito").
+que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
+de telefone pelo pedido: o que foi feito") e F1-1 a F1-5 do perfil (em "F1: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

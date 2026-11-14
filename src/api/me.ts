@@ -30,6 +30,7 @@ import { loadRoleCatalog } from "@/lib/tenant/roles";
 import { teamPhoneGatePasses } from "@/lib/phone/gate";
 import { phoneVerificationRequired } from "@/api/phone-gate";
 import { listInvitationsFor } from "@/lib/tenant/team";
+import { avatarIdOf, avatarUrl } from "@/lib/profile/avatar";
 
 /**
  * O tenant ativo da sessão, se a pessoa ainda for membro. Removida dele, a sessão passa
@@ -91,6 +92,7 @@ meRoutes.get("/api/me", authRateLimit, requireAuth, async (c) => {
   return c.json<MeResponse>({
     user: {
       ...user,
+      avatarUrl: avatarUrl(user.id, await avatarIdOf(user.id)),
       activeTenant: tenant && {
         id: tenant.id,
         slug: tenant.slug,

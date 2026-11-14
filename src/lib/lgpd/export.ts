@@ -26,6 +26,7 @@ import { getStorage, newStorageKey } from "@/lib/storage";
 import { TenantRuleError } from "@/lib/tenant/errors";
 import { allCustomFields, labelledCustomFields } from "@/lib/crm/custom-fields";
 import { tagsOfCustomers } from "@/lib/crm/tags";
+import { avatarForExport } from "@/lib/profile/avatar";
 
 export type ExportSubject = { type: ConsentSubjectType; id: string };
 
@@ -263,6 +264,10 @@ async function userFiles(userId: string): Promise<ZipEntry[]> {
     { name: "auditoria.json", data: json(base.audit) },
   ];
 
+  // A foto de perfil, como foi guardada (bloco F).
+  const avatar = await avatarForExport(userId);
+  if (avatar) entries.push(avatar);
+
   // Quem é owner é também controlador dos dados dos clientes da organização.
   for (const owned of base.memberships.filter(({ roles }) => isOwner(roles))) {
     const customers = await withTenant(owned.tenantId, async (tx) => {
@@ -362,6 +367,7 @@ export async function buildExportFiles(
     "- consentimentos.json: aceites e recusas dos textos legais, com a versão.",
     "- auditoria.json: ações registradas em seu nome.",
     "- clientes-<organizacao>.json: clientes das organizações de que você é proprietário.",
+    "- foto-de-perfil.<png|jpg|webp> (equipe): a foto do seu perfil, se houver.",
     "- conversas-whatsapp.json (portal): conversas de WhatsApp das organizações com os seus",
     "  cadastros, com as mensagens trocadas (anexos por nome, tipo e tamanho). Com",
     "  `truncated` verdadeiro, só as 20.000 mensagens mais recentes vieram: peça o restante ao",

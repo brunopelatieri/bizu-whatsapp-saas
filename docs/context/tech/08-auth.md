@@ -2,7 +2,7 @@
 
 - **Escopo:** Better Auth da equipe e da plataforma, verificação de e-mail, sessão e papéis. A instância do portal está em `tech/25-portal-clientes.md`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-auth.md`, `spec-seguranca.md`
-- **Paths do código:** `src/lib/auth/`, `src/api/auth.ts`, `src/api/auth-ext.ts`, `src/api/guards.ts`, `src/api/verification-guard.ts`, `src/db/schema/auth.ts`, `src/lib/schemas/auth.ts`, `src/lib/email/templates/auth/`, `src/providers/auth-provider.tsx`, `src/components/auth/`, `src/pages/*-page.tsx`, `src/routes/auth/`
+- **Paths do código:** `src/lib/auth/`, `src/api/auth.ts`, `src/api/auth-ext.ts`, `src/api/guards.ts`, `src/api/verification-guard.ts`, `src/db/schema/auth.ts`, `src/lib/schemas/auth.ts`, `src/lib/email/templates/auth/`, `src/providers/auth-provider.tsx`, `src/components/auth/`, `src/pages/*-page.tsx`, `src/routes/auth/`, `src/api/profile.ts` e `src/lib/schemas/profile.ts` (perfil, bloco F)
 
 ## Estado atual
 
@@ -241,6 +241,17 @@ liberou; owner e equipe da plataforma só com a confirmação do sistema. A sess
 responde pelo telefone da conta personificada. `ProtectedRoute` mostra só "Confirme seu WhatsApp".
 Desligada, `/api/me` traz `phonePending` e as áreas mostram um aviso. Detalhe, decisões a confirmar e
 limites: `tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".
+
+## Perfil da própria conta (bloco F, F1)
+
+`PATCH /api/me { name }` (2 a 120 caracteres; auditoria `user.profile_updated` sem o nome) e a foto
+(`POST`/`DELETE /api/me/avatar`, leitura em `GET /api/avatars/:userId`), em `src/api/profile.ts`. Toda escrita
+é bloqueada em personificação, e nada do perfil passa pelo bloqueio de telefone (com o telefone pendente,
+só a lista de `src/api/phone-gate.ts`). **`/update-user` do Better Auth está em `disabledPaths`:** nome e foto só
+mudam pelas rotas do perfil (com auditoria), e `user.image` não vira um texto qualquer escolhido pelo
+cliente. O e-mail segue pelo `change-email` (`ChangeEmailCard`), a senha pelo `change-password` (tela na F2) e
+o telefone pela troca (`/api/me/phone-change`). `GET /api/me` traz `user.avatarUrl`
+(`/api/avatars/<id>?v=<arquivo>` ou `null`). Foto: `tech/27-lgpd-arquivos.md`, "Módulo de arquivos".
 
 ## Bloqueio de login por tentativas
 

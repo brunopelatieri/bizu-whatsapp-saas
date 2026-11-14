@@ -21,6 +21,7 @@ import { invitationRoutes } from "@/api/invitations";
 import { lgpdRoutes, portalLgpdRoutes } from "@/api/lgpd";
 import { logError } from "@/api/log";
 import { meRoutes } from "@/api/me";
+import { profileRoutes } from "@/api/profile";
 import { portalRoutes } from "@/api/portal";
 import { rateLimit } from "@/api/rate-limit";
 import { checkReady } from "@/api/ready";
@@ -84,6 +85,7 @@ api.route("/", portalRoutes);
 
 api.route("/", sessionRoutes);
 api.route("/", meRoutes);
+api.route("/", profileRoutes);
 api.route("/", lgpdRoutes);
 api.route("/", portalLgpdRoutes);
 api.route("/", tenantRoutes);

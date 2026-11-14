@@ -292,6 +292,35 @@ describe("troca de número da conta da equipe", () => {
     });
   });
 
+  it("quem sai da organização que respondia pela troca perde a troca, e isso fica auditado", async () => {
+    const { user: boss, tenant } = await confirmedOwner();
+    const person = await createUser(owner);
+    await addMember(owner, tenant.id, person, "member");
+    await waitForBackgroundTasks();
+    await setUserPhone(person, uniquePhone(), null);
+    await call("POST", "/api/tenant/active", { cookie: person.cookie, body: { tenantId: tenant.id } });
+    expect((await askChange(person.cookie, uniquePhone())).status).toBe(202);
+    const change = await openChange(person.id);
+    expect(change.tenant_id).toBe(tenant.id);
+
+    const [membership] = await owner<{ id: string }[]>`
+      select id from member where user_id = ${person.id} and organization_id = ${tenant.id}
+    `;
+    expect(
+      (await call("DELETE", `/api/team/members/${membership?.id}`, { cookie: boss.cookie })).status,
+    ).toBeLessThan(300);
+    await waitForBackgroundTasks();
+
+    expect((await requestsOf(person.id)).find(({ id }) => id === change.id)?.status).toBe("canceled");
+    const audits = await asPlatform(
+      owner,
+      (tx) => tx<{ metadata: Record<string, unknown> }[]>`
+        select metadata from audit_log where action = 'phone.change_canceled' and target_id = ${person.id}
+      `,
+    );
+    expect(audits.map(({ metadata }) => metadata)).toEqual([{ reason: "left_tenant" }]);
+  });
+
   it("cancelar restaura tudo, e o token da troca cancelada não vale", async () => {
     const { user, key } = await confirmedOwner();
     expect((await askChange(user.cookie, uniquePhone())).status).toBe(202);

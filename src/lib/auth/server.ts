@@ -63,8 +63,10 @@ function createAuth() {
     // limite por e-mail); personificação, pela política de consentimento (`impersonation.ts`);
     // escrita sobre usuários, por /api/admin/*, com as regras e a auditoria de lá (o plugin
     // não compara o papel do alvo); sessões, por /api/me/sessions, com auditoria e sem
-    // expor tokens. `auth.api.*` continua disponível no servidor.
+    // expor tokens; nome e foto da própria conta, por /api/me e /api/me/avatar (bloco F), com auditoria e
+    // sem deixar `image` virar um texto qualquer. `auth.api.*` continua disponível no servidor.
     disabledPaths: [
+      "/update-user",
       "/send-verification-email",
       "/request-password-reset",
       "/list-sessions",

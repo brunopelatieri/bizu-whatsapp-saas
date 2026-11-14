@@ -283,7 +283,7 @@ export function phoneAfterMemberLeft(userId: string, tenantId: string) {
       .delete(phoneTenantVouch)
       .where(and(eq(phoneTenantVouch.userId, userId), eq(phoneTenantVouch.tenantId, tenantId)))
       .returning({ userId: phoneTenantVouch.userId });
-    await tx
+    const closed = await tx
       .update(phoneVerification)
       .set(CLOSED)
       .where(
@@ -292,7 +292,18 @@ export function phoneAfterMemberLeft(userId: string, tenantId: string) {
           isOpen,
           eq(phoneVerification.tenantId, tenantId),
         ),
-      );
+      )
+      .returning({ purpose: phoneVerification.purpose });
+
+    // A troca de número que esta organização respondia cai junto (TC-8): fica registrado.
+    if (closed.some(({ purpose }) => purpose === "change")) {
+      await auditInTransaction(tx, "phone.change_canceled", {
+        actor: { id: null, type: "system" },
+        tenantId,
+        target: { type: "user", id: userId },
+        metadata: { reason: "left_tenant" },
+      });
+    }
 
     if (vouches.length > 0) {
       await auditInTransaction(tx, "phone.unverified", {
@@ -404,16 +415,22 @@ const newToken = (type: PhoneVerificationSubject) =>
  * de ser a do pedido (o aviso de falha dela não mexe mais em nada). Devolve `null` se o pedido
  * já não está aberto. **Não confere o escopo do canal**: quem envia confere.
  */
-export function issueVerificationToken(requestId: string, now = new Date()) {
+export function issueVerificationToken(
+  requestId: string,
+  now = new Date(),
+  /** O responsável que quem envia espera (`null` = plataforma); outro escopo agora: `null`. */
+  expectedTenantId?: string | null,
+) {
   const ttlMs = getEnv().PHONE_VERIFICATION_TTL_MINUTES * 60_000;
 
   return withPlatformScope("telefone: emite o link", async (tx) => {
     const [found] = await tx
-      .select({ subjectType: phoneVerification.subjectType })
+      .select({ subjectType: phoneVerification.subjectType, tenantId: phoneVerification.tenantId })
       .from(phoneVerification)
       .where(and(eq(phoneVerification.id, requestId), isOpen))
       .for("update");
     if (!found) return null;
+    if (expectedTenantId !== undefined && found.tenantId !== expectedTenantId) return null;
 
     const token = newToken(found.subjectType);
     await tx
@@ -613,16 +630,25 @@ export function portalPhoneOverview(portalUserId: string) {
         // Dá para entrar nela agora (`POST /api/portal/active-tenant`): ficha ativa, organização ativa.
         enterable: sql<boolean>`(${customer.status} = 'active' and ${organization.status} = 'active')`,
         request: sql<string | null>`(select pv.status from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') and pv.purpose = 'signup' limit 1)`,
+        // A troca aberta da ficha (uma por cadastro), na mesma consulta.
+        change: sql<{ status: string; phone: string; at: string } | null>`(select json_build_object('status', pv.status, 'phone', pv.phone_normalized, 'at', pv.created_at) from phone_verification pv where pv.subject_type = 'customer' and pv.subject_id = ${customer.id} and pv.status in ('sent', 'awaiting_manual') and pv.purpose = 'change' limit 1)`,
       })
       .from(customer)
       .innerJoin(organization, eq(organization.id, customer.tenantId))
       .where(eq(customer.portalUserId, portalUserId))
       .orderBy(asc(organization.name));
 
-    const changes = new Map<string, PhoneChangeView>();
-    for (const record of records) {
-      changes.set(record.id, await changeView(tx, { type: "customer", id: record.id }));
-    }
+    const changeOf = (record: (typeof records)[number]): PhoneChangeView =>
+      record.change
+        ? {
+            status: record.change.status as (typeof OPEN)[number],
+            phoneHint: phoneHint(record.change.phone),
+            responsible: "organization",
+            tenantId: record.tenantId,
+            tenantName: record.name,
+            requestedAt: new Date(record.change.at),
+          }
+        : null;
 
     return records.map((record) => {
       const request = record.request === "sent" || record.request === "awaiting_manual" ? record.request : "none";
@@ -638,7 +664,7 @@ export function portalPhoneOverview(portalUserId: string) {
         view,
         enterable: Boolean(record.enterable),
         phoneHint: record.phoneNormalized ? phoneHint(record.phoneNormalized) : null,
-        change: changes.get(record.id) ?? null,
+        change: changeOf(record),
       };
     });
   });

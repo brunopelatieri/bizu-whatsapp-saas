@@ -24,6 +24,9 @@ paths:
   - "src/lib/phone/gate.ts"
   - "src/api/phone-gate.ts"
   - "src/components/phone/**"
+  - "src/api/profile.ts"
+  - "src/lib/profile/**"
+  - "src/lib/schemas/profile.ts"
   - "src/pages/forgot-password-page.tsx"
   - "src/pages/reset-password-page.tsx"
   - "src/lib/legal/**"
@@ -40,7 +43,7 @@ paths:
 - Nenhum token é consumido em GET: a página renderiza e um botão faz a chamada. `/api/auth/verify-email` só aceita POST, atrás do `verificationGuard`.
 - Respostas de cadastro, reenvio, reset e troca de e-mail nunca revelam se um e-mail existe: mesmo status, corpo e cabeçalhos. Trabalho que depende da existência roda em `runInBackground`.
 - Login de conta não verificada responde o 401 de senha errada, byte a byte (`hideUnverified`, em todo o proxy): a tela não pode depender de `EMAIL_NOT_VERIFIED`.
-- `/send-verification-email`, `/request-password-reset`, personificação, rotas de sessão (`/list-sessions`, `/revoke-*`), `/two-factor/send-otp`, `/two-factor/verify-otp` e toda escrita do plugin admin ficam em `disabledPaths`; use `auth.api.*` no servidor, atrás das rotas próprias.
+- `/send-verification-email`, `/request-password-reset`, personificação, rotas de sessão (`/list-sessions`, `/revoke-*`), `/two-factor/send-otp`, `/two-factor/verify-otp` e toda escrita do plugin admin ficam em `disabledPaths`; use `auth.api.*` no servidor, atrás das rotas próprias. `/update-user` também: nome e foto da própria conta mudam só por `PATCH /api/me` e `/api/me/avatar` (`src/api/profile.ts`), com auditoria e bloqueio na personificação.
 - Personificação passa só por `POST /api/admin/impersonate` e `/stop-impersonating` (`src/api/impersonation.ts`), com consentimento; mutação sensível nova usa `blockWhileImpersonating` e entra no `it.each` de `tests/db/impersonation.test.ts`. Em `/api/auth/*`, a sessão personificada só usa `get-session` e `sign-out`. O prazo dela é `session.impersonation_expires_at`, nunca `expires_at`, que o cliente consegue renovar. Guarda sobre sessão decide por `resolveSession`, não por `getSessionCookie`, que lê cookie repetido de outro jeito.
 - Papel de plataforma sem 2FA em produção responde 403 `PLATFORM_2FA_REQUIRED`; `tenant.settings.require_2fa` responde 403 `TENANT_2FA_REQUIRED`. Trocar `BETTER_AUTH_SECRET` invalida os 2FA ativos.
 - Não confie em `X-Forwarded-For`: o IP vem de `clientKey` (`TRUSTED_PROXY_HOPS`) e chega ao Better Auth em `x-bizu-client-ip`.

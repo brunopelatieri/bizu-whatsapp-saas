@@ -44,7 +44,10 @@
   segue pendente o `claim` do portal (D-1). **Troca de telefone pelo pedido** implementada no servidor
   (`…/phone-change` na equipe, no portal e na ficha pela equipe; `PATCH` e `/admin` passam pelo pedido; o
   cadastro mantém o número antigo até a confirmação; migration `0038`), com as decisões TC-1 a TC-10 a
-  confirmar; a tela da troca fica para a fase de telas.
+  confirmar; a tela da troca fica para a fase de telas. **F1 do bloco F** implementada (API do perfil:
+  `PATCH /api/me` com o nome, foto em `POST`/`DELETE /api/me/avatar` e `GET /api/avatars/:userId`, variável
+  `AVATAR_MAX_KB`, `update-user` do Better Auth desligado, foto na exportação e na anonimização), com as decisões
+  F1-1 a F1-5 a confirmar; a tela (F2) é a próxima.
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
