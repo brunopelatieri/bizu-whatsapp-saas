@@ -45,7 +45,7 @@ const REACH_TEXT: Record<Reach, string> = {
     "Liberada por você, a conta passa a valer no sistema inteiro, em todas as organizações.",
   team: "Liberada por você, a pessoa passa a valer só nesta organização. Em outras organizações e na plataforma, o número continua pendente.",
   customer:
-    "Liberada por você, a ficha passa a valer só nesta organização. A liberação à mão não atrai as próximas conversas desse número nem liga a ficha a quem é da equipe.",
+    "Liberada por você, a ficha passa a valer só nesta organização. Se foi a equipe que pediu a troca do número, a ficha passa a receber as próximas conversas dele, como a de um cliente recém-cadastrado. Se foi o cliente que informou o número, as conversas não são ligadas sozinhas.",
 };
 
 const STATUS_LABEL: Record<PhoneRelease["status"], string> = {

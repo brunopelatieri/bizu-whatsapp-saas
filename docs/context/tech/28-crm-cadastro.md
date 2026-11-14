@@ -569,7 +569,8 @@ TC-1 a TC-10 na SPEC ("Troca de telefone pelo pedido: o que foi feito").
   existe ainda), com o índice único como rede (`phoneInUseOnUnique`).
 - **Confirmação** (`confirmUserChange`, `confirmCustomerChange`): grava o número do pedido com o estado do
   responsável (conta pela plataforma: `whatsapp`/`manual`; conta pela organização: pendente no sistema e
-  `phone_tenant_vouch` só nela; ficha: `whatsapp` pelo link, `manual` pelo owner), fecha os outros pedidos
+  `phone_tenant_vouch` só nela; ficha: `whatsapp` pelo link; pelo owner, `team` se a equipe pediu a troca e
+  `manual` se foi a própria pessoa no portal, TC-5), fecha os outros pedidos
   abertos (eram do número antigo), apaga as liberações de organização da conta e reabre o que a conta ainda
   deve ao número novo (plataforma e outras organizações; envio depois do commit). A ligação
   `customer.user_id` fica (é por id); a ficha que troca pelo link liga a pessoa da equipe e o contato do
@@ -577,7 +578,9 @@ TC-1 a TC-10 na SPEC ("Troca de telefone pelo pedido: o que foi feito").
   ficha** (P1). Na troca pedida pela pessoa do portal, a conta do portal recebe o número, só declarado.
   Auditoria: `phone.change_requested`, `phone.change_canceled` e `phone.verified` com `purpose`.
 - **Envio:** o link sai ao número **novo**, pelo canal do responsável; a troca não espera a D-12. Ficha sem
-  conta no portal não recebe link (ninguém o confirmaria): vai à liberação do owner, que é avisado. A troca
+  conta no portal não recebe link (ninguém o confirmaria): vai à liberação do owner, que é avisado. Liberada,
+  a troca que a equipe pediu deixa a ficha `team`: ela atrai as próximas conversas do número
+  (`AUTO_LINK_CUSTOMER_VIAS`), mas não é ligada a pessoa da equipe na hora da troca. A troca
   da plataforma aparece na fila do proprietário também para o membro comum.
 - **`/admin`:** a edição do telefone de uma conta abre a troca e o proprietário a libera à mão na mesma
   transação (`changeUserPhoneByPlatform`, `manual`; 409 se outra conta do grupo tem o número). A edição da

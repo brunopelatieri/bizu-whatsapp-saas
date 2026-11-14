@@ -82,7 +82,8 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     `POST`/`DELETE /api/portal/me/phone-change` e `POST`/`DELETE /api/customers/:id/phone-change` (`customer:update`).
     **Mudança de comportamento:** `PATCH /api/customers/:id` e `PATCH /api/portal/me` com outro número deixam de
     gravá-lo e abrem a troca (o do portal devolve `phoneChangePending`; a ficha segue com o antigo); a edição do telefone
-    de uma conta em `/admin/usuarios/:id` passa pelo pedido, liberado à mão pelo proprietário na mesma transação; com o
+    de uma conta em `/admin/usuarios/:id` passa pelo pedido, liberado à mão pelo proprietário na mesma transação; a troca
+    do telefone de um cliente pedida pela equipe e liberada pelo owner deixa a ficha `team`, como no cadastro; com o
     telefone pendente, o portal corrige o número pela troca, e `PATCH /api/portal/me` fica bloqueado. A leitura ganhou
     `change` (`GET /api/me/phone-verification` e cada responsável do portal), `phoneChange` (`GET /api/customers/:id`) e
     `purpose` (filas). O reenvio aceita `{ purpose: "change" }`. Decisões a confirmar: TC-1 a TC-10.

@@ -998,6 +998,14 @@ async function confirmUser(tx: Tx, request: Request, confirmation: Confirmation)
  * pessoa do portal não fica sabendo se o número é de outro cliente (seria um oráculo); aqui quem
  * fica sabendo provou a posse do número, ou é o owner que libera. O contato e as conversas do
  * número antigo continuam ligados à ficha (P1: o histórico é do cadastro, não do número).
+ *
+ * **Como a ficha fica (TC-5, decidido pelo proprietário em 2026-11-13):**
+ * - pelo link: `whatsapp` (posse provada);
+ * - troca **pedida pela equipe** e liberada pelo owner: `team`, como no cadastro de um cliente. Quem
+ *   informou o número foi a equipe e quem tem `phone:confirm` aprovou: a ficha volta a atrair as
+ *   conversas do número. Um colaborador sozinho continua sem conseguir (pedir não é liberar);
+ * - troca pedida pela própria pessoa no portal e liberada pelo owner: `manual`. Quem declarou o
+ *   número foi ela, e ninguém provou a posse: não atrai conversa.
  */
 async function confirmCustomerChange(
   tx: Tx,
@@ -1024,10 +1032,12 @@ async function confirmCustomerChange(
   }
 
   const proven = confirmation.via === "whatsapp";
+  // Sem o link, vale quem informou o número: a equipe (`team`) ou a própria pessoa (`manual`).
+  const via = proven ? "whatsapp" : request.requestedByType === "user" ? "team" : "manual";
   const phone = changedPhone(request);
   await tx
     .update(customer)
-    .set({ ...phone, ...verifiedPhone(proven ? "whatsapp" : "manual") })
+    .set({ ...phone, ...verifiedPhone(via) })
     .where(eq(customer.id, record.id));
 
   // A troca que a própria pessoa pediu no portal leva o número também para a conta dela, como o
@@ -1050,7 +1060,9 @@ async function confirmCustomerChange(
   }
 
   // Como na confirmação do cadastro: só a prova de posse liga a ficha à pessoa da equipe com o
-  // número e o contato que já escreveu dele. A ligação que a ficha já tinha (por id) fica.
+  // número e o contato que já escreveu dele. A ligação que a ficha já tinha (por id) fica. A troca
+  // atestada pela equipe (`team`) não liga nada aqui: a ficha tem histórico, e ligá-la a um membro
+  // faria a exclusão dele levar a ficha junto (D-11). As próximas conversas do número ela atrai.
   if (proven) {
     if (!record.userId) {
       const teamUserId = await matchingTeamMember(tx, record.tenantId, request.phoneKey);

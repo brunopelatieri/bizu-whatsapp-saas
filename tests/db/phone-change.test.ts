@@ -1,9 +1,11 @@
 import type postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { withScope } from "@/db/rls";
 import { waitForBackgroundTasks } from "@/lib/auth/background";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
 import { setEmailProviderForTests } from "@/lib/email/send";
 import { resetEnvForTests } from "@/lib/env";
+import { autoLinkContact } from "@/lib/inbox/contacts";
 import { phoneValues } from "@/lib/phone/columns";
 import { ensureUserVerification, issueVerificationToken } from "@/lib/phone/requests";
 import { asPlatform, makePlatformUser } from "./billing-helpers";
@@ -533,7 +535,7 @@ describe("troca de número da ficha de cliente", () => {
     });
   });
 
-  it("equipe: número de outro cliente é 409 no pedido; a troca pedida por um colaborador só vale com o owner, como `manual`", async () => {
+  it("equipe: número de outro cliente é 409 no pedido; a troca pedida por um colaborador só vale com o owner, como `team` (TC-5)", async () => {
     const { user: boss, tenant } = await confirmedOwner();
     const collaborator = await createUser(owner);
     await addMember(owner, tenant.id, collaborator, "member");
@@ -575,13 +577,58 @@ describe("troca de número da ficha de cliente", () => {
     expect((await releaseInTenant(collaborator.cookie, change.id)).status).toBe(403);
     expect(await customerPhone(customer.id)).toMatchObject({ phone_key: before?.phone_key });
 
-    // O owner libera: vale, sem prova de posse (não atrai conversas nem liga à equipe).
+    // Antes da liberação, a conversa do número novo não é da ficha.
+    const channel = await seedCloudChannel(tenantScope(tenant.id));
+    const thread = await seedConversation(tenantScope(tenant.id), channel.id, {
+      phone: phoneValues(next).phoneNormalized,
+    });
+    const link = () =>
+      withScope(tenantScope(tenant.id), (tx) =>
+        autoLinkContact(tx, tenantScope(tenant.id), thread.contactId, phoneValues(next).phoneKey),
+      );
+    expect(await link()).toBeNull();
+
+    // O owner libera: quem informou o número foi a equipe, então vale como no cadastro (`team`).
+    // A ficha volta a atrair as conversas do número; não é ligada a ninguém da equipe.
+    expect((await releaseInTenant(boss.cookie, change.id)).status).toBe(200);
+    expect(await customerPhone(customer.id)).toMatchObject({
+      phone_key: phoneValues(next).phoneKey,
+      via: "team",
+      user_id: null,
+    });
+    expect(await link()).toEqual({ customerId: customer.id });
+  });
+
+  it("portal: a troca que a própria pessoa pediu e o owner liberou vale como `manual` e não atrai conversa", async () => {
+    const { user: boss, tenant } = await confirmedOwner();
+    const customer = await createCustomer(boss);
+    const cookie = await inviteAndEnter(boss, mail, customer.id, customer.email);
+
+    const next = uniquePhone();
+    const asked = await call("POST", "/api/portal/me/phone-change", {
+      cookie,
+      body: { phone: next },
+    });
+    expect(asked.status).toBe(202);
+    const change = await openChange(customer.id);
+    expect(change).toMatchObject({ requested_by_type: "portal_user" });
+
     expect((await releaseInTenant(boss.cookie, change.id)).status).toBe(200);
     expect(await customerPhone(customer.id)).toMatchObject({
       phone_key: phoneValues(next).phoneKey,
       via: "manual",
-      user_id: null,
     });
+
+    // Quem declarou o número foi a pessoa, e ninguém provou a posse: a conversa não é ligada sozinha.
+    const channel = await seedCloudChannel(tenantScope(tenant.id));
+    const thread = await seedConversation(tenantScope(tenant.id), channel.id, {
+      phone: phoneValues(next).phoneNormalized,
+    });
+    expect(
+      await withScope(tenantScope(tenant.id), (tx) =>
+        autoLinkContact(tx, tenantScope(tenant.id), thread.contactId, phoneValues(next).phoneKey),
+      ),
+    ).toBeNull();
   });
 
   it("a equipe e o portal cancelam a troca da ficha; a ficha fica como estava", async () => {

@@ -196,7 +196,8 @@ Duas colunas em `customer`, `user` e `portal_user`:
 - Cliente criado pela equipe não recebe link: uma importação de 10.000 linhas viraria 10.000
   mensagens a quem nunca escreveu, e o número seria bloqueado pelo WhatsApp. O telefone que a
   equipe informa é aceito como `team`. A **troca** do telefone de um cliente, por ele ou pela
-  equipe, sempre passa pelo link (P1).
+  equipe, sempre passa pelo pedido (P1): vale pelo link ou pela liberação do owner. A troca que a
+  equipe pediu e o owner liberou fica `team`, como no cadastro (TC-5).
 
 ### Alcance da confirmação (T2a, revisões de segurança)
 
@@ -570,7 +571,9 @@ Implementada no servidor, sem tela nova (a tela da troca fica para a próxima fa
   `POST …/phone-verification/resend` com `{ purpose: "change" }` (na equipe e no portal).
 - **Envio:** o link vai sempre ao número **novo**, pelo canal do responsável da troca. A troca não espera a
   D-12 (foi pedida). A troca da ficha sem conta no portal não manda link (ninguém o confirmaria): vai direto à
-  liberação do owner, que é avisado por e-mail.
+  liberação do owner, que é avisado por e-mail. **Liberada pelo owner, a troca que a equipe pediu deixa a ficha
+  `team`** (atrai as conversas do número, como um cliente recém-cadastrado); a que a própria pessoa pediu no
+  portal deixa `manual` (TC-5).
 - **Bloqueio (T3):** `POST` e `DELETE /api/me/phone-change` entraram na lista do que passa com o telefone
   pendente (é o "corrigir o número" da equipe, que não existia; a decisão T3-6 deixa de valer na parte da
   equipe). No portal, `POST` e `DELETE /api/portal/me/phone-change` entraram e **`PATCH /api/portal/me` saiu**:
@@ -590,7 +593,7 @@ Implementada no servidor, sem tela nova (a tela da troca fica para a próxima fa
 | TC-2 | Conferência de unicidade no pedido e na confirmação | **No pedido, só onde quem pede pode saber:** a equipe recebe 409 `PHONE_IN_USE` ao pedir a troca da ficha (como no cadastro). A própria conta e a pessoa do portal recebem sempre 202. **Na confirmação, sempre**, sob a trava do número (conta, `lockPhoneKey`) ou da ficha (com o índice único como rede): conta pelo link da plataforma fica com o número (quem provou fica com ele, como no cadastro); pelo link da organização ou à mão, 409; ficha, 409 (D-1, o `claim`, ainda não existe) | Recusar já no pedido (oráculo de quem tem conta ou é cliente) |
 | TC-3 | Quem responde pela troca da conta | **A plataforma** para quem responde a ela e para quem já tem o número confirmado no sistema inteiro (a troca não rebaixa a conta); **a organização em uso** (ou a primeira em que entrou) para o membro comum sem essa confirmação. Confirmada pela organização, a conta fica com o número novo pendente no sistema e liberada só nela; ganha os pedidos da plataforma (sem envio, D-12) e das outras organizações | Sempre a plataforma (contraria a D-12), ou sempre a organização (rebaixa quem tinha a confirmação do sistema) |
 | TC-4 | O que acontece na confirmação com o resto | Pedidos abertos do número antigo: fechados. Liberações de organização: apagadas (eram do número antigo). Ligação da ficha à pessoa da equipe (`customer.user_id`): fica (é por id, D-9); a ficha que troca pelo link liga a pessoa da equipe do número novo se não tinha ligação. Contato e conversas do número antigo: continuam na ficha (P1) | Desfazer a ligação da ficha na troca da conta |
-| TC-5 | Troca pedida pela equipe para um cliente | **Pelo link**, como diz a SPEC: o link vai ao número novo e só confirma na sessão do portal da ficha. Ficha sem conta no portal: sem link, direto à liberação do owner, que vale `manual` (não atrai conversas nem liga à equipe). Assim um colaborador não passa a ficha de um cliente para um número dele | A equipe atestar (`team`), como no cadastro |
+| TC-5 (**decidida pelo proprietário em 2026-11-13**) | Troca pedida pela equipe para um cliente | **Pelo link ou pela liberação do owner.** O link vai ao número novo e só confirma na sessão do portal da ficha (`whatsapp`). Ficha sem conta no portal: sem link, direto à liberação do owner. **Liberada por quem tem `phone:confirm`, a troca que a equipe pediu vale `team`, como no cadastro de um cliente:** a ficha volta a atrair as conversas do número. Não é ligada a pessoa da equipe (a ficha tem histórico, e a D-11 a apagaria com o membro). Um colaborador sozinho continua sem passar a ficha para outro número: pedir não é liberar. A troca que a própria pessoa pediu no portal e o owner liberou segue `manual` | Descartadas: manter `manual` (a ficha deixava de atrair as conversas, e a maioria dos clientes não tem portal) e a equipe trocar direto, sem fila |
 | TC-6 | Edição em `/admin` | Conta: troca aberta e liberada à mão pelo proprietário na mesma transação (`manual`, 409 se outra conta do grupo tem o número; editar a própria conta já era recusado). **Pessoa do portal: continua gravando direto como `manual`** (a conta do portal não tem pedido, e nada da ficha muda) | Criar pedido para `portal_user` |
 | TC-7 | `PATCH` que traz telefone | Continuam aceitando `phone`: outro número abre a troca, o mesmo é gravado. `PATCH /api/portal/me` saiu da lista do bloqueio | Recusar `phone` no `PATCH` e exigir a rota da troca |
 | TC-8 | Troca e responsáveis que mudam | A troca não espera a D-12. Membro que sai da organização responsável perde a troca (cancelada, como os pedidos dela); quem vira owner tem a troca movida para a plataforma, na fila, sem link até pedir o reenvio. A troca da plataforma aparece na fila do proprietário também para o membro comum | Manter a troca na organização até expirar |
