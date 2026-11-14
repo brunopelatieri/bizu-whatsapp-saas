@@ -135,6 +135,8 @@ export type MessageView = {
     status: MediaStatus;
   } | null;
   replyTo: { id: string; type: MessageType; preview: string; direction: MessageDirection } | null;
+  /** Estrela da conversa (a mesma para quem tem acesso a ela); a limpeza de retenção poupa a favorita. */
+  isFavorite: boolean;
   createdAt: string;
 };
 
@@ -380,7 +382,7 @@ export function chronological(data: InfiniteData<Page<MessageView>> | undefined)
 
 type InboxRequest = {
   path: string;
-  method: "POST" | "PATCH";
+  method: "POST" | "PATCH" | "PUT";
   body?: unknown;
 };
 

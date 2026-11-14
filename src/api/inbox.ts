@@ -41,6 +41,7 @@ import {
   listMessages,
   unreadCounts,
 } from "@/lib/inbox/conversations";
+import { setMessageFavorite } from "@/lib/inbox/favorite";
 import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
 import { retryMessage } from "@/lib/inbox/send";
 import { listConversationTemplates } from "@/lib/inbox/send-template";
@@ -49,6 +50,7 @@ import {
   assignSchema,
   conversationStatusSchema,
   conversationsQuerySchema,
+  favoriteMessageSchema,
   linkContactSchema,
   messagesQuerySchema,
   saveContactAsCustomerSchema,
@@ -233,6 +235,26 @@ inboxRoutes.post("/api/inbox/messages/:id/retry", canReply, sendLimit, validId, 
   const { message, failed } = await retryMessage(inboxActor(c), c.req.valid("param").id);
   return c.json({ message }, failed ? 200 : 201);
 });
+
+/**
+ * Estrela da mensagem (retenção, R3a): `{ favorite: boolean }`, idempotente. Pede `inbox:reply`; a
+ * mensagem de conversa que a pessoa não vê responde 404. A estrela é da conversa, não da pessoa.
+ */
+inboxRoutes.put(
+  "/api/inbox/messages/:id/favorite",
+  canReply,
+  queueLimit,
+  validId,
+  zValidator("json", favoriteMessageSchema, validationError),
+  async (c) =>
+    c.json({
+      message: await setMessageFavorite(
+        inboxActor(c),
+        c.req.valid("param").id,
+        c.req.valid("json").favorite,
+      ),
+    }),
+);
 
 // ---------------------------------------------------------------------------
 // Contato e início de conversa

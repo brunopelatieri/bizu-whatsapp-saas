@@ -1,7 +1,12 @@
-import { Loader2 } from "lucide-react";
+import { Archive, Loader2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { QueryState } from "@/components/admin/query-state";
-import { dayKey, formatDayLabel } from "@/components/inbox/format";
+import {
+  dayKey,
+  emptiedByRetention,
+  formatDayLabel,
+  RETENTION_EMPTY_NOTICE,
+} from "@/components/inbox/format";
 import {
   chronological,
   type MessageView,
@@ -19,6 +24,8 @@ const TOP_TRIGGER = 120;
 type MessageThreadProps = {
   conversationId: string;
   canReply: boolean;
+  /** `last_message_at` da conversa: preenchido com a thread vazia = esvaziada pela retenção. */
+  lastMessageAt: string | null;
   /** Envios que ainda não voltaram do servidor. */
   sending: SendingMessage[];
   /** "Responder" numa bolha: a citação ativa do composer. */
@@ -30,7 +37,13 @@ type MessageThreadProps = {
  * rolar para cima sem perder a posição; rola para o fim só se já estava no fim (ou na primeira
  * carga).
  */
-export function MessageThread({ conversationId, canReply, sending, onReply }: MessageThreadProps) {
+export function MessageThread({
+  conversationId,
+  canReply,
+  lastMessageAt,
+  sending,
+  onReply,
+}: MessageThreadProps) {
   const query = useMessages(conversationId);
   const { data, hasNextPage, isFetchingNextPage, fetchNextPage } = query;
   const messages = useMemo(() => chronological(data), [data]);
@@ -113,9 +126,16 @@ export function MessageThread({ conversationId, canReply, sending, onReply }: Me
         ) : null}
 
         {messages.length === 0 && sending.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            Nenhuma mensagem ainda. Escreva a primeira abaixo.
-          </p>
+          emptiedByRetention(0, lastMessageAt) ? (
+            <div className="flex flex-col items-center gap-2 px-4 py-10 text-center text-sm text-muted-foreground">
+              <Archive className="size-5 shrink-0" aria-hidden />
+              <p>{RETENTION_EMPTY_NOTICE}</p>
+            </div>
+          ) : (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Nenhuma mensagem ainda. Escreva a primeira abaixo.
+            </p>
+          )
         ) : null}
 
         {messages.map((message, index) => {

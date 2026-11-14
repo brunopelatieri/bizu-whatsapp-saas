@@ -29,11 +29,13 @@ import {
   platformActor,
   startPlatformConversation,
 } from "@/lib/inbox/platform";
+import { setMessageFavorite } from "@/lib/inbox/favorite";
 import { retryMessage } from "@/lib/inbox/send";
 import { listConversationTemplates } from "@/lib/inbox/send-template";
 import type { InboxActor } from "@/lib/inbox/visibility";
 import {
   conversationStatusSchema,
+  favoriteMessageSchema,
   messagesQuerySchema,
   platformConversationsQuerySchema,
   platformLinkContactSchema,
@@ -200,6 +202,26 @@ adminInboxRoutes.post(
     await retryMessageMedia(actorOf(c), c.req.valid("param").id);
     return c.json({ ok: true }, 202);
   },
+);
+
+/**
+ * Estrela da mensagem (retenção, R3a), igual à do tenant, no escopo da plataforma: a limpeza também
+ * poda `tenant_id` nulo (padrões do `.env`), então quem atende ali também precisa poupar a mensagem.
+ */
+adminInboxRoutes.put(
+  "/api/admin/inbox/messages/:id/favorite",
+  canReply,
+  queueLimit,
+  validId,
+  zValidator("json", favoriteMessageSchema, validationError),
+  async (c) =>
+    c.json({
+      message: await setMessageFavorite(
+        actorOf(c),
+        c.req.valid("param").id,
+        c.req.valid("json").favorite,
+      ),
+    }),
 );
 
 // ---------------------------------------------------------------------------

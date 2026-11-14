@@ -57,7 +57,10 @@
   (2026-11-14): limpeza `src/lib/inbox/retention.ts` (idade, contagem e favoritas acima do teto, por organização e tipo de canal, com piso,
   lote, mídia e conversa esvaziada), prévia (`dryRun`), job diário `inbox.retention` e rotas `/api/admin/retention/*`; **com
   `MESSAGE_RETENTION_ENABLED=true` apaga mensagem**. Decisões R2-1 a R2-10 a confirmar e revisão jurídica do texto de privacidade pendente.
-  Falta a R3 (estrela, aviso e tela do `/admin`; contrato das rotas em "R2: o que foi feito").
+  **R3a** implementada
+  (2026-11-14): estrela na mensagem (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, selo e botão na bolha, tempo real) e aviso da conversa
+  esvaziada, sem migration; decisões R3a-1 a R3a-5 a confirmar (SPEC, "R3a: o que foi feito").
+  Falta a R3b (tela de retenção do `/admin`; contrato das rotas em "R2: o que foi feito").
   **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
   `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
   tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,

@@ -269,6 +269,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["POST", `${BASE}/conversations/${conversationId}/read`],
         ["POST", `${BASE}/conversations/${conversationId}/messages`, { type: "text", text: "oi", clientId: "abcdefgh1" }],
         ["POST", `${BASE}/messages/${messageId}/retry`],
+        ["PUT", `${BASE}/messages/${messageId}/favorite`, { favorite: true }],
         ["POST", `${BASE}/messages/${messageId}/media/retry`],
         ["POST", `${BASE}/conversations`, { channelId: cloudId, phone: "11987654321" }],
         ["PATCH", `${BASE}/contacts/${contactId}`, { name: "X" }],
@@ -736,6 +737,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["GET", `${BASE}/conversations`, undefined],
         ["POST", `${BASE}/conversations/${thread.id}/messages`, { type: "text", text: "oi", clientId: id() }],
         ["POST", `${BASE}/conversations/${thread.id}/status`, { status: "closed" }],
+        ["PUT", `${BASE}/messages/${randomUUID()}/favorite`, { favorite: true }],
         ["POST", `${BASE}/conversations`, { channelId: cloudId, phone: "11987654321" }],
       ] as const;
       for (const [method, path, body] of attempts) {
