@@ -38,6 +38,14 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Atendimento: filtro de número na URL e "Também neste contato" (bloco X de `docs/specs/pre-producao/spec.md`, fase X1)**.
+  - A lista de conversas (`/app/atendimento` e `/admin/atendimento`) guarda o número escolhido na URL como `?canal=<id do canal>`: sobrevive a recarregar e a voltar, e a URL leva só o id do
+    canal. Id inválido, de canal que não existe ou de outro escopo cai em "todos", sem erro, e sai da URL. Abrir conversa, voltar à lista e iniciar conversa mantêm o filtro.
+  - Painel do contato com a seção "Também neste contato": as outras conversas do mesmo contato, em outros números, com o selo do número, a situação e a data; clicar abre a conversa.
+    Nova rota `GET /api/inbox/conversations/:id/related` (`inbox:read`) e `GET /api/admin/inbox/conversations/:id/related` (plataforma): só as conversas que a pessoa pode ver
+    (`visibleConversation`), com os cinco campos da seção, nunca dono, prévia, contador, nome nem telefone. Sem outra conversa, a seção não aparece.
+  - **Migração:** nenhuma.
+
 - **Importação de clientes pelo link do Google Planilhas (bloco I de `docs/specs/pre-producao/spec.md`, fase I3)**.
   - No diálogo "Importar planilha", ao lado de soltar o arquivo: colar o link de uma planilha compartilhada como "qualquer pessoa com o link". O servidor baixa o CSV
     (`POST /api/customers/import/google-sheets`, `customer:create`) e a tela segue pelo mesmo leitor, prévia, contadores e lotes da I2.

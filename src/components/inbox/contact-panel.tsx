@@ -22,6 +22,7 @@ import {
 } from "@/components/inbox/inbox-api";
 import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { PlatformContactSection } from "@/components/inbox/platform-contact-section";
+import { RelatedConversations } from "@/components/inbox/related-conversations";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +85,8 @@ export function ContactPanel({ detail, onBack }: ContactPanelProps) {
         ) : (
           <UnlinkedSection detail={detail} link={link} canReply={canReply} />
         )}
+
+        <RelatedConversations conversationId={detail.conversation.id} />
       </div>
     </aside>
   );

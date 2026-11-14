@@ -39,6 +39,7 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  listRelatedConversations,
   unreadCounts,
 } from "@/lib/inbox/conversations";
 import { setMessageFavorite } from "@/lib/inbox/favorite";
@@ -136,6 +137,11 @@ inboxRoutes.get(
   zValidator("query", messagesQuerySchema, validationError),
   async (c) =>
     c.json(await listMessages(inboxActor(c), c.req.valid("param").id, c.req.valid("query"))),
+);
+
+/** As outras conversas do contato (outros números), só as que a pessoa vê; "Também neste contato". */
+inboxRoutes.get("/api/inbox/conversations/:id/related", canRead, validId, async (c) =>
+  c.json(await listRelatedConversations(inboxActor(c), c.req.valid("param").id)),
 );
 
 inboxRoutes.get("/api/inbox/unread", canRead, async (c) => c.json(await unreadCounts(inboxActor(c))));

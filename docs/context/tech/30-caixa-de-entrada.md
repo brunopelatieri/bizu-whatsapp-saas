@@ -24,6 +24,8 @@
   `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
   `tests/db/inbox-media-send.test.ts` (C5),
   `src/lib/channels/providers/*/inbox.db.test.ts`,
+  da X1: `src/components/inbox/channel-filter.ts` (e o teste), `use-inbox-path.ts`, `related-conversations.tsx`, `listRelatedConversations` em `conversations.ts`,
+  `tests/db/inbox-related.test.ts`,
   da C7: `tests/db/inbox-lgpd.test.ts` e os ganchos em `src/lib/lgpd/deletion.ts`, `src/lib/lgpd/export.ts`,
   `src/lib/tenant/customers.ts` (`deleteCustomer`), `src/lib/channels/events.ts` (`purgeTenantChannelEvents`) e
   `src/api/roles.ts`
@@ -151,6 +153,7 @@ Erros saem por `handleTenantError`.
 | `GET /api/inbox/conversations?tab&status&unread&channelId&tagIds&assignedTo&q&cursor&limit` | `inbox:read`; `tab=all` e `assignedTo` pedem `supervise` (403); `tagIds` pede `customer:read` | `listConversations` |
 | `GET /api/inbox/conversations/:id` | `inbox:read` | `getConversation`: `{ conversation, contact, link, window }` |
 | `GET /api/inbox/conversations/:id/messages?before&limit` | `inbox:read` | `listMessages`, da mais nova para a mais antiga |
+| `GET /api/inbox/conversations/:id/related` | `inbox:read` | `listRelatedConversations` (X1): `{ items }` com as **outras** conversas do mesmo contato (outros números), cada uma só `{ id, status, channel: { id, name, type }, lastMessageAt, createdAt }`, da mais recente à mais antiga (teto 50). A atual passa por `requireVisibleConversation` (fora do alcance: 404, igual a id inexistente) e cada outra por `visibleConversation(actor)`: a que a pessoa não vê não aparece nem é contada. Sem dono, prévia, contador, nome nem telefone. Contato sem outras conversas: `items` vazio |
 | `POST /api/inbox/conversations/:id/messages` | `inbox:reply`, 60/min (anexo: 20/min) | JSON `text` (com `replyTo`) → `sendText`; JSON `template` → `sendTemplate`; `multipart/form-data` → `sendMedia`. 201 (`sent` ou `queued`), 200 com a mensagem `failed` |
 | `GET /api/inbox/conversations/:id/templates` | `inbox:reply` | `listConversationTemplates`: modelos aprovados do WABA do canal, já analisados |
 | `GET /api/inbox/media-out/:token` | **sem sessão**, token assinado | `openOutboundMedia` (só a Evolution chama; ver "Anexo de saída") |
@@ -319,6 +322,16 @@ por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
 - **Lista** (`conversation-list.tsx`): abas Fila, Minhas e Todas (a última só com `supervise`), situação, não
   lidas, número (com mais de um), etiqueta (com `customer:read`), atendente (`supervise` + `assign`, só em "Todas"),
   busca com espera de 300 ms e rolagem infinita por cursor (`IntersectionObserver` e botão "Carregar mais").
+- **Filtro de número na URL (X1, `channel-filter.ts`, `use-inbox-path.ts`):** `?canal=<id do canal>`, nos dois escopos. A lista lê o parâmetro com
+  `useSearchParams`; só vale o id de um número da lista do escopo (`resolveChannelFilter`). Formato inválido, canal que não existe ou de outro
+  escopo (e a lista de números que falhou) caem em "todos", sem erro, e o parâmetro sai da URL (`replace`). Com o parâmetro e os números ainda
+  sendo lidos, a lista espera (`useConversations(filters, enabled)`). Trocar o número **empilha** o histórico (voltar desfaz a troca) e a URL
+  guarda **só** o id do canal (busca, situação, etiquetas e atendente seguem em estado local). Abrir conversa, voltar à lista e iniciar conversa
+  levam o filtro adiante por `useInboxPath()`.
+- **"Também neste contato" (X1, `related-conversations.tsx`):** seção do painel do contato, nos dois escopos, com as outras conversas do mesmo
+  contato (selo do número, situação e data; clicar abre a conversa, mantendo o filtro). Lê `GET .../conversations/:id/related`
+  (`useRelatedConversations`, chave sob `conversations` para qualquer releitura da lista reler também, ciclo de 60 s com o SSE). Carregando,
+  erro e lista vazia **não desenham nada** (a seção some). O componente tem o slot `footer` para a ação "Continuar por outro número" da X2.
 - **Conversa:** `message-thread` mostra da mais antiga para a mais nova, com separador por dia; ao rolar perto
   do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
   um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
@@ -416,6 +429,7 @@ leitura do envio JSON ou `multipart`, resposta da mídia).
 |---|---|---|
 | `GET /api/admin/inbox/conversations?status&unread&channelId&q&cursor&limit` | plataforma | `listConversations` com `tab = all` fixo (a rota não tem `tab`, `tagIds` nem `assignedTo`; `platformConversationsQuerySchema`) |
 | `GET .../conversations/:id`, `.../messages`, `.../templates` | plataforma (`templates`: quem responde) | `getConversation`, `listMessages`, `listConversationTemplates` |
+| `GET .../conversations/:id/related` | plataforma | `listRelatedConversations` (X1), no escopo da plataforma: só conversas de `tenant_id` nulo; a de tenant responde 404 |
 | `GET .../unread` | plataforma | `unreadCounts` (`{ queue, mine }`: a plataforma só usa `queue`, o total com não lidas) |
 | `GET .../events` | plataforma | `streamInboxEvents` com o ator da plataforma: só avisos `s = null`; batimento, 15 min, 3 por pessoa, 503 sem `LISTEN` |
 | `GET .../messages/:id/media` | plataforma | `openMessageMedia` (a mídia da mensagem aponta para `/api/admin/inbox/messages/:id/media`: `inboxBase(scope)`) |
@@ -554,6 +568,10 @@ cascata com o arquivo órfão.
 
 ## Testes
 
+- `tests/db/inbox-related.test.ts` (X1): `GET .../related` nos dois escopos: o que vem (outras do mesmo contato, ordem, só os cinco campos),
+  contato sem outras, conversa de outro membro fora do alcance (não aparece, não conta, 404 igual a inexistente), outra organização e
+  inexistente 404, sem sessão 401, sem `inbox:read` 403, plataforma × tenant nos dois sentidos. `src/components/inbox/channel-filter.test.ts`:
+  parâmetro da URL (formato, canal fora da lista, lista ainda não lida) e o caminho que leva o filtro. A rota entra em `rbac.test.ts`.
 - `tests/db/rls.test.ts`: as cinco tabelas (inclusive `file`) nos três modos de `scopedPolicy()`;
   tenant não lê arquivo da plataforma; `channel_id` imutável; `restrict` do canal; cascade da
   organização.

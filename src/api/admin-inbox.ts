@@ -20,6 +20,7 @@ import {
   getConversation,
   listConversations,
   listMessages,
+  listRelatedConversations,
   unreadCounts,
 } from "@/lib/inbox/conversations";
 import { openMessageMedia, retryMessageMedia } from "@/lib/inbox/media-access";
@@ -112,6 +113,11 @@ adminInboxRoutes.get(
   zValidator("query", messagesQuerySchema, validationError),
   async (c) =>
     c.json(await listMessages(actorOf(c), c.req.valid("param").id, c.req.valid("query"))),
+);
+
+/** As outras conversas do contato, só as da plataforma (nenhuma de tenant). */
+adminInboxRoutes.get("/api/admin/inbox/conversations/:id/related", validId, async (c) =>
+  c.json(await listRelatedConversations(actorOf(c), c.req.valid("param").id)),
 );
 
 adminInboxRoutes.get("/api/admin/inbox/unread", async (c) => c.json(await unreadCounts(actorOf(c))));

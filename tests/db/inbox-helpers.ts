@@ -167,6 +167,39 @@ export function memoryStorage() {
   return { objects, storage };
 }
 
+/**
+ * Outra conversa do **mesmo contato**, em outro número (há uma por contato e número): a "Também
+ * neste contato" da X1 parte dela.
+ */
+export async function seedConversationOnContact(
+  scope: Scope,
+  channelId: string,
+  contactId: string,
+  seed: Pick<ConversationSeed, "status" | "assignedUserId" | "lastMessageAt" | "unreadCount"> = {},
+) {
+  return withScope(scope, async (tx) => {
+    const at = seed.lastMessageAt ?? new Date();
+    const [row] = await tx
+      .insert(conversation)
+      .values({
+        tenantId: scopeTenantId(scope),
+        channelId,
+        contactId,
+        status: seed.status ?? "open",
+        assignedUserId: seed.assignedUserId ?? null,
+        assignedAt: seed.assignedUserId ? new Date() : null,
+        lastMessageAt: at,
+        lastMessagePreview: "segredo da outra conversa",
+        lastMessageDirection: "in",
+        lastInboundAt: at,
+        unreadCount: seed.unreadCount ?? 0,
+      })
+      .returning();
+    if (!row) throw new Error("conversa não criada");
+    return { id: row.id, contactId };
+  });
+}
+
 /** Leitura direta, atravessando o RLS, para conferir o banco depois da chamada à API. */
 export const readAll = <T>(fn: Parameters<typeof withPlatformScope<T>>[1]) =>
   withPlatformScope("teste", fn);

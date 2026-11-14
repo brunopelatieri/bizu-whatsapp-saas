@@ -110,6 +110,7 @@ const endpoints = [
   ["GET", "/api/inbox/conversations", "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}`, "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}/messages`, "inbox:read"],
+  ["GET", `/api/inbox/conversations/${anyId}/related`, "inbox:read"],
   ["POST", `/api/inbox/conversations/${anyId}/claim`, "inbox:reply"],
   // `null` na própria pede `inbox:reply`, o resto `inbox:assign`: o serviço confere.
   ["POST", `/api/inbox/conversations/${anyId}/assign`, "inbox:read"],

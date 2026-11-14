@@ -1947,8 +1947,8 @@ Comparação com as SPECs 049, 056 e 066 da origem.
 | Selo do canal na lista e na conversa (049 §4.2) | Existe (`channel-badge.tsx`) | Nenhuma |
 | Escolher o número ao iniciar conversa (049 §4.6) | Existe (`new-conversation-dialog.tsx`) | Nenhuma |
 | Composer conforme a capacidade do canal (049 §4.3) | Existe para modelo; não há interativo nem gravação de áudio a esconder | Nenhuma |
-| Filtro de canal na URL (049 §4.1) | Filtro existe, em estado local (`conversation-list.tsx:85`) | **X1:** `?canal=<id>`; id inválido cai em "todos" |
-| "Também neste contato" (049 §4.4) | Não existe | **X1:** seção no `contact-panel.tsx` com as outras conversas do contato, respeitando `visibility.ts` |
+| Filtro de canal na URL (049 §4.1) | Filtro existe, em estado local (`conversation-list.tsx:85`) | **X1 (implementada):** `?canal=<id>`; id inválido cai em "todos" |
+| "Também neste contato" (049 §4.4) | Não existe | **X1 (implementada):** seção no `contact-panel.tsx` com as outras conversas do contato, respeitando `visibility.ts` |
 | Filtro de clientes por canal (049 §4.5) | Não existe | **X4**, opcional: parâmetro `channelId` em `GET /api/customers` com `EXISTS` |
 | Continuar por outro canal (056) | Servidor pronto: `startConversation` é o find-or-create por contato e canal (`contact-actions.ts:358-432`); falta a ação | **X2** |
 | Seletor de emoji (066) | Não existe; `Textarea` controlado sem ref de cursor (`composer.tsx:394-411`) | **X3** |
@@ -1988,6 +1988,47 @@ Comparação com as SPECs 049, 056 e 066 da origem.
 
 **Fases e LLM:** X1 e X3 com Sonnet 5.5; X2 com Opus 5.5 (cria conversa e envia por outro
 número) e `/security-review`.
+
+### X1: o que foi feito (2026-11-14)
+
+Filtro de número na URL e "Também neste contato". **Sem migration**, sem mudança de regra de visibilidade. A X2 (continuar por outro número) e a X4 não foram tocadas; a X3 vem em seguida,
+em commit próprio, na mesma branch.
+
+**Filtro de número na URL (`?canal=<id>`)**
+
+- `src/components/inbox/channel-filter.ts` (puro, com teste): `parseChannelParam` (só o formato de id; o resto é descartado), `resolveChannelFilter` (só vale o id que está na lista de números **do escopo**)
+  e `inboxPath`. A lista (`conversation-list.tsx`) lê o parâmetro com `useSearchParams`; o estado local do número saiu.
+- Formato inválido, canal inexistente, canal de outro escopo (um número de organização aberto em `/admin`, e o inverso) e lista de números que falhou caem em "todos", sem erro, e o parâmetro é
+  removido da URL com `replace` (não empilha o histórico). Com o parâmetro e os números ainda sendo lidos, a lista espera (`useConversations(filters, enabled)`), sem pedir "todos" antes.
+- Trocar o número no seletor ou em "Limpar" **empilha** o histórico: voltar desfaz a troca. A URL guarda **só** o id do canal: busca, situação, etiquetas e atendente ficam em estado local (nome,
+  telefone e etiqueta nunca vão à barra de endereço), e a troca descarta qualquer outro parâmetro.
+- `useInboxPath()` (`use-inbox-path.ts`) leva o filtro adiante: linha da lista, "voltar" da conversa, "Voltar ao atendimento" e a conversa recém-iniciada.
+
+**"Também neste contato"**
+
+- Serviço `listRelatedConversations(actor, conversationId)` (`src/lib/inbox/conversations.ts`): a conversa atual por `requireVisibleConversation` (fora do alcance, 404 igual a id inexistente) e as
+  outras do mesmo `contact_id` (há uma por contato e número) por `visibleConversation(actor)`, da mais recente à mais antiga, teto de 50. Rotas finas em `src/api/inbox.ts` e
+  `src/api/admin-inbox.ts` (`GET .../conversations/:id/related`, `inbox:read` no tenant; qualquer papel de plataforma em `/admin`), sem escrita e sem limite de taxa próprio além do geral.
+- Resposta `{ items: [{ id, status, channel: { id, name, type }, lastMessageAt, createdAt }] }`: **nenhum** outro campo (dono, prévia, contador, nome, telefone, etiqueta). Sem `customer`, a
+  plataforma não ganha caminho novo até cliente de organização.
+- `related-conversations.tsx` no `contact-panel.tsx`, nos dois escopos e em todo tipo de vínculo: selo do número (`ChannelBadge`), situação e data (`formatListTime`); clicar leva à conversa com o
+  filtro. Carregando, erro e lista vazia **não desenham nada**. A chave da consulta mora sob `conversations` (qualquer releitura da lista, inclusive a do SSE, relê esta; ciclo de 60 s com o SSE).
+- **Lugar da X2:** o componente tem o slot `footer` (abaixo da lista) para "Continuar por outro número"; a X1 não implementa a ação. A seção só existe com outra conversa visível, então a X2 também
+  precisa tratar o contato sem outras conversas (a faixa "Janela de 24 horas encerrada" é a outra entrada da SPEC).
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X1-1 | O parâmetro se chama `canal` e leva só o id; qualquer outro parâmetro da URL é descartado quando o filtro muda ou é limpo |
+| X1-2 | A leitura é uma **rota própria** (`.../related`), não um campo de `GET .../conversations/:id`: o detalhe já é pesado e a seção é opcional; o custo é uma requisição a mais por conversa aberta |
+| X1-3 | "Do mesmo contato" é o mesmo `chat_contact` (mesma `phone_key` no escopo), não "o mesmo cliente vinculado": dois contatos de um mesmo cliente **não** se enxergam aqui |
+| X1-4 | Quem lê a conversa vê a seção; ela não pede `customer:read` (não há dado de cliente nela) |
+| X1-5 | Trocar o número empilha o histórico (voltar desfaz); parâmetro inválido é limpo com `replace` |
+| X1-6 | A lista de números que não carregou (por exemplo, papel sem `channel:read`) trata o filtro da URL como "todos": sem a lista não há como confirmar que o canal é do escopo |
+
+**Fora de escopo e observado:** o redirecionamento do login (`/login?next=`) descarta a consulta da URL, então abrir um link com `?canal=` sem sessão perde o filtro depois do login; é do
+`ProtectedRoute`, não do atendimento, e ficou como está.
 
 ---
 

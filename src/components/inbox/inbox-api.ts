@@ -169,6 +169,12 @@ export const inboxKeys = {
       : ([INBOX_KEY, tenantId, "conversations"] as const),
   conversation: (tenantId: TenantId, id: string) =>
     [INBOX_KEY, tenantId, "conversation", id] as const,
+  /**
+   * As outras conversas do contato. Mora sob `conversations` de propósito: qualquer mudança que releia
+   * a lista (um aviso do SSE de outra conversa do mesmo contato, por exemplo) relê esta também.
+   */
+  related: (tenantId: TenantId, id: string) =>
+    [INBOX_KEY, tenantId, "conversations", "related", id] as const,
   messages: (tenantId: TenantId, id: string) => [INBOX_KEY, tenantId, "messages", id] as const,
   unread: (tenantId: TenantId) => [INBOX_KEY, tenantId, "unread"] as const,
   assignees: (tenantId: TenantId) => [INBOX_KEY, tenantId, "assignees"] as const,
@@ -272,7 +278,7 @@ function conversationsPath(scope: InboxScope, filters: ConversationFilters, curs
 }
 
 /** Lista por cursor; cada página é lida de novo no polling, na ordem. */
-export function useConversations(filters: ConversationFilters) {
+export function useConversations(filters: ConversationFilters, enabled = true) {
   const scope = useInboxScope();
   const interval = useInboxRefetchInterval();
 
@@ -282,7 +288,7 @@ export function useConversations(filters: ConversationFilters) {
       apiFetch<Page<ConversationItem>>(conversationsPath(scope, filters, pageParam)),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: scope.ready,
+    enabled: enabled && scope.ready,
     refetchInterval: interval,
     retry: false,
   });
@@ -297,6 +303,32 @@ export function useConversation(id: string | undefined) {
     queryKey: inboxKeys.conversation(scope.key, id ?? ""),
     queryFn: () => apiFetch<ConversationResponse>(`${scope.api}/conversations/${id}`),
     enabled: scope.ready && Boolean(id),
+    refetchInterval: interval,
+    retry: false,
+  });
+}
+
+/** Uma conversa do mesmo contato em outro número ("Também neste contato"). */
+export type RelatedConversation = {
+  id: string;
+  status: ConversationStatus;
+  channel: { id: string; name: string; type: ChannelType };
+  lastMessageAt: string | null;
+  createdAt: string;
+};
+
+/** As outras conversas do contato que a pessoa pode ver; vazio = a seção não aparece. */
+export function useRelatedConversations(conversationId: string | undefined) {
+  const scope = useInboxScope();
+  const interval = useInboxRefetchInterval("list");
+
+  return useQuery({
+    queryKey: inboxKeys.related(scope.key, conversationId ?? ""),
+    queryFn: () =>
+      apiFetch<{ items: RelatedConversation[] }>(
+        `${scope.api}/conversations/${conversationId}/related`,
+      ).then(({ items }) => items),
+    enabled: scope.ready && Boolean(conversationId),
     refetchInterval: interval,
     retry: false,
   });

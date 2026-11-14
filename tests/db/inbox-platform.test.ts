@@ -262,6 +262,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["GET", `${BASE}/conversations/${conversationId}`],
         ["GET", `${BASE}/conversations/${conversationId}/messages`],
         ["GET", `${BASE}/conversations/${conversationId}/templates`],
+        ["GET", `${BASE}/conversations/${conversationId}/related`],
         ["GET", `${BASE}/unread`],
         ["GET", `${BASE}/events`],
         ["GET", `${BASE}/messages/${messageId}/media`],
@@ -361,6 +362,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
       const probes = [
         ["GET", `${BASE}/conversations/${tenantThread.id}`],
         ["GET", `${BASE}/conversations/${tenantThread.id}/messages`],
+        ["GET", `${BASE}/conversations/${tenantThread.id}/related`],
         ["GET", `${BASE}/messages/${tenantMessage.id}/media`],
         ["POST", `${BASE}/conversations/${tenantThread.id}/status`, { status: "closed" }],
         ["POST", `${BASE}/conversations/${tenantThread.id}/read`],
