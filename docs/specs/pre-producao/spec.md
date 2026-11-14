@@ -1667,7 +1667,8 @@ Não existe importador nem dependência de planilha. O cadastro valida com `cust
   colunas, prévia das 5 primeiras, contadores `lidas · válidas · duplicadas · inválidas`,
   progresso e a lista de rejeitadas (linha e motivo) **visível depois do resultado**.
 - **Google Planilhas por link:** fase separada (I3): rota de servidor que baixa o CSV público,
-  com guarda de SSRF (só `docs.google.com`, sem redirecionamento para outro host) e rate limit.
+  com guarda de SSRF (só `docs.google.com`, sem redirecionamento para outro host) e rate limit. **Emenda da I3:** a exportação
+  do Google redireciona para `doc-XX-YY-sheets.googleusercontent.com`, que entrou na lista fechada (decisão I3-1, a confirmar).
 
 **Fases:** I1 `src/lib/spreadsheet/` com os casos A a K da origem como teste; I2 rota e tela;
 I3 Google Planilhas. **LLM:** Sonnet 5.5; Opus 5.5 na guarda de SSRF da I3.
@@ -1838,6 +1839,101 @@ o conteúdo do diálogo estourava a largura (a tabela esticava a coluna do grid)
 **O que não foi testado:** vários processos do servidor ao mesmo tempo (a trava é do Postgres, e os testes rodam num processo só); um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade;
 Firefox e Safari (só o navegador do painel); queda do processo no meio de um lote (as fichas dos sublotes já confirmados ficam sem o evento de auditoria do lote, e importar de novo as pula); o tempo da
 trava sob carga de produção (medido só em desenvolvimento); a lista de rejeitadas com milhares de linhas (renderiza 200 por vez).
+
+### I3: o que foi feito (2026-11-14)
+
+Importar pelo link do Google Planilhas. **Sem migration** e sem mudança no leitor da I1 nem nas regras da I2: o servidor baixa o CSV e a tela o
+embrulha num `File`, que segue pelo mesmo `readSpreadsheetFile`, prévia, contadores, lotes de `POST /api/customers/import` e lista de rejeitadas.
+
+| O quê | Onde |
+|---|---|
+| `POST /api/customers/import/google-sheets` (`customer:create`; corpo `{ url }`, 16 KB; devolve o CSV) | `src/api/customer-import.ts` (mesmo grupo e mesma cadeia de guardas da importação) |
+| Leitura do link e montagem do endereço (puro, na tela e de novo no servidor) | `src/lib/spreadsheet/google-sheets-link.ts` (`parseGoogleSheetLink`, `googleSheetExportUrl`) |
+| A busca com a guarda de SSRF | `src/lib/spreadsheet/google-sheets-fetch.server.ts` (`fetchGoogleSheetCsv`, transporte e resolvedor injetáveis) |
+| IP público | `src/lib/net/public-ip.ts` (`isPublicIp`) |
+| Contrato e rate limit | `src/lib/schemas/customer-import.ts` (`googleSheetImportSchema`, `GOOGLE_SHEET_RATE_LIMIT`) |
+| Tela | `customer-import-dialog.tsx` ("Ou cole o link do Google Planilhas", ao lado de soltar o arquivo), `import-api.ts` (`fetchGoogleSheetFile`), `src/lib/api/client.ts` (`apiFetchBytes`) |
+
+**Como a exportação do Google se comporta** (observado em 2026-11-14 com a planilha pública de exemplo do próprio Google, sem conta e com agente genérico).
+`GET https://docs.google.com/spreadsheets/d/<id>/export?format=csv&gid=0` responde **307** para
+`https://doc-08-4o-sheets.googleusercontent.com/export/<tokens>/<id>?format=csv&gid=0`, que responde **200** `text/csv; charset=utf-8`,
+`Transfer-Encoding: chunked` (**sem `Content-Length`**), `nosniff` e `Content-Disposition: attachment`. Três pedidos seguidos foram ao mesmo host.
+Id que não existe: **404** `text/html` já em `docs.google.com`. `gid` que não existe: 307 e depois **400** `text/html` no `googleusercontent`. Um documento
+de texto no lugar de planilha: 404. **A planilha privada não foi observada** (sem conta do Google nesta sessão); o comportamento documentado é redirecionar para
+`accounts.google.com` (ou responder 401/403), e os três casos dão a mensagem de planilha privada (testados com transporte falso). O endpoint `gviz/tq?tqx=out:csv`
+responde 200 direto em `docs.google.com`, sem redirecionamento, mas **não foi usado** (decisão I3-2).
+
+**Hosts aceitos** (lista fechada e exata, conferida em cada salto; `https`, sem porta e sem credenciais):
+
+| Host | Caminho | Por quê |
+|---|---|---|
+| `docs.google.com` | `/spreadsheets/` | É o endereço que o servidor monta (e um redirecionamento relativo dentro dele) |
+| `doc-XX-YY-sheets.googleusercontent.com`, com `XX` e `YY` de exatamente dois caracteres `[0-9a-z]` (`EXPORT_CONTENT_HOST`) | `/export/` | É onde a exportação é entregue hoje (307 acima). O padrão é o mais estreito que funcionou. O `googleusercontent.com` inteiro **não** entra: ele serve conteúdo enviado por qualquer usuário |
+
+Redirecionamento para `accounts.google.com` (ou `docs.google.com/accounts/...`, `/ServiceLogin`) é "planilha privada"; para qualquer outro lugar, encerra com
+"o Google respondeu de um jeito inesperado" e `warn` no log com o código e o salto. Até **3 saltos** (hoje é 1).
+
+**As defesas e o teste de cada uma**
+
+| Defesa | Teste |
+|---|---|
+| O link colado nunca é buscado: só o id (`[A-Za-z0-9_-]{20,100}`) e o `gid` (dígitos) saem dele; o endereço é montado | `google-sheets-link.test.ts` (matriz: válidos; `docs.google.com.evil.com`, `evil.com/docs.google.com/...`, `docs.google.com@evil.com`, credenciais, `http`, porta, IPv4 e IPv6 literais, decimal e hexa, metadados, `localhost`, ponto final, homógrafo cirílico, punycode, ponto ideográfico, documento, apresentação, formulário, desenho, Drive, "Publicar na Web", id com `..`, `%2f`, `%00`, acentuado, curto e absurdo, controle, nulo, `DEL`, largura zero, inversão de direção, espaço, `gid` hostil); `tests/db/customer-import-google.test.ts` (o endereço pedido é o montado e o link hostil não gera busca) |
+| Redirecionamento à mão, um por um, `https`, host na lista, caminho esperado, teto de saltos | `google-sheets-fetch.server.test.ts` › "redirecionamentos" (fora da lista, `googleusercontent` genérico, sufixo, grupo a mais, caminho, `http`, porta, credenciais, IP privado, metadados, `localhost`, `file:`, `javascript:`, login do Google, sem `Location`, cadeia acima do teto, ciclo) |
+| Todos os IPs do host conferidos (privada, loopback, link-local, metadados, CGNAT, IPv6 ULA e link-local, IPv4 mapeado, NAT64 interno, 6to4, Teredo) e a conexão fixada neles | `public-ip.test.ts`; `google-sheets-fetch.server.test.ts` › "resolução de nome" (host da lista resolvendo para faixa interna, um IP privado no meio de públicos, nenhum IP, falha de DNS) e › "httpsTransport" (conecta no IP fixado, não no do DNS) |
+| Sem cookies, sem cabeçalho do usuário, sem compressão | `google-sheets-fetch.server.test.ts` (só `User-Agent`, `Accept`, `Accept-Encoding: identity`; resposta comprimida recusada); `customer-import-google.test.ts` |
+| Tempo limite para conectar (5 s) e total (20 s, somando saltos e a leitura) | `google-sheets-fetch.server.test.ts` (sem resposta, corpo parado no meio, total entre saltos, resposta tardia fechada, tempo para conectar no transporte real) |
+| 10 MB contados enquanto lê, sem confiar no `Content-Length` | `google-sheets-fetch.server.test.ts` (acima do teto sem `Content-Length`, com o verdadeiro, com um mentiroso, exatamente no teto) |
+| Só `text/csv` ou `text/plain`; nunca zip nem byte nulo | idem (HTML de login com 200, binário, XLSX, JSON, sem tipo) |
+| A resposta ao navegador é texto: `text/csv`, `nosniff`, `attachment`, `no-store`; erro nunca repassa o corpo do Google | `customer-import-google.test.ts` |
+| Mensagem do que fazer: privada, inexistente, aba que não existe, grande demais, não é texto, tempo, Google limitando | `google-sheets-fetch.server.test.ts` › "respostas de erro do Google" |
+| Permissão, sem organização, outra origem, `read_only`, suspensa, rate limit, teto de corpo | `customer-import-google.test.ts`; `rbac.test.ts` (a rota na matriz); `impersonation.test.ts`; `phone-gate.test.ts` (a rota nasce bloqueada com telefone pendente) |
+
+**Log e auditoria (decisão I3-5).** Nada do link, do id da planilha nem do conteúdo vai a log, auditoria ou resposta de erro. A guarda só registra `warn`
+(código e salto, sem endereço) quando recusa um redirecionamento ou um IP. Não há evento de auditoria da busca: ela não grava nada, e o que entra é auditado
+por `customer.imported`, como na I2.
+
+**Conferido no navegador** (servidor de desenvolvimento, organização seed local, desktop e 375 px): a planilha pública de exemplo do Google foi baixada de verdade
+pelo servidor (2 saltos, cerca de 0,7 s) e lida no navegador, que mostrou a mensagem do leitor "Não achei a coluna de telefone" (ela não tem telefone); id inexistente
+deu "Não encontrei a planilha..."; `gid` inexistente, "O Google não encontrou esta aba..."; os links `docs.google.com.evil.com` e `docs.google.com@169.254.169.254`
+foram recusados antes de qualquer busca; o CSV volta com `text/csv`, `nosniff`, `attachment` e `no-store`; o log do servidor só tem método, caminho e status.
+O fluxo com telefones (prévia, contadores, importação e rejeitadas) foi conferido com a resposta **desta rota substituída no navegador** por um CSV fictício (sem conta
+do Google não há planilha pública com telefones fictícios): 6 lidas, 3 importadas, 2 duplicadas (base e arquivo), 1 inválida, etiqueta nova criada. No celular
+o campo e o botão ficam em coluna, sem estouro horizontal. Os dados de teste foram removidos (3 fichas, a etiqueta e as duas linhas de auditoria).
+
+**Roteiro para o proprietário** (o que não deu para conferir aqui): criar uma planilha com `telefone;nome` e 2 linhas fictícias; (1) compartilhada como "qualquer pessoa
+com o link", colar o link com a aba aberta e importar; (2) a mesma planilha **restrita**, colar o link: deve aparecer "A planilha é privada..." (e no log do servidor nenhum
+`warn`); (3) uma segunda aba, colar o link dela: deve importar a segunda aba.
+
+**Decisões da I3 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I3-1 | **A SPEC dizia "sem redirecionamento para outro host"**; a exportação depende de redirecionar para `doc-XX-YY-sheets.googleusercontent.com`, que entrou na lista com o padrão mais estreito que funcionou (dois grupos de dois caracteres, caminho `/export/`). Se o Google mudar o formato do host, a importação pelo link falha com "respondeu de um jeito inesperado" e um `warn` no log | Não seguir redirecionamento e usar o `gviz` (I3-2) |
+| I3-2 | **Exportação `/export?format=csv`, não o `gviz/tq?tqx=out:csv`** (que responderia direto em `docs.google.com`): o `gviz` deduz o tipo de cada coluna e esvazia os valores que não combinam (um telefone digitado como texto numa coluna de números some) e trata o cabeçalho por conta própria | O `gviz`, sem redirecionamento |
+| I3-3 | **Toda falha da busca é 422**, não 502/504: o `rateLimit` devolve a tentativa em 5xx, e cada busca que falha também custou uma ida ao Google | 502/504 e um limite que não devolve |
+| I3-4 | Rate limit `customer-import-google`: **10 buscas por 10 minutos** por pessoa e organização (a importação tem 40) | Outro número |
+| I3-5 | **Sem auditoria da busca**; `warn` só quando a guarda recusa | Um evento `customer.import_fetched` (sem o link) |
+| I3-6 | Aceitos `/spreadsheets/d/<id>`, `/u/N/` e o antigo `/a/<domínio>/` do Workspace; o link de **"Publicar na Web"** (`/d/e/2PACX-...`) é recusado com mensagem para usar o de compartilhamento (outro identificador, sem planilha de teste para conferir) | Aceitar também o link publicado |
+| I3-7 | O servidor devolve os bytes **sem ler o conteúdo** (só confere tipo, zip e byte nulo); a leitura é a do navegador, como no arquivo enviado. `read_only` e personificação seguem a importação (a busca não grava, mas só serve para importar) | Ler no servidor e devolver as linhas |
+| I3-8 | Tempos: **5 s** para conectar e **20 s** no total; até **3** saltos | Outros números |
+
+**Revisões (`/code-review` e `/security-review`, 2026-11-14)**
+
+| Achado | Destino |
+|---|---|
+| O transporte ouvia `error` com `once`: um segundo erro (o sinal abortando depois de uma falha) ficaria sem ouvinte e derrubaria o processo | **Corrigido:** `on` |
+| Soltar um arquivo enquanto a busca pelo link corria fazia um resultado sobrescrever o outro | **Corrigido:** o soltar é ignorado durante a busca |
+| A rota herdava o teto de 5 MB do corpo da importação | **Corrigido:** 16 KB (`jsonBodyLimit`); teste em `customer-import-google.test.ts` |
+| Todo 400 virava "aba não encontrada" | **Corrigido:** só no host do conteúdo; em outro salto é falha do Google. Teste |
+| Link antigo do Workspace (`/a/<domínio>/spreadsheets/...`) era recusado | **Corrigido:** aceito (o domínio nunca é usado). Teste |
+| Resposta que chegasse depois do tempo limite não era fechada | **Corrigido:** fechada ao chegar. Teste |
+| `isGoogleSheetLink` só servia aos testes | **Corrigido:** removida |
+| `readCapped` repete a leitura com teto de `downloadMedia` (canais) | **Não corrigido:** erros e semântica de job próprios dos canais; unificar é refatoração à parte |
+| `/security-review` | **Nenhum achado com confiança acima de 8.** Conferidos: host e protocolo fora do controle do usuário; `Location` com credenciais, barra invertida, `%2e`, ponto final, IDN e CR/LF; IP interno e troca de DNS (conexão fixada); só três cabeçalhos fixos; cadeia de guardas; resposta como anexo de texto; nada do link em log |
+
+**O que não foi testado:** a planilha privada real (sem conta do Google; ver o roteiro acima); a importação real de uma planilha do Google com telefones (o fluxo foi conferido com a
+resposta substituída no navegador); um link de "Publicar na Web"; planilha real perto de 10 MB; o padrão do host de conteúdo ao longo do tempo (só um host observado, `doc-08-4o`); rede só IPv6
+(NAT64); Firefox e Safari.
 
 ---
 
@@ -2035,7 +2131,7 @@ contagem de `customers` com muitas fichas (a SPEC deixa o contador de uso para d
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
 | 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2, R3a e R3b implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem, aviso da conversa esvaziada e tela de retenção do `/admin`); falta a revisão jurídica do texto de privacidade (ver "R3b: o que foi feito", com o roteiro manual). Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
-| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito"). **I1 e I2 implementadas** (importação de clientes: leitura no navegador, rota, tela; "I1: o que foi feito" e "I2: o que foi feito"); falta a I3 (Google Planilhas) |
+| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito"). **I1, I2 e I3 implementadas** (importação de clientes: leitura no navegador, rota, tela, link do Google Planilhas com guarda de SSRF; "I1: o que foi feito", "I2: o que foi feito" e "I3: o que foi feito") |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
 `npm run build` e `/code-review`; `/security-review` onde a tabela de fases indica.
@@ -2045,7 +2141,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito"), I1-1 a I1-7 da leitura da planilha (em "I1: o que foi feito") e I2-1 a I2-10 da rota e da tela de importação (em "I2: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito"), I1-1 a I1-7 da leitura da planilha (em "I1: o que foi feito") I2-1 a I2-10 da rota e da tela de importação (em "I2: o que foi feito") e I3-1 a I3-8 do Google Planilhas (em "I3: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

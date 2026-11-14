@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_GOOGLE_SHEET_LINK_CHARS } from "@/lib/spreadsheet/google-sheets-link";
 import { MAX_CELL_CHARS } from "@/lib/spreadsheet/types";
 
 /**
@@ -79,3 +80,18 @@ export type ImportQuota = {
   /** Vagas restantes; `null` sem limite. */
   available: number | null;
 };
+
+/**
+ * `POST /api/customers/import/google-sheets` (I3): o link colado. O formato fica com
+ * `parseGoogleSheetLink`, que dá a mensagem certa para cada erro; aqui só o tamanho.
+ */
+export const googleSheetImportSchema = z
+  .object({ url: z.string().max(MAX_GOOGLE_SHEET_LINK_CHARS, "Link longo demais.") })
+  .strict();
+export type GoogleSheetImportInput = z.infer<typeof googleSheetImportSchema>;
+
+/**
+ * Buscas ao Google por 10 minutos, por pessoa e organização (`customer-import-google`). Bem abaixo
+ * dos 40 pedidos da importação: cada busca faz o servidor baixar até 10 MB de fora.
+ */
+export const GOOGLE_SHEET_RATE_LIMIT = 10;

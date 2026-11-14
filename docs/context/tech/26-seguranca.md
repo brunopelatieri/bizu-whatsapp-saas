@@ -19,6 +19,7 @@
 | Adivinhação de senha, inclusive vinda de muitos IPs | Bloqueio de login por tentativas, por e-mail (`LOGIN_*`, `tech/08-auth.md`) | `tests/db/login-throttle.test.ts` |
 | Rate limit dividido entre réplicas | `RATE_LIMIT_STORE=postgres`, obrigatório em produção | `tests/db/rate-limit-store.test.ts` |
 | Banco ou backup vazado | Credenciais em AES-256-GCM, com a chave só no ambiente | `src/lib/crypto/secrets.test.ts`, `tests/db/credentials.test.ts` |
+| SSRF (o servidor buscar endereço vindo do usuário) | Nunca busca o endereço digitado: monta o seu com identificadores conferidos; lista exata de hosts por salto; IP público conferido e fixado (abaixo, "Busca de saída") | `src/lib/spreadsheet/google-sheets-*.test.ts`, `src/lib/net/public-ip.test.ts`, `tests/db/customer-import-google.test.ts` |
 
 ## CSP
 
@@ -62,6 +63,26 @@ página do app e são autenticados por assinatura ou não têm efeito.
 confiando no preflight. A guarda soma uma regra: **toda mutação com `Origin` diferente de `APP_URL`
 responde 403**, inclusive `Origin: null`. Requisição sem `Origin` e com JSON passa (não é navegador).
 O `sameOrigin` de cada grupo de rotas continua, porque ele vale também para GET.
+
+## Busca de saída a partir de algo que o usuário digitou (SSRF)
+
+Regra: **o servidor nunca busca um endereço que veio do usuário.** Quando uma função precisa buscar algo de fora a partir de um link
+digitado, ela extrai do link só identificadores, confere cada um por formato estrito e **monta ela mesma** o endereço, num host fixo.
+Hoje o único caso é a importação pelo Google Planilhas (bloco I, I3: `src/lib/spreadsheet/google-sheets-link.ts` e
+`google-sheets-fetch.server.ts`). As mídias dos canais buscam endereço de **provedor**, não de usuário, com lista de origens (`tech/29-canais-whatsapp.md`).
+
+| Camada | Como |
+|---|---|
+| Endereço | Só o id da planilha (`[A-Za-z0-9_-]{20,100}`) e o `gid` (dígitos) saem do link; host, porta, caminho, consulta e credenciais do link nunca entram na requisição |
+| Redirecionamento | Seguido à mão, até 3 saltos; cada um `https`, sem porta nem credenciais, host numa **lista exata** (`docs.google.com` em `/spreadsheets/`, `doc-XX-XX-sheets.googleusercontent.com` em `/export/`); o resto encerra (o login do Google é "planilha privada") |
+| IP | Todos os IPs do host conferidos por `isPublicIp` (`src/lib/net/public-ip.ts`: privadas, loopback, link-local e metadados, CGNAT, multicast, reservadas, IPv6 ULA e link-local, IPv4 mapeado, NAT64 para faixa interna, 6to4, Teredo); a conexão usa **só esses IPs** (`lookup` fixado no `node:https`), sem segunda resolução de nome |
+| Requisição | Sem agente compartilhado, sem cookies nem cabeçalho do usuário, `Accept-Encoding: identity` (nada é descomprimido) |
+| Tempo e tamanho | 5 s para conectar, 20 s no total; 10 MB contados enquanto lê, sem confiar no `Content-Length` |
+| Resposta | Só `text/csv` ou `text/plain`, nunca zip nem byte nulo; volta ao navegador como `text/csv` com `nosniff`, `attachment` e `no-store`; erro nunca repassa o corpo de fora |
+| Log | Nada do link, do id nem do conteúdo; `warn` só com o código e o salto quando a guarda recusa |
+
+A lista de hosts e o porquê de cada um estão na SPEC (`docs/specs/pre-producao/spec.md`, "I3: o que foi feito"). Busca de saída nova a partir de
+entrada do usuário segue o mesmo desenho e reaproveita `isPublicIp`.
 
 ## Rate limit
 

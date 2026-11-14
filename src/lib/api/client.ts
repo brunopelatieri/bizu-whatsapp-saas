@@ -79,32 +79,51 @@ function extraDetails(body: unknown): Record<string, unknown> {
   return rest;
 }
 
-/** Chama a API do próprio app, com cookies, e padroniza os erros em `ApiError`. */
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+function send(path: string, init?: RequestInit) {
   const headers = new Headers(init?.headers);
 
   if (typeof init?.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(path, {
+  return fetch(path, {
     credentials: "same-origin",
     ...init,
     headers,
   });
+}
+
+/** Erro da API (corpo JSON `{ error, code }`) como `ApiError`, com o tratamento de sessão e telefone. */
+async function failWith(path: string, response: Response, body: unknown): Promise<never> {
+  const parsed = (body && typeof body === "object" ? body : {}) as { error?: string; code?: string };
+
+  if (response.status === 401) await leaveExpiredSession();
+  if (response.status === 403 && parsed.code === "PHONE_UNVERIFIED") announcePhoneUnverified(path);
+
+  throw new ApiError(
+    parsed.error ?? "Não foi possível concluir a solicitação.",
+    response.status,
+    parsed.code,
+    extraDetails(body),
+  );
+}
+
+/** Chama a API do próprio app, com cookies, e padroniza os erros em `ApiError`. */
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await send(path, init);
   const body = await response.json().catch(() => null);
 
-  if (!response.ok) {
-    if (response.status === 401) await leaveExpiredSession();
-    if (response.status === 403 && body?.code === "PHONE_UNVERIFIED") announcePhoneUnverified(path);
-
-    throw new ApiError(
-      body?.error ?? "Não foi possível concluir a solicitação.",
-      response.status,
-      body?.code,
-      extraDetails(body),
-    );
-  }
-
+  if (!response.ok) return failWith(path, response, body);
   return body as T;
+}
+
+/**
+ * Como `apiFetch`, para rota que responde com bytes (o CSV do Google Planilhas, I3). O erro continua
+ * sendo JSON e vira `ApiError` do mesmo jeito.
+ */
+export async function apiFetchBytes(path: string, init?: RequestInit): Promise<Uint8Array> {
+  const response = await send(path, init);
+
+  if (!response.ok) return failWith(path, response, await response.json().catch(() => null));
+  return new Uint8Array(await response.arrayBuffer());
 }

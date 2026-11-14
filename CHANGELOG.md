@@ -38,6 +38,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Importação de clientes pelo link do Google Planilhas (bloco I de `docs/specs/pre-producao/spec.md`, fase I3)**.
+  - No diálogo "Importar planilha", ao lado de soltar o arquivo: colar o link de uma planilha compartilhada como "qualquer pessoa com o link". O servidor baixa o CSV
+    (`POST /api/customers/import/google-sheets`, `customer:create`) e a tela segue pelo mesmo leitor, prévia, contadores e lotes da I2.
+  - Guarda de SSRF: o servidor **nunca busca o link colado**. Extrai só o id da planilha e o da aba, monta o endereço em `https://docs.google.com`, segue redirecionamento
+    à mão só para `docs.google.com` e `doc-XX-XX-sheets.googleusercontent.com` (onde o Google entrega a exportação hoje), confere e fixa os IPs (nunca faixa interna nem metadados),
+    sem cookies, com tempo limite e teto de 10 MB contado enquanto lê. Novo `isPublicIp` (`src/lib/net/public-ip.ts`).
+  - Planilha privada, inexistente, aba que não existe, grande demais ou que não é texto têm mensagem do que fazer (422), sem repassar a resposta do Google. Rate limit próprio
+    `customer-import-google` (10 por 10 minutos por pessoa e organização). Nada do link nem da planilha em log ou auditoria.
+  - `apiFetchBytes` (`src/lib/api/client.ts`): `apiFetch` para rota que responde com bytes, com o mesmo tratamento de erro.
+  - **Migração:** nenhuma. Projeto derivado que bloqueia saída de rede precisa liberar `docs.google.com` e `*.googleusercontent.com` (porta 443) para usar o recurso.
+
 - **Importação de clientes por planilha: rota e tela (bloco I de `docs/specs/pre-producao/spec.md`, fase I2)**.
   - `POST /api/customers/import` (`customer:create`): lotes de até 500 linhas, cada uma pelas regras do cadastro (`customerSchema`, telefone, unicidade por organização). Resposta por linha:
     `created`, `duplicate` (número já cadastrado ou repetido no arquivo; **nunca atualiza** a ficha existente, sem `claim` nem mensagem), `invalid` (com o motivo) ou `limit`. `GET /api/customers/import/quota` devolve as vagas do plano.

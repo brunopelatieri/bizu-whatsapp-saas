@@ -1,8 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import { Download, FileSpreadsheet, Link2, Loader2, Upload } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { postImportBatch, useImportQuota } from "@/components/app/customers/import/import-api";
+import {
+  fetchGoogleSheetFile,
+  postImportBatch,
+  useImportQuota,
+} from "@/components/app/customers/import/import-api";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +16,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -32,6 +38,7 @@ import { displayPhone } from "@/lib/phone/br";
 import type { ImportRowResult } from "@/lib/schemas/customer-import";
 import { IMPORT_COLUMNS } from "@/lib/spreadsheet/columns";
 import { customerFieldsFromRow } from "@/lib/spreadsheet/customer-row";
+import { GoogleSheetLinkError, parseGoogleSheetLink } from "@/lib/spreadsheet/google-sheets-link";
 import { type ImportRun, planImport, runImport } from "@/lib/spreadsheet/import-plan";
 import { readSpreadsheetFile } from "@/lib/spreadsheet/read-file";
 import { buildTemplateCsv, TEMPLATE_FILENAME } from "@/lib/spreadsheet/template-file";
@@ -173,6 +180,9 @@ export function CustomerImportDialog({ onClose }: { onClose: () => void }) {
   const [running, setRunning] = useState(false);
   const [run, setRun] = useState<ImportRun | null>(null);
   const [finished, setFinished] = useState(false);
+  const [link, setLink] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [fetchingLink, setFetchingLink] = useState(false);
 
   const quota = useImportQuota(!finished);
   const plan = useMemo(() => (table ? planImport(table.rows) : null), [table]);
@@ -205,7 +215,40 @@ export function CustomerImportDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  /**
+   * Planilha do Google (I3): o servidor baixa o CSV, e daqui em diante é o mesmo caminho do arquivo
+   * enviado (`load`). O link é conferido aqui só para avisar na hora; o servidor confere de novo.
+   */
+  async function loadFromLink(event: React.FormEvent) {
+    event.preventDefault();
+    setLinkError(null);
+    setReadError(null);
+
+    try {
+      parseGoogleSheetLink(link);
+    } catch (error) {
+      setLinkError(error instanceof GoogleSheetLinkError ? error.message : "Link inválido.");
+      return;
+    }
+
+    setFetchingLink(true);
+    try {
+      await load(await fetchGoogleSheetFile(link.trim()));
+    } catch (error) {
+      setLinkError(
+        error instanceof ApiError
+          ? error.status === 429
+            ? "Muitas buscas em pouco tempo. Aguarde alguns minutos, ou baixe a planilha em .csv e envie o arquivo."
+            : error.message
+          : "Não consegui buscar a planilha. Tente de novo.",
+      );
+    } finally {
+      setFetchingLink(false);
+    }
+  }
+
   function reset() {
+    setLinkError(null);
     setFile(null);
     setTable(null);
     setSheets([]);
@@ -279,8 +322,8 @@ export function CustomerImportDialog({ onClose }: { onClose: () => void }) {
           <DialogTitle>Importar clientes</DialogTitle>
           <DialogDescription>
             Envie uma planilha .csv ou Excel (.xlsx) de até {MAX_SPREADSHEET_BYTES / (1024 * 1024)}{" "}
-            MB e {nf.format(MAX_IMPORT_ROWS)} linhas. O arquivo é lido aqui no seu navegador; só as
-            linhas seguem para o sistema.
+            MB e {nf.format(MAX_IMPORT_ROWS)} linhas, ou cole o link de uma planilha do Google
+            Planilhas. A planilha é lida aqui no seu navegador; só as linhas seguem para o sistema.
           </DialogDescription>
         </DialogHeader>
 
@@ -299,6 +342,8 @@ export function CustomerImportDialog({ onClose }: { onClose: () => void }) {
               onDrop={(event) => {
                 event.preventDefault();
                 setDragging(false);
+                // Com uma busca pelo link em andamento, o arquivo solto disputaria a prévia com ela.
+                if (reading || fetchingLink) return;
                 const dropped = event.dataTransfer.files[0];
                 if (dropped) void load(dropped);
               }}
@@ -317,13 +362,57 @@ export function CustomerImportDialog({ onClose }: { onClose: () => void }) {
                 type="file"
                 accept={accept}
                 className="sr-only"
-                disabled={reading}
+                disabled={reading || fetchingLink}
                 onChange={(event) => {
                   const chosen = event.target.files?.[0];
                   if (chosen) void load(chosen);
                 }}
               />
             </label>
+
+            {/* `noValidate`: a mensagem é a de `parseGoogleSheetLink`, não o balão do navegador. */}
+            <form
+              noValidate
+              className="space-y-2 rounded-lg border p-3"
+              onSubmit={(event) => void loadFromLink(event)}
+            >
+              <Label htmlFor="google-sheet-link" className="flex items-center gap-2">
+                <Link2 className="size-4 text-muted-foreground" />
+                Ou cole o link do Google Planilhas
+              </Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="google-sheet-link"
+                  type="url"
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  value={link}
+                  disabled={fetchingLink || reading}
+                  aria-invalid={linkError ? true : undefined}
+                  aria-describedby="google-sheet-link-help"
+                  onChange={(event) => {
+                    setLink(event.target.value);
+                    setLinkError(null);
+                  }}
+                />
+                <Button type="submit" variant="outline" disabled={fetchingLink || reading || link.trim() === ""}>
+                  {fetchingLink ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {fetchingLink ? "Buscando…" : "Buscar planilha"}
+                </Button>
+              </div>
+              <p id="google-sheet-link-help" className="text-xs text-muted-foreground">
+                A planilha precisa estar compartilhada como "Qualquer pessoa com o link". Com a aba
+                certa aberta, copie o endereço do navegador (ou use Compartilhar &gt; Copiar link
+                para a primeira aba).
+              </p>
+              {linkError ? (
+                <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+                  {linkError}
+                </p>
+              ) : null}
+            </form>
 
             {readError ? (
               <p role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">

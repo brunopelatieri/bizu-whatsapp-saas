@@ -61,6 +61,7 @@ const endpoints = [
   ["POST", "/api/customers", "customer:create"],
   ["POST", "/api/customers/import", "customer:create"],
   ["GET", "/api/customers/import/quota", "customer:create"],
+  ["POST", "/api/customers/import/google-sheets", "customer:create"],
   ["GET", `/api/customers/${anyId}`, "customer:read"],
   ["PATCH", `/api/customers/${anyId}`, "customer:update"],
   ["DELETE", `/api/customers/${anyId}`, "customer:delete"],

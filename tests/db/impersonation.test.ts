@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { waitForBackgroundTasks } from "@/lib/auth/background";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
 import { setEmailProviderForTests } from "@/lib/email/send";
+import { setSheetFetchDepsForTests } from "@/lib/spreadsheet/google-sheets-fetch.server";
 import { makePlatformUser } from "./billing-helpers";
 import { applyCookies, PASSWORD } from "./security-helpers";
 import {
@@ -238,6 +239,36 @@ describe("personificação", () => {
 
       const [row] = await auditRows("customer.imported");
       expect(row).toMatchObject({ actor_id: tenantOwner.id, impersonator_id: support.id });
+    });
+
+    it("a busca do Google Planilhas segue a importação: permitida na personificação, sem auditoria própria", async () => {
+      await grant();
+      const cookie = await enterAs(tenantOwner);
+      const csv = ["telefone", "11987654398", ""].join(String.fromCharCode(10));
+      setSheetFetchDepsForTests({
+        resolve: async () => [{ address: "142.250.219.225", family: 4 }],
+        transport: async () => ({
+          status: 200,
+          header: (name) => (name.toLowerCase() === "content-type" ? "text/csv" : undefined),
+          body: (async function* () {
+            yield new TextEncoder().encode(csv);
+          })(),
+          close: () => undefined,
+        }),
+        totalTimeoutMs: 5_000,
+        connectTimeoutMs: 1_000,
+        maxBytes: 1024,
+      });
+      try {
+        const response = await call("POST", "/api/customers/import/google-sheets", {
+          cookie,
+          body: { url: "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit" },
+        });
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(csv);
+      } finally {
+        setSheetFetchDepsForTests(undefined);
+      }
     });
 
     it("a sessão termina junto com o consentimento", async () => {

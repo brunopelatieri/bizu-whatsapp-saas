@@ -696,8 +696,8 @@ total não sobe (CL-12). Contato que chega por mensagem (`chat_contact`) não co
 
 ## Importação de clientes (pré-produção, bloco I)
 
-**I1 (leitura da planilha) e I2 (rota e tela) implementadas; a I3 (Google Planilhas por link) não.** `src/lib/spreadsheet/` é puro e roda no navegador: o arquivo
-nunca vai ao servidor, só as linhas.
+**I1 (leitura da planilha), I2 (rota e tela) e I3 (Google Planilhas por link) implementadas.** `src/lib/spreadsheet/` é puro e roda no navegador: o arquivo
+nunca vai ao servidor, só as linhas (a planilha do Google passa pelo servidor só para ser baixada, sem ficar guardada; abaixo).
 
 - **Colunas** (`IMPORT_COLUMNS`, `columns.ts`, fonte única do leitor, do modelo e da tela): `phone` obrigatória (`telefone`, `celular`,
   `whatsapp`, `numero`), `name` (`nome`), `email` (`e-mail`), `document` (`documento`, `cpf`, `cnpj`), `tags` (`etiquetas`; `;` recomendado,
@@ -730,6 +730,26 @@ serviço em `src/lib/tenant/customer-import.ts`; contrato em `src/lib/schemas/cu
 - **Tela:** `src/components/app/customers/import/customer-import-dialog.tsx` (diálogo em `/app/clientes`; `import-api.ts` para a quota e o envio) sobre `src/lib/spreadsheet/import-plan.ts`
   (`planImport`, `runImport`): prévia, contadores, aviso "cabem N de M", progresso com cancelar e a lista de não importadas **depois** do resultado.
 - **Testes:** `tests/db/customer-import.test.ts`, mais `pool-saturation.test.ts` (14 importações simultâneas), `rbac.test.ts`, `impersonation.test.ts` e `src/lib/spreadsheet/import-plan.test.ts`.
+
+**Google Planilhas por link (I3)** — `POST /api/customers/import/google-sheets` (`customer:create`, mesma cadeia de guardas da importação, corpo de 16 KB,
+rate limit `customer-import-google`: 10 buscas por 10 minutos por pessoa e organização). Recebe `{ url }` e devolve o CSV (`text/csv; charset=utf-8`,
+`nosniff`, `attachment`, `no-store`); a tela o embrulha num `File` (`fetchGoogleSheetFile`, `import-api.ts`) e segue pelo **mesmo** `readSpreadsheetFile`,
+prévia e lotes de `POST /api/customers/import`. A rota não grava nada.
+
+- **O link colado nunca é buscado.** `parseGoogleSheetLink` (`src/lib/spreadsheet/google-sheets-link.ts`, puro, usado na tela e de novo no servidor) só aceita
+  `https://docs.google.com/spreadsheets/d/<id>/...` (também `/u/N/` e o antigo `/a/<domínio>/` do Workspace), sem porta nem credenciais, e extrai o id
+  (`[A-Za-z0-9_-]{20,100}`) e o `gid` (só dígitos); `googleSheetExportUrl` monta `https://docs.google.com/spreadsheets/d/<id>/export?format=csv[&gid=N]`.
+- **A busca** (`src/lib/spreadsheet/google-sheets-fetch.server.ts`, `fetchGoogleSheetCsv`): redirecionamento seguido à mão (até 3 saltos), cada salto `https`, sem
+  porta nem credenciais, host numa lista exata (`docs.google.com` em `/spreadsheets/`; `doc-XX-XX-sheets.googleusercontent.com` em `/export/`); login do Google é
+  "planilha privada"; todos os IPs do host conferidos por `isPublicIp` (`src/lib/net/public-ip.ts`) e a conexão fixada neles; sem cookies nem cabeçalho do usuário,
+  sem compressão; 5 s para conectar e 20 s no total; 10 MB contados enquanto lê; só `text/csv` ou `text/plain`, e nunca zip nem byte nulo.
+- **Erros:** link fora do formato é 400 `INVALID_SHEET_LINK`; toda falha da busca é **422** `SHEET_<CÓDIGO>` (`NOT_SHARED`, `NOT_FOUND`, `TAB_NOT_FOUND`,
+  `TOO_LARGE`, `NOT_CSV`, `EMPTY`, `TIMEOUT`, `GOOGLE_RATE_LIMITED`, `UNEXPECTED_REDIRECT`, `BLOCKED_ADDRESS`, `UPSTREAM`), com mensagem do que fazer e nunca
+  o corpo do Google. 422 e não 5xx porque o `rateLimit` devolve a tentativa em 5xx.
+- **Log e auditoria:** nada da planilha (link, id, conteúdo). A guarda só registra `warn` com o código e o salto quando recusa um redirecionamento ou um IP (sinal
+  de ataque ou de mudança no Google). Sem evento de auditoria próprio: a busca não grava; o que entra fica em `customer.imported`.
+- **Testes:** `src/lib/spreadsheet/google-sheets-link.test.ts` (matriz de links válidos e hostis), `google-sheets-fetch.server.test.ts` (redirecionamentos, DNS,
+  tamanho, tipo, tempo, com transporte falso), `src/lib/net/public-ip.test.ts`, `tests/db/customer-import-google.test.ts` (a rota), `rbac.test.ts` e `impersonation.test.ts`.
 
 ## O que a SPEC pede e ainda não existe
 
