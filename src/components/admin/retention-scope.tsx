@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { ConfirmDialog } from "@/components/app/confirm-dialog";
 import { CHANNEL_KINDS } from "@/components/channels/channel-kinds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,8 @@ import {
   platformSourceLabel,
   policyFromDraft,
   type RunRow,
+  type SaveConfirmation,
+  saveConfirmation,
   sourceLabel,
   stateNotice,
 } from "@/lib/inbox/retention-format";
@@ -256,6 +259,11 @@ export function RetentionScope({
 }) {
   const [draft, setDraft] = useState<PolicyDraft>(() => draftFromPolicy(view.policy));
   const [errors, setErrors] = useState<Partial<Record<DimensionInfo["key"], string>>>({});
+  // Política mais restrita com a retenção ligada: espera a confirmação antes de gravar (R3b-4).
+  const [pending, setPending] = useState<{
+    policy: RetentionPolicyInput;
+    confirmation: SaveConfirmation;
+  } | null>(null);
   const editable = canWrite && !platform;
   const dirty = editable && isDirty(draft, view.policy);
   const lastRun = describeLastRun(view.lastRun);
@@ -268,6 +276,12 @@ export function RetentionScope({
       return;
     }
     setErrors({});
+
+    const confirmation = saveConfirmation(view, result.policy);
+    if (confirmation) {
+      setPending({ policy: result.policy, confirmation });
+      return;
+    }
     onSave(result.policy);
   }
 
@@ -355,6 +369,31 @@ export function RetentionScope({
         dirty={dirty}
         platform={platform}
         onPreview={onPreview}
+      />
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={pending?.confirmation.title ?? ""}
+        description={
+          pending ? (
+            <span className="grid gap-2">
+              <span>{pending.confirmation.intro}</span>
+              {pending.confirmation.lines.map((line) => (
+                <span key={line} className="font-medium text-foreground">
+                  {line}
+                </span>
+              ))}
+              <span>{pending.confirmation.note}</span>
+            </span>
+          ) : null
+        }
+        confirmLabel="Salvar política"
+        pending={saving}
+        onConfirm={() => {
+          if (pending) onSave(pending.policy);
+          setPending(null);
+        }}
+        onCancel={() => setPending(null)}
       />
     </section>
   );

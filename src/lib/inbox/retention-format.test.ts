@@ -11,11 +11,14 @@ import {
   isIdleRun,
   limitFromDraft,
   limitLabel,
+  effectiveAfterSave,
   platformSourceLabel,
   policyFromDraft,
+  saveConfirmation,
   savedPolicy,
   sourceLabel,
   stateNotice,
+  tightenedLimits,
 } from "@/lib/inbox/retention-format";
 import { emptyRunResult, RETENTION_LIMIT_MAX } from "@/lib/inbox/retention-policy";
 import { retentionPolicySchema } from "@/lib/schemas/retention";
@@ -103,6 +106,65 @@ describe("alterações não salvas", () => {
     const draft = draftFromPolicy(null);
     draft.maxMessages = { mode: "number", value: "" };
     expect(isDirty(draft, null)).toBe(true);
+  });
+});
+
+describe("confirmação ao salvar com a retenção ligada (R3b-4)", () => {
+  const defaults = { maxMessages: 5000, retentionDays: 90, maxFavorites: 200 };
+  const current = (over: Partial<typeof defaults> | Record<string, number | null> = {}, enabled = true) => ({
+    enabled,
+    defaults,
+    effective: { ...defaults, ...over },
+  });
+  const inherit = { maxMessages: null, retentionDays: null, maxFavorites: null };
+
+  it("o que passa a valer: nulo herda o padrão, 0 tira o limite, número fica", () => {
+    expect(effectiveAfterSave(null, 5000)).toBe(5000);
+    expect(effectiveAfterSave(null, null)).toBeNull();
+    expect(effectiveAfterSave(0, 5000)).toBeNull();
+    expect(effectiveAfterSave(1000, 5000)).toBe(1000);
+  });
+
+  it("desligada nunca pede confirmação, mesmo apertando", () => {
+    expect(saveConfirmation(current({}, false), { ...inherit, maxMessages: 10 })).toBeNull();
+  });
+
+  it("ligada e sem apertar nada (afrouxar, tirar o limite, manter) salva direto", () => {
+    expect(saveConfirmation(current(), { ...inherit, maxMessages: 9000 })).toBeNull();
+    expect(saveConfirmation(current(), { maxMessages: 0, retentionDays: 0, maxFavorites: 0 })).toBeNull();
+    expect(saveConfirmation(current(), { ...inherit, retentionDays: 90 })).toBeNull();
+    expect(saveConfirmation(current(), inherit)).toBeNull();
+  });
+
+  it("número menor que o que vale hoje pede confirmação e diz de quanto para quanto", () => {
+    const confirmation = saveConfirmation(current(), { ...inherit, maxMessages: 1000 });
+    expect(confirmation?.lines).toEqual(["Máximo de mensagens: de 5.000 mensagens para 1.000 mensagens"]);
+    expect(confirmation?.intro).toContain("sem volta");
+    expect(confirmation?.note).toContain("prévia");
+  });
+
+  it("limite onde não havia nenhum também aperta", () => {
+    const now = current({ retentionDays: null });
+    expect(tightenedLimits(now, { ...inherit, retentionDays: 30 })).toMatchObject([{ from: null, to: 30 }]);
+    expect(saveConfirmation(now, { ...inherit, retentionDays: 30 })?.lines).toEqual([
+      "Guardar por quantos dias: de sem limite para 30 dias",
+    ]);
+  });
+
+  it("voltar a herdar um padrão mais baixo que o valor fixado aperta", () => {
+    // Hoje vale 20.000 (fixado); herdar traz o padrão de 5.000.
+    const now = current({ maxMessages: 20_000 });
+    expect(saveConfirmation(now, inherit)?.lines).toEqual([
+      "Máximo de mensagens: de 20.000 mensagens para 5.000 mensagens",
+    ]);
+  });
+
+  it("o teto de favoritas conta, e vários limites saem em linhas separadas", () => {
+    const confirmation = saveConfirmation(current(), { maxMessages: 100, retentionDays: 0, maxFavorites: 1 });
+    expect(confirmation?.lines).toEqual([
+      "Máximo de mensagens: de 5.000 mensagens para 100 mensagens",
+      "Máximo de favoritas: de 200 favoritas para 1 favorita",
+    ]);
   });
 });
 

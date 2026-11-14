@@ -2,6 +2,7 @@ import {
   RETENTION_LIMIT_MAX,
   type RetentionDimension,
   type RetentionLimit,
+  type RetentionLimits,
   type RetentionRunResult,
   type RetentionSource,
   retentionDimensions,
@@ -138,6 +139,64 @@ export function isDirty(draft: PolicyDraft, policy: RetentionPolicyInput | null)
   if (!result.ok) return true;
   const saved = savedPolicy(policy);
   return retentionDimensions.some((key) => result.policy[key] !== saved[key]);
+}
+
+/** O limite que passa a valer depois de salvar: `null` herda o padrão, `0` é sem limite. */
+export function effectiveAfterSave(value: number | null, defaultValue: RetentionLimit): RetentionLimit {
+  if (value === null) return defaultValue;
+  return value === 0 ? null : value;
+}
+
+/** Um limite que a política nova deixa mais apertado do que o que vale hoje. */
+export type TightenedLimit = { info: DimensionInfo; from: RetentionLimit; to: number };
+
+/**
+ * Os limites que ficam **mais apertados** ao salvar: passam a ter um número onde não havia limite, ou
+ * um número menor que o de hoje. É o que pode fazer a próxima limpeza apagar (ou rebaixar) mais.
+ * Afrouxar, tirar o limite ou manter o mesmo valor não entra. Compara com o que **vale** hoje
+ * (`effective`), então herdar um padrão mais baixo que o valor fixado também conta.
+ */
+export function tightenedLimits(
+  current: { effective: RetentionLimits; defaults: RetentionLimits },
+  policy: RetentionPolicyInput,
+): TightenedLimit[] {
+  return DIMENSIONS.flatMap((info) => {
+    const from = current.effective[info.key];
+    const to = effectiveAfterSave(policy[info.key], current.defaults[info.key]);
+    return to !== null && (from === null || to < from) ? [{ info, from, to }] : [];
+  });
+}
+
+export type SaveConfirmation = {
+  title: string;
+  intro: string;
+  /** Uma linha por limite que aperta: "Máximo de mensagens: de 5.000 mensagens para 1.000 mensagens". */
+  lines: string[];
+  note: string;
+};
+
+/**
+ * A confirmação antes de salvar (R3b-4, decidida em 2026-11-14): só com a retenção **ligada** e só
+ * quando algum limite aperta. Desligada, nada é apagado; afrouxando, nada a mais é apagado. `null`
+ * salva direto.
+ */
+export function saveConfirmation(
+  current: { enabled: boolean; effective: RetentionLimits; defaults: RetentionLimits },
+  policy: RetentionPolicyInput,
+): SaveConfirmation | null {
+  if (!current.enabled) return null;
+  const tightened = tightenedLimits(current, policy);
+  if (tightened.length === 0) return null;
+
+  return {
+    title: "Salvar uma política mais restrita?",
+    intro:
+      "A retenção está ligada. A próxima limpeza diária apaga, sem volta, as mensagens que passarem destes limites:",
+    lines: tightened.map(
+      ({ info, from, to }) => `${info.label}: de ${limitLabel(info, from)} para ${limitLabel(info, to)}`,
+    ),
+    note: "A prévia só considera a política depois de salva. Salve, veja a prévia e, se o resultado não for o esperado, volte ao valor anterior antes da próxima limpeza.",
+  };
 }
 
 /** De onde vem o limite que vale. `unlimited` quer dizer que nem a política nem o padrão definem um. */

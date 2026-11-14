@@ -1100,7 +1100,11 @@ limpeza de verdade só roda no job diário, com `MESSAGE_RETENTION_ENABLED=true`
   valor" (campo numérico de 1 até `RETENTION_LIMIT_MAX`, que só habilita nessa opção). Em "Definir um valor", vazio, `0`, negativo, fracionário e
   acima do teto são recusados na tela com frase própria (o `0` manda escolher "Sem limite"), antes do `PUT`; o corpo sai com os três campos e passa
   no `retentionPolicySchema`. "Salvar política" só habilita com alteração; "Descartar alterações" volta ao gravado. Voltar a herdar tudo é salvar
-  com as três opções em "Herdar" (R2-8).
+  com as três opções em "Herdar" (R2-8). **Com a retenção ligada, salvar um limite mais apertado pede confirmação**
+  (`saveConfirmation`, em `retention-format.ts`): o diálogo lista cada limite que aperta, de quanto para quanto, e lembra
+  que a limpeza apaga sem volta e que a prévia só considera a política depois de salva. "Mais apertado" é passar a ter um
+  número onde não havia limite, ou um número menor que o que **vale** hoje (`effective`), inclusive ao voltar a herdar um
+  padrão mais baixo. Desligada, ou sem apertar nada, salva direto.
 - **Prévia** (botão "Ver prévia", depois "Atualizar prévia"; `GET .../preview`): as contagens do que a limpeza faria agora e os totais do escopo.
   O texto diz que **não apaga nada** e que **usa a política já gravada, não o que está digitado**; com alteração não salva, diz para salvar antes.
   Depois de salvar, a prévia aberta é relida sozinha (a escrita invalida as consultas do `/admin`). Com o lote cortado, avisa o limite por dia.
@@ -1111,7 +1115,7 @@ limpeza de verdade só roda no job diário, com `MESSAGE_RETENTION_ENABLED=true`
 (`components/channels/channel-kinds.tsx`), o mesmo das telas de canal; a tela não escreve nome de módulo. Sem `loader`.
 
 **Testes:** `src/lib/inbox/retention-format.test.ts` (as três opções, `0` ≠ vazio ≠ herdar, tetos, corpo montado passando no Zod da rota, "tem
-alteração", rótulos de origem, resumo da última limpeza e da prévia, avisos de estado) e `src/components/admin/retention-scope.test.ts` (renderiza
+alteração", a confirmação ao apertar um limite com a retenção ligada, rótulos de origem, resumo da última limpeza e da prévia, avisos de estado) e `src/components/admin/retention-scope.test.ts` (renderiza
 o componente: aviso de ligada e de desligada, as nove opções do proprietário, o suporte e a plataforma sem formulário, última limpeza e prévia).
 Não há teste de banco novo: a R3b não toca servidor.
 
@@ -1166,7 +1170,7 @@ banco a conversa ficou sem mensagem, com `last_message_at` e sem prévia do text
 | R3b-1 | Onde fica | Cartão na página da organização e cartão da plataforma em `/admin/configuracoes`, sem rota nem item de menu novos | Página própria `/admin/retencao` com seletor de organização |
 | R3b-2 | Forma do campo | Três opções em `radio` (herdar, sem limite, definir) e número só em "definir", que recusa vazio e `0` | Campo único com vazio = herdar e `0` = sem limite (mais curto, mas confunde) |
 | R3b-3 | Prévia | Sob demanda (botão), usa a política gravada, relida sozinha depois de salvar | Prévia ao vivo do que está digitado (pediria rota que aceite política no corpo) |
-| R3b-4 | Salvar com a retenção ligada | Salva direto; o aviso do topo já diz que a limpeza roda uma vez por dia e apaga sem volta | Diálogo de confirmação quando a política nova apaga mais |
+| R3b-4 (**decidida pelo proprietário em 2026-11-14**) | Salvar com a retenção ligada | **Diálogo de confirmação quando a política nova aperta algum limite**, listando de quanto para quanto. Desligada, ou só afrouxando, salva direto | Descartada: salvar sempre direto, só com o aviso do topo |
 | R3b-5 | Aviso de estado | Um só, no topo do cartão, citando `MESSAGE_RETENTION_ENABLED` | Um aviso por tipo de canal |
 | R3b-6 | Organização `deleting` | Cartão visível e só leitura (como etiquetas e campos); `deleted` não mostra o cartão | Esconder também em `deleting` |
 | R3b-7 | Horário da última limpeza | No fuso do navegador, `dd/mm/aaaa, hh:mm` | UTC, como o cron |

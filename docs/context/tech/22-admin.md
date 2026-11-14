@@ -106,6 +106,9 @@ Tela sobre `/api/admin/retention/*` (acima), sem rota de servidor própria e **s
 - **Cada limite tem três opções distintas:** "Herdar o padrão do sistema (X)" (`null`), "Sem limite" (`0`) e "Definir um valor" (1 até
   `RETENTION_LIMIT_MAX`; vazio e `0` são recusados na tela). Mostra o que vale (`effective`) e de onde vem (`sources`: "fixado para esta organização",
   "padrão do sistema", "nenhum limite definido"), o piso de idade e a última limpeza ("Nunca rodou." ou as contagens).
+- **Confirmação ao salvar:** com a retenção ligada, a política que aperta algum limite (número onde não havia, ou menor que o que vale hoje,
+  inclusive ao herdar um padrão mais baixo) abre um diálogo com cada limite, de quanto para quanto (`saveConfirmation`). Desligada, ou só
+  afrouxando, salva direto.
 - **Avisos:** retenção desligada, "a política fica gravada, mas nenhuma mensagem é apagada"; ligada, "roda uma vez por dia e apaga sem volta; favorita e
   mensagem mais nova que o piso não saem". A prévia diz que não apaga e que usa a política **gravada**, não o que está digitado.
 - Só `platform_owner` vê o formulário; o suporte lê e vê a prévia (o `PUT` direto é 403). Roteiro manual com a retenção ligada em banco de teste:

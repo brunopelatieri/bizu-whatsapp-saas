@@ -16,7 +16,8 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     favoritas) e de onde vem ("fixado para esta organização", "padrão do sistema" ou "nenhum limite definido"), o piso de idade e a última limpeza
     (quando rodou e as contagens, ou "Nunca rodou.").
   - Edição da política, só para o `platform_owner` (o suporte lê): cada limite tem três opções distintas, herdar o padrão (`null`), sem limite (`0`) ou um
-    número de 1 até o teto (`RETENTION_LIMIT_MAX`); vazio e `0` em "definir" são recusados na tela.
+    número de 1 até o teto (`RETENTION_LIMIT_MAX`); vazio e `0` em "definir" são recusados na tela. Com a retenção ligada, salvar um limite
+    mais apertado pede confirmação, mostrando de quanto para quanto.
   - Prévia sob demanda do que a limpeza faria agora (idade, contagem, favoritas rebaixadas, arquivos, lote cortado): não apaga nada e usa a política já
     gravada. Aviso de estado: retenção desligada (política gravada, nada é apagado) ou ligada (roda uma vez por dia e apaga sem volta; favorita e piso não saem).
   - Cartão "Retenção de mensagens da plataforma" em `/admin/configuracoes`: só leitura, com os padrões do sistema e a prévia.
