@@ -9,7 +9,7 @@ import {
 } from "@/jobs/billing";
 import { handleChannelHealth, handleChannelInbound } from "@/jobs/channels";
 import { handleEmailSend } from "@/jobs/email";
-import { handleInboxMedia, handleInboxSweep } from "@/jobs/inbox";
+import { handleInboxMedia, handleInboxRetention, handleInboxSweep } from "@/jobs/inbox";
 import { handleLgpdDelete, handleLgpdExport } from "@/jobs/lgpd";
 import { handleMaintenancePrune } from "@/jobs/maintenance";
 import { handlePhoneVerify } from "@/jobs/phone";
@@ -33,8 +33,8 @@ export async function registerQueues(boss: PgBoss) {
 }
 
 export async function registerSchedules(boss: PgBoss) {
-  for (const { queue, cron } of scheduleDefinitions) {
-    await boss.schedule(queue, cron);
+  for (const { queue, cron, singletonKey } of scheduleDefinitions) {
+    await boss.schedule(queue, cron, null, singletonKey ? { singletonKey } : undefined);
   }
 }
 
@@ -56,6 +56,7 @@ export async function registerWorkers(
   await boss.offWork(QUEUE.channelHealth);
   await boss.offWork(QUEUE.inboxMedia);
   await boss.offWork(QUEUE.inboxSweep);
+  await boss.offWork(QUEUE.inboxRetention);
   await boss.offWork(QUEUE.phoneVerify);
   await boss.work(
     QUEUE.emailSend,
@@ -90,6 +91,7 @@ export async function registerWorkers(
     handleInboxMedia,
   );
   await boss.work(QUEUE.inboxSweep, options, handleInboxSweep);
+  await boss.work(QUEUE.inboxRetention, options, handleInboxRetention);
   await boss.work(
     QUEUE.phoneVerify,
     { batchSize: 1, localConcurrency: 2, ...options },

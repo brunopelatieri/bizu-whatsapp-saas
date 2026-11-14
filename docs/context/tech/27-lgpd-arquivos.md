@@ -6,6 +6,12 @@
 
 A tabela de retenção e a base legal estão em `docs/context/lgpd.md`.
 
+- **Mensagens do atendimento (bloco R, R2):** com `MESSAGE_RETENTION_ENABLED=true`, o job `inbox.retention` apaga, por organização
+  e tipo de canal, a mensagem que passou do prazo ou do teto de quantidade (as favoritas ficam até o teto de favoritas) e a
+  **mídia dela**: a linha `file` (`owner_type = 'message'`) sai na transação e o objeto do `StorageProvider` depois do commit
+  (falha ao apagar o objeto vai ao log; nunca uma pessoa nos dados). A mídia apagada deixa de contar em `storage_mb`. Detalhe em
+  `tech/30-caixa-de-entrada.md`.
+
 ## Consentimento e textos legais
 
 - `consent_log` (sem tenant): uma linha por aceite ou recusa, com `kind` (`terms`, `privacy`, `marketing`), `version`, `accepted`, `ip_hash` (mesmo hash do `audit_log`) e `user_agent`. O estado atual é a linha mais recente de cada tipo.

@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e a fase R1 do bloco R (decisões R1-1 a R1-10 a confirmar; R2 e R3 pendentes) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1 e R2 do bloco R (decisões R1-1 a R1-10 e R2-1 a R2-10 a confirmar; R3 pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -787,7 +787,7 @@ conversa encerrada antiga perde as mensagens e permanece na lista.
 | Fase | Entrega | Verificação | LLM |
 |---|---|---|---|
 | R1 (**implementada**; ver "R1: o que foi feito", com o contrato da R2 e da R3) | Migration `0039` com **todo** o schema do bloco, variáveis, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga; desligado nunca apaga; o piso vence. `tests/db/retention-schema.test.ts`: RLS, `CHECK`s, padrões | Sonnet 5.5 |
-| R2 | Serviço de limpeza, prévia, job; exclusão do arquivo | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
+| R2 (**implementada**; ver "R2: o que foi feito", com o contrato das rotas para a R3b) | Serviço de limpeza, prévia, job; exclusão do arquivo; rotas `/api/admin/retention/*` | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
 | R3 | Estrela, aviso da conversa vazia, tela do `/admin` | Roteiro manual com o interruptor ligado em banco de teste | Sonnet 5.5 |
 
 **Nenhuma fase depois da R1 gera migration** (o Postgres local é compartilhado e a numeração colidiria). Faltou coluna? Pare e fale com a sessão
@@ -911,6 +911,109 @@ cru não leem, não gravam nem alteram as duas tabelas; a plataforma sim); `test
 | R1-8 | Tetos de cada limite | Só no `.env` e na rota do `/admin` (`RETENTION_LIMIT_MAX`: 10.000.000, 3650 e 1.000.000); o banco só exige `>= 0` | Teto também em `CHECK` |
 | R1-9 | Anonimizar a conta | Zera `favorited_by`, mantém a estrela | Deixar o id da conta anonimizada |
 | R1-10 | Compose | Limites sem padrão no `compose.prod.yml` (só o `.env.prod.example` traz 5000/90/200); `ENABLED` padrão `false` | Padrões também no compose |
+
+### R2: o que foi feito (2026-11-14)
+
+Limpeza, prévia, job e rotas do `/admin`. **Apaga mensagem** quando `MESSAGE_RETENTION_ENABLED=true`. Nenhuma migration (o schema veio
+todo na R1). A precedência e o piso continuam só em `retention-policy.ts`.
+
+**Serviço `src/lib/inbox/retention.ts`:**
+
+```ts
+runRetention(target: { tenantId: string | null; channelType }, { dryRun?, now?, config? }): Promise<{ plan; result: RetentionRunResult; ran }>
+loadRetentionPlan(target, config?)            // planRetention com a linha de retention_policy (a plataforma não tem linha)
+lastRetentionRun(target)                      // { lastRunAt, result: readRunResult(last_result) } | null
+listRetentionTargets()                        // pares distintos (tenant_id, channel.type) das conversas; a plataforma com tenantId null
+runRetentionCycle({ now?, config?, targets?, run? })   // o job; targets e run só para teste
+getRetentionView(target, config?), retentionTenantExists(id), saveRetentionPolicy(id, tipo, input, actor)   // rotas do /admin
+```
+
+| Fase | O que apaga (ou rebaixa) | Ordem do lote | Nunca |
+|---|---|---|---|
+| Idade | não favorita com `created_at < ageCutoff` (`retentionCutoffs`: o corte nunca passa do piso) | as mais velhas primeiro | favorita; mais nova que o piso |
+| Contagem | não favorita cujo ranque `created_at DESC, id DESC` **entre as não favoritas que a idade deixou** passa de `maxMessages`, com `created_at < floorAt` | as de ranque mais alto (mais velhas) primeiro | favorita; mais nova que o piso |
+| Favoritas | favorita cujo ranque entre as favoritas passa de `maxFavorites`, com `created_at < floorAt`: `is_favorite = false`, `favorited_at` e `favorited_by` nulos. **Não apaga**: ela entra nas fases 1 e 2 no ciclo seguinte | as mais velhas primeiro | apagar; mais nova que o piso |
+
+- Escopo = organização × tipo de canal (e plataforma × tipo): `message.tenant_id` e a conversa num `channel.type` do escopo. Roda em `withScope`
+  (RLS do escopo; `withPlatformData` na plataforma) **e** com `tenant_id = $1` (ou `IS NULL`) e o tipo em toda sentença que toca `message`, `file`
+  e `conversation`. Uma execução de uma organização nunca alcança mensagem de outra, nem da plataforma (teste).
+- `LIMIT plan.batchLimit` por fase; `truncated = true` quando sobrou (a seleção pede `batchLimit + 1`). O que sobrou fica para o próximo ciclo.
+- Só executa com `plan.canPurge`; senão **não toca nada, nem o estado**. Quem apaga lê só `plan.run`.
+- **A prévia e a execução escolhem as vítimas pelo mesmo código** (`selectVictims`). A prévia só conta; a execução apaga exatamente aquelas, e cada
+  `DELETE`/`UPDATE` repete o escopo, o tipo, a estrela, o corte e, na contagem e nas favoritas, o próprio ranque recalculado na sentença (`overCap`):
+  uma estrela marcada entre a seleção e o `DELETE`, ou uma exclusão concorrente que traga a mensagem para dentro do teto, a salva. Por isso o que a
+  prévia conta bate com o que a execução apaga no mesmo estado (teste com as três fases, mídia e lote cortado).
+- Antes de apagar, trava as conversas afetadas (`FOR UPDATE`, por id): a mesma ordem da ingestão e do envio (conversa, depois mensagem).
+- Mídia: a linha `file` da mensagem apagada (`owner_type = 'message'` com `owner_id` dela, ou a apontada por `file_id`), no escopo e **que nenhuma mensagem
+  que sobrou aponte**, sai na transação; o objeto sai do armazenamento depois do commit (falha vai a `logError`), como `purgeContacts`.
+- Conversa esvaziada: fica; só `last_message_preview` vira nulo (e só quando ela ficou sem mensagem). `last_message_at`, `last_inbound_at`,
+  `last_message_direction`, `unread_count`, situação e dono ficam.
+- `notifyInbox` por conversa afetada (apagada ou rebaixada), `k: "message"`, só ids (`s`, `c`, `a`).
+- Depois do commit, upsert de `message_retention_state` (`last_run_at = now`, `last_result` no formato de `RetentionRunResult`).
+- Prévia (`dryRun`): `plan.effective`; funciona com a retenção desligada; não altera nada e não grava o estado. Nela, `messagesTotal` e `favoritesTotal`
+  são o estado atual; na execução, o estado depois dela.
+
+**Job `inbox.retention`** (`src/jobs/queues.ts`, `src/jobs/inbox.ts`): cron `45 4 * * *` (UTC), fila `exclusive` com `singletonKey = "inbox.retention"`
+no agendamento (`scheduleDefinitions` ganhou `singletonKey`), **sem retry** e com expiração de 6 h (um job repetido ou expirado abriria
+uma segunda passada com a primeira ainda apagando), dead letter `inbox.retention.dead`. Desligada, não percorre nada.
+Cada escopo que falha vai a `logError` ("Falha na limpeza de mensagens de um escopo", sem texto de mensagem nem id de pessoa) e o ciclo segue; a saída
+do job só tem contagens (`scopes`, `ran`, `failed`, `truncated`). Vale em `JOBS_MODE=inline` e `worker` como os demais.
+
+**Rotas `/api/admin/retention/*`** (`src/api/admin-retention.ts`, sub-router com a própria cadeia `sameOrigin` → `jsonBodyLimit` → `authRateLimit` →
+`requireAuth` → `requirePlatform()`, montado antes de `adminRoutes`). **Contrato para a tela da R3b:**
+
+| Método e rota | Quem | Resposta |
+|---|---|---|
+| `GET /api/admin/retention/tenants/:id` | equipe da plataforma | `{ scopes: RetentionView[] }`, um por tipo de canal, na ordem de `channelTypes` |
+| `PUT /api/admin/retention/tenants/:id/:channelType` | `platform_owner`, `blockWhileImpersonating` | corpo `retentionPolicySchema` (`src/lib/schemas/retention.ts`): `{ maxMessages, retentionDays, maxFavorites }`, os três obrigatórios, inteiro `>= 0` até `RETENTION_LIMIT_MAX` ou `null` (herda); `0` = sem limite; campo a mais é 400. Upsert de `retention_policy` com `updated_by`; audita `admin.retention_policy_updated` **sem `tenant_id`**, `target = tenant`, `metadata = { channelType, maxMessages, retentionDays, maxFavorites }`. Responde `{ scope: RetentionView }` |
+| `GET /api/admin/retention/tenants/:id/:channelType/preview` | equipe da plataforma | `{ preview: RetentionRunResult }` (o que a limpeza faria agora, pela política efetiva, mesmo desligada) |
+| `GET /api/admin/retention/platform` | equipe da plataforma | `{ scopes: RetentionView[] }` do escopo da plataforma (só os padrões do `.env`; não há escrita) |
+| `GET /api/admin/retention/platform/:channelType/preview` | equipe da plataforma | `{ preview: RetentionRunResult }` |
+
+```ts
+type RetentionView = {
+  channelType: "whatsapp_cloud" | "whatsapp_qr";
+  enabled: boolean;                 // MESSAGE_RETENTION_ENABLED: desligada, a política só vale na prévia (mostre um aviso)
+  floorHours: number; batchLimit: number;
+  policy: { maxMessages; retentionDays; maxFavorites } | null;   // a linha como está (null no campo = herda); null sem linha
+  policyUpdatedAt: string | null;
+  defaults: RetentionLimits;        // padrões do .env (null = sem limite)
+  effective: RetentionLimits;       // o que vale (linha, depois .env)
+  sources: Record<"maxMessages" | "retentionDays" | "maxFavorites", "policy" | "default" | "unlimited">;
+  lastRun: { at: string | null; result: RetentionRunResult } | null;   // null = nunca rodou
+};
+```
+
+Erros: 401 sem sessão; 403 `PLATFORM_FORBIDDEN` para quem não é da plataforma (e para o suporte no `PUT`); 403 `PLATFORM_2FA_REQUIRED`; 404 para
+organização inexistente ou **excluída** (`status = deleted`), id que não é UUID ou tipo de canal desconhecido; 400 com a mensagem do Zod. Como toda
+rota nova, com `PHONE_VERIFICATION_REQUIRED=true` a conta com telefone pendente recebe 403 `PHONE_UNVERIFIED` (nada daqui entrou na lista do que passa).
+
+**Texto e LGPD:** `docs/context/lgpd.md` (linha do atendimento e a da política) e a seção 6 de `src/lib/legal/privacidade.md`: a linha
+"Conversas, mensagens e arquivos" virou duas, "Mensagens e arquivos" (limpeza automática diária com prazo, teto, favoritas e piso, com os padrões
+90 dias, 5.000, 200 e 72 h) e "Contatos e conversas" (sem prazo automático). `LEGAL_VERSIONS` ficou em `2026-11`. **Revisão jurídica pendente.**
+
+**Testes:** `tests/db/inbox-retention.test.ts` (desligada, sem limite e `0` não apagam; o piso nas três fases e nunca abaixo de 24 h; idade, contagem
+pelo escopo inteiro, desempate por id, favoritas rebaixadas que só somem no ciclo seguinte, as três fases juntas; a prévia bate com a execução, com a
+retenção desligada e com o lote cortado; isolamento entre organizações, entre a plataforma e as organizações e entre tipos de canal; `batchLimit` e
+`truncated`; lote acima de 65.535 ids (um parâmetro de array só); `file` e objeto; conversa esvaziada com as âncoras; mensagem citada; estado gravado; `pg_notify` só com ids; reentrega de aviso antigo;
+o job: fila, agendamento, escopos e uma organização que falha). `tests/db/admin-retention.test.ts` (papéis, organização inexistente ou excluída,
+tetos e campos, `sources`, auditoria sem `tenant_id`, prévia sem apagar, última execução). `rbac.test.ts` e `impersonation.test.ts` ganharam as rotas.
+O escopo da plataforma só é limpo nos testes com o corte de 3650 dias e mensagens com mais de 10 anos; o ciclo, só com escopos explícitos.
+
+**Decisões da R2 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R2-1 | O que entra no ranque da contagem | As não favoritas **que a idade deixou** (é o que sobraria depois da fase 1; igual à execução da origem) | Ranquear antes da fase 1 (a prévia da origem contava em dobro) |
+| R2-2 | Arquivo apontado por outra mensagem que sobrou | Fica (só sai o que ninguém mais aponta) | Apagar sempre (`purgeContacts` não confere, porque leva a conversa inteira) |
+| R2-3 | Execução sem limite ou desligada | Não grava `message_retention_state` (a tela mostra só a última execução de verdade) | Gravar uma linha "sem efeito" |
+| R2-4 | Escopo que falha no job | Vai ao log e o job termina com sucesso (`failed` na saída); o job não tem retry (a falha ao listar os escopos espera o dia seguinte) | Falhar o job inteiro com retry (repetiria os escopos que já limparam: mais um lote, e poderia sobrepor duas passadas) |
+| R2-5 | Organizações suspensas ou com exclusão agendada | Entram na limpeza como as outras (a regra protege o servidor) | Pular as não ativas |
+| R2-6 | Prévia | `GET` (leitura, liberada ao suporte) | `POST` |
+| R2-7 | Escopo da plataforma | Lido e com prévia no `/admin`, sem escrita (só o `.env`, como a R1 decidiu) | Linha de política também para a plataforma (pediria migration) |
+| R2-8 | Voltar a herdar tudo | `PUT` com os três `null` (a linha fica, toda nula) | Rota `DELETE` |
+| R2-9 | Aviso às telas | `k: "message"` sem `m` (relê lista, detalhe e mensagens) | `k: "conversation"` (não relê as mensagens) |
+| R2-10 | Horário | 04:45 UTC, depois do `maintenance.prune` (04:30) | Outro horário |
 
 ---
 
@@ -1357,7 +1460,7 @@ Comparação com a SPEC 059 da origem.
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
-| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1 implementada** (schema e precedência); R2 (limpeza) e R3 (estrela, aviso e tela) pendentes: **até a R2 nada apaga mensagem** |
+| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1 e R2 implementadas** (schema, precedência, limpeza, prévia, job e rotas); R3 (estrela, aviso e tela) pendente. Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
@@ -1368,7 +1471,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), F1-1 a F1-5 do perfil (em "F1: o que foi feito") e R1-1 a R1-10 da retenção (em "R1: o que foi feito").
+de telefone pelo pedido: o que foi feito"), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

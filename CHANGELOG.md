@@ -10,6 +10,20 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Retenção de mensagens, fase R2 (bloco R de `docs/specs/pre-producao/spec.md`)**: a limpeza. **Com `MESSAGE_RETENTION_ENABLED=true`, mensagens são
+  apagadas sem volta.**
+  - Serviço `src/lib/inbox/retention.ts`: por organização (e plataforma) e tipo de canal, nas fases idade, contagem (o teto vale para o escopo
+    inteiro) e favoritas acima do teto (perdem a estrela e só somem no ciclo seguinte), com o piso de idade nas três, `MESSAGE_RETENTION_BATCH_LIMIT`
+    por fase e `truncated`. Apaga a mídia da mensagem (linha `file` e objeto depois do commit); a conversa esvaziada fica, sem a prévia do texto.
+  - Prévia (`dryRun`) pelo mesmo código da execução: conta o que seria apagado, sem alterar nada, mesmo com a retenção desligada.
+  - Job diário `inbox.retention` (04:45 UTC, fila `exclusive` com `singletonKey`); uma organização que falha não impede as outras.
+    `scheduleDefinitions` aceita `singletonKey`.
+  - Rotas `/api/admin/retention/*`: política efetiva por organização e tipo de canal, gravar a política (só `platform_owner`, auditada como
+    `admin.retention_policy_updated`), prévia e última execução. A tela é da R3.
+  - Texto de privacidade (seção 6): mensagens e arquivos passam a ter limpeza automática; contatos e conversas seguem sem prazo. `LEGAL_VERSIONS`
+    continua `2026-11`.
+  - **Migração:** nenhuma migration. Projeto derivado com `MESSAGE_RETENTION_ENABLED=true` (o padrão de `docker/.env.prod.example`) passa a apagar
+    mensagens no primeiro ciclo: confira os limites `MESSAGE_RETENTION_*` (ou desligue) antes de atualizar, e use a prévia do `/admin` para ver o efeito.
 - **Retenção de mensagens, fase R1 (bloco R de `docs/specs/pre-producao/spec.md`)**: só a base; **nenhuma mensagem é apagada ainda**
   (a limpeza é a R2).
   - Migration `0039_retencao_mensagens`: `message.is_favorite`, `favorited_at` e `favorited_by` (a estrela é da conversa); tabelas

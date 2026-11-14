@@ -33,6 +33,8 @@ export const QUEUE = {
   inboxMediaDead: "inbox.media.dead",
   inboxSweep: "inbox.sweep",
   inboxSweepDead: "inbox.sweep.dead",
+  inboxRetention: "inbox.retention",
+  inboxRetentionDead: "inbox.retention.dead",
   phoneVerify: "phone.verify",
   phoneVerifyDead: "phone.verify.dead",
 } as const;
@@ -118,6 +120,7 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxMediaDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxSweepDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.inboxRetentionDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.phoneVerifyDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
@@ -239,6 +242,20 @@ export const queueDefinitions: QueueDefinition[] = [
     },
   },
   {
+    // Limpeza de mensagens (bloco R): cron diário. `exclusive` + `singletonKey` fixo: no máximo um
+    // job vivo (na fila ou rodando). **Sem retry** e com expiração longa: um job expirado ou repetido
+    // começaria uma segunda passada enquanto a primeira ainda apaga. O escopo que falha só vai ao log;
+    // uma falha ao listar os escopos espera o ciclo do dia seguinte.
+    name: QUEUE.inboxRetention,
+    options: {
+      policy: "exclusive",
+      retryLimit: 0,
+      expireInSeconds: 6 * 3600,
+      deleteAfterSeconds: 7 * 24 * 3600,
+      deadLetter: QUEUE.inboxRetentionDead,
+    },
+  },
+  {
     // `singleton` por cadastro (`singletonKey` = `user:<id>` ou `customer:<id>`): um job ativo
     // por pessoa, os demais esperam. É o que garante um link por número quando o cadastro e o
     // aceite do convite abrem dois pedidos quase juntos. Falha de provedor é tratada no job (a
@@ -255,7 +272,10 @@ export const queueDefinitions: QueueDefinition[] = [
   },
 ];
 
-export type ScheduleDefinition = { queue: string; cron: string };
+export type ScheduleDefinition = { queue: string; cron: string; singletonKey?: string };
+
+/** `singletonKey` do job diário de retenção: um só vivo por vez (fila `exclusive`). */
+export const INBOX_RETENTION_SINGLETON = "inbox.retention";
 
 /** Crons (UTC), como em `spec-email-jobs.md`. */
 export const scheduleDefinitions: ScheduleDefinition[] = [
@@ -267,4 +287,5 @@ export const scheduleDefinitions: ScheduleDefinition[] = [
   { queue: QUEUE.lgpdDelete, cron: "0 5 * * *" },
   { queue: QUEUE.channelHealth, cron: "*/15 * * * *" },
   { queue: QUEUE.inboxSweep, cron: "*/5 * * * *" },
+  { queue: QUEUE.inboxRetention, cron: "45 4 * * *", singletonKey: INBOX_RETENTION_SINGLETON },
 ];

@@ -508,9 +508,9 @@ cascata com o arquivo órfão.
   confirmado, e o número que a pessoa troca em `/portal/conta`, ou declara no cadastro, fica pendente até ser confirmado
   (`tech/28`, "Telefone verificado e único"). A regra de não exportar nem apagar pelo vínculo com `user` continua.
 - **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
-  `maintenance.prune`. Conversas e mensagens **ainda não** têm prazo automático: ficam enquanto o owner as mantiver, e saem
-  com o cliente, a pessoa ou a organização (`lgpd.md`). O bloco R da pré-produção (`docs/specs/pre-producao/spec.md`) muda
-  isso em três fases; **a R1 está feita e só entrega schema, variáveis e a precedência**:
+  `maintenance.prune`. **Mensagens** (bloco R da pré-produção, `docs/specs/pre-producao/spec.md`) saem pela limpeza da R2
+  quando `MESSAGE_RETENTION_ENABLED=true`; **contatos e conversas** continuam sem prazo automático (saem com o cliente, a
+  pessoa ou a organização, `lgpd.md`). R1 (schema, variáveis e precedência) e R2 (limpeza, prévia, job e rotas) feitas:
   - `message.is_favorite`, `favorited_at`, `favorited_by` (a favorita é da conversa, não de quem marcou; a anonimização da conta
     zera só o autor), `retention_policy` e `message_retention_state` (só o proprietário da plataforma; `tech/07`).
   - `src/lib/inbox/retention-policy.ts` (puro): linha da política, depois padrão do `.env` do tipo de canal, depois sem
@@ -520,7 +520,29 @@ cascata com o arquivo órfão.
   - A conversa esvaziada **não ganha coluna**: o aviso "Mensagens antigas removidas pela política de retenção" nasce de a conversa
     ter `last_message_at` e nenhuma mensagem. Por isso a limpeza (R2) **não pode** zerar `last_message_at`, `last_inbound_at`
     (âncora da janela de 24 h) nem `last_message_direction`; só `last_message_preview`, que guarda o texto da última mensagem.
-  - O contrato inteiro para a R2 e a R3 está na SPEC, em "R1: o que foi feito".
+  - O contrato inteiro para a R2 e a R3 está na SPEC, em "R1: o que foi feito"; o da R3b (rotas), em "R2: o que foi feito".
+  - **Limpeza (R2, `src/lib/inbox/retention.ts`)**: `runRetention({ tenantId | null, channelType }, { dryRun?, now?, config? })`.
+    Escopo = organização (ou plataforma) × tipo de canal (`message` → `conversation` → `channel.type`); os tetos valem para o
+    escopo inteiro, ranque `created_at DESC, id DESC`. Fases, nesta ordem, cada uma com `LIMIT batchLimit` (e `truncated`
+    quando sobra): **idade** (não favorita, `created_at < ageCutoff`, as mais velhas primeiro); **contagem** (não favorita,
+    ranque entre as não favoritas que a idade deixou `> maxMessages`, `created_at < floorAt`); **favoritas** (ranque entre as
+    favoritas `> maxFavorites`, `created_at < floorAt`: perdem a estrela e os carimbos, e só somem no ciclo seguinte). Quem
+    apaga lê só `plan.run`; `!plan.canPurge` não toca nada (nem o estado). A prévia e a execução escolhem as vítimas pelo
+    **mesmo código** (`selectVictims`); a execução apaga exatamente aquelas, e cada `DELETE`/`UPDATE` confere de novo o escopo,
+    o tipo, a estrela, o corte e, na contagem e nas favoritas, o ranque recalculado na sentença (`overCap`): uma estrela
+    marcada no meio do caminho, ou uma exclusão concorrente que traga a mensagem para dentro do teto, a salva. Roda em `withScope` (RLS do escopo)
+    **e** com `tenant_id` explícito (ou `IS NULL`) e o tipo de canal em toda sentença. Trava as conversas afetadas
+    (`FOR UPDATE`, por id) antes de apagar, a mesma ordem da ingestão e do envio. A mídia das apagadas (`file` dona ou apontada
+    por `file_id`, no escopo, que nenhuma mensagem que sobrou aponte) sai na transação e o objeto depois do commit, como
+    `purgeContacts`. A conversa esvaziada fica, só com `last_message_preview` zerado. `notifyInbox` com `k: "message"` e só ids,
+    por conversa afetada. Depois do commit grava `message_retention_state` (upsert por escopo, `withPlatformData`).
+  - **Prévia** (`dryRun: true`): `plan.effective` (funciona com a retenção desligada), não altera nada nem grava o estado;
+    `messagesTotal`/`favoritesTotal` são o estado atual. O que ela conta bate com o que a execução apaga no mesmo estado (teste).
+  - **Job `inbox.retention`** (cron diário 04:45 UTC, fila `exclusive`, `singletonKey = "inbox.retention"`): desligada, não faz
+    nada; sem retry e com expiração de 6 h (nunca duas passadas juntas); percorre `listRetentionTargets()` (pares distintos `tenant_id` × tipo de canal das conversas, a plataforma com `null`);
+    escopo que falha vai a `logError` (sem texto de mensagem) e não impede os demais.
+  - **Rotas `/api/admin/retention/*`** (`src/api/admin-retention.ts`, `tech/22-admin.md`): política efetiva por organização e
+    tipo, gravar a linha (só o proprietário), prévia e última execução. A tela é da R3b.
 
 ## Testes
 
@@ -593,6 +615,9 @@ Reunidos aqui; o detalhe de cada um está na seção da fase.
 | C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
 | C7 | **Fechado na pré-produção (T1):** o vínculo automático só usa telefone confirmado. Texto original: O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
 | C7 | Backup anterior à exclusão ainda contém as conversas: restaurar exige reaplicar as exclusões (`tech/14-deploy.md`) |
+| R2 | Reentrega pelo provedor de um aviso **mais velho que o piso** depois da limpeza recria a mensagem (a ingestão não a acha para deduplicar) e soma 1 em `unread_count`; as âncoras da conversa não recuam (`GREATEST`) e o próximo ciclo a leva de novo. O piso (72 h por padrão, nunca abaixo de 24 h) cobre as reentregas reais |
+| R2 | Apagar mensagem citada dispara o `SET NULL` de `reply_to_message_id` em respostas de conversas que a limpeza não travou; um aviso de status concorrente nessas linhas pode dar deadlock. O Postgres aborta uma das transações: se for a da limpeza, o escopo volta inteiro (nada apagado pela metade), vai ao log e o ciclo seguinte refaz |
+| R2 | A conversa encerrada antiga perde as mensagens e continua na lista (como na origem); conversa e contato não têm prazo |
 
 ## Desvios da SPEC (C7)
 

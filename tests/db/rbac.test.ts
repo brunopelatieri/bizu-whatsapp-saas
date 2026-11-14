@@ -289,6 +289,7 @@ describe("RBAC", () => {
     const reads = [
       ["GET", "/api/admin/webhooks"],
       ["GET", "/api/admin/channel-events"],
+      ["GET", "/api/admin/retention/platform"],
       ["GET", "/api/admin/channels"],
       ["GET", "/api/admin/subscriptions"],
       ["GET", "/api/admin/audit"],

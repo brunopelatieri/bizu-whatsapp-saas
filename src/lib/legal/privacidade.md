@@ -56,7 +56,8 @@ Se a organização usa um número conectado por QR Code, esse número é o Whats
 | Eventos de pagamento processados | 90 dias |
 | Avisos recebidos do WhatsApp, já tratados | 30 dias (configurável pela plataforma, de 1 a 365) |
 | Pedidos de confirmação de telefone encerrados | 30 dias |
-| Conversas, mensagens e arquivos do atendimento por WhatsApp | sem prazo automático: ficam enquanto a organização os mantiver, e saem quando o cliente, a conta ou a organização são excluídos (seção 7) |
+| Mensagens e arquivos do atendimento por WhatsApp | apagados automaticamente, uma vez por dia, quando passam do prazo ou do limite de quantidade definidos pela plataforma para cada organização e tipo de número (padrão: 90 dias ou as 5.000 mensagens mais recentes); as mensagens marcadas como favoritas ficam fora dessa limpeza até o limite de favoritas (padrão: as 200 mais recentes); mensagens das últimas 72 horas nunca são apagadas por essa regra (o mínimo configurável é 24 horas). Antes disso, saem quando o cliente, a conta ou a organização são excluídos (seção 7) |
+| Contatos e conversas do atendimento por WhatsApp | sem prazo automático: ficam enquanto a organização os mantiver (a conversa continua na lista mesmo sem as mensagens antigas), e saem quando o cliente, a conta ou a organização são excluídos (seção 7) |
 | Foto de perfil | até você trocá-la ou removê-la, ou até a conta ser excluída |
 | Faturas | 5 anos, anonimizadas se a conta for excluída |
 | Arquivos de exportação | 7 dias |

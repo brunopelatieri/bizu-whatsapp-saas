@@ -411,6 +411,11 @@ describe("personificação", () => {
       for (const [method, path, body] of [
         ["POST", "/api/admin/crm/tags", { name: "x" }],
         ["PUT", `/api/admin/tenants/${tenantId}/profile`, { tagIds: [] }],
+        [
+          "PUT",
+          `/api/admin/retention/tenants/${tenantId}/whatsapp_cloud`,
+          { maxMessages: 1, retentionDays: 1, maxFavorites: 1 },
+        ],
       ] as const) {
         const response = await call(method, path, { cookie, body });
 

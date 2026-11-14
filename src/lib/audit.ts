@@ -126,6 +126,8 @@ export type AuditAction =
   | "admin.custom_field_archived"
   | "admin.custom_field_deleted"
   | "admin.tenant_profile_updated"
+  // retenção de mensagens (bloco R): sem `tenant_id`, só o tipo de canal e os três números.
+  | "admin.retention_policy_updated"
   // caixa-de-entrada (C2): só ids e enums em `metadata`, nunca texto, nome ou telefone.
   | "inbox.conversation_claimed"
   | "inbox.conversation_assigned"
