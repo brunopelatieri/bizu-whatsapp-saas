@@ -15,10 +15,16 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     organização e métrica (`withinLimit`, `src/lib/billing/limits.ts`): com uma vaga só e pedidos simultâneos, passa um e os outros
     recebem o 403 `PLAN_LIMIT_REACHED` de sempre. Vale para o cadastro pela equipe, "salvar contato como cliente", o autocadastro do
     portal (e a abertura do `claim`), o convite e o aceite. A confirmação do `claim`, o reenvio, o cancelamento e a remoção não tomam a
-    trava (não ocupam vaga). Plano sem limite na métrica não toma a trava; a espera tem prazo de 15 s.
+    trava (não ocupam vaga). Plano sem limite na métrica não toma a trava (ver a correção do pool, abaixo).
   - `assertWithinLimit` segue só conferindo (`custom_roles`); canais e organizações por dono mantêm as travas que já tinham. Ordem das
     travas do projeto: limite, número, conta ou ficha, pedido (`docs/context/tech/23-billing-planos.md`).
   - Sem mudança de regra, mensagem nem código de erro. **Migração:** nenhuma.
+- **Correção: pool de conexões travado por seções que seguram uma conexão e pedem outra (RISK-015)**.
+  - O pool é de 10 conexões e o Better Auth usa o mesmo. A trava de `members` (Q1) e `createOrganizationWithinLimit` (anterior) seguravam uma
+    conexão em transação enquanto o Better Auth pedia outra: com 10 pedidos simultâneos o acesso ao banco do processo parava até reiniciar.
+  - `nestedSection` (`src/db/nested-section.ts`) limita a 3 quantas dessas seções rodam ao mesmo tempo, com a fila sem conexão;
+    `withinLimitNested` (`members`) não abre transação quando o plano não tem limite. O `lock_timeout` de 15 s da primeira versão da Q1 saiu.
+    Sem mudança de regra, mensagem nem código de erro. **Migração:** nenhuma.
 - **Ajustes do proprietário no bloco T (2026-11-14)** sobre a ligação manual e o `claim` de `docs/specs/pre-producao/spec.md`:
   - O link do `claim` segue a mesma cascata dos outros pedidos (Cloud, depois QR Code), também depois de falha e no reenvio
     (CL-3 revista; risco aceito como na D-13).

@@ -1,5 +1,6 @@
 import { and, count, eq, gt, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { nestedSection } from "@/db/nested-section";
 import { channel, customer, invitation, member, organizationRole } from "@/db/schema";
 import type { PlanLimits } from "@/db/schema/billing";
 import { LIMIT_LABELS, type LimitMetric } from "@/lib/billing/constants";
@@ -163,7 +164,7 @@ function limitReached(check: LimitCheck) {
 /**
  * Lança 403 `PLAN_LIMIT_REACHED` se não couber mais um. **Só confere**: não impede que duas
  * requisições simultâneas passem juntas pela última vaga. Quem cria `members` ou `customers`
- * usa `withinLimit`.
+ * usa `withinLimit` ou `withinLimitNested`.
  */
 export async function assertWithinLimit(
   tenantId: string,
@@ -177,44 +178,50 @@ export async function assertWithinLimit(
   return check;
 }
 
-/**
- * Quanto uma requisição espera pela trava de limite antes de desistir. O dono da trava ainda
- * pode precisar de uma conexão do pool (o Better Auth grava convite e membro por outra
- * conexão); sem prazo, uma fila de esperas que ocupasse o pool inteiro o travaria para sempre.
- */
-const LIMIT_LOCK_TIMEOUT = "15s";
-
 /** A chave da trava de uma métrica de um tenant (os testes a seguram por ela). */
 export const limitLockKey = (tenantId: string, metric: LimitMetric) =>
   `limit:${tenantId}:${metric}`;
 
 /**
- * Trava (até o fim da transação) a métrica do tenant. **Ordem de travas do projeto:** esta é
- * sempre a mais externa. `withinLimit` abre a própria transação e a toma antes de qualquer
- * outra trava (o número, `lockPhoneKey`; a conta ou a ficha; o pedido) e nunca é chamada
- * dentro de uma transação que já segura uma delas, então não fecha ciclo com nenhuma.
- * O prazo de espera volta a `0` (o padrão do Postgres; o projeto não define outro) depois.
+ * Trava (até o fim da transação) a métrica do tenant e confere o limite contando pela mesma
+ * transação. **Ordem de travas do projeto:** esta é sempre a mais externa. As funções abaixo
+ * abrem a própria transação e a tomam antes de qualquer outra trava (o número, `lockPhoneKey`;
+ * a conta ou a ficha; o pedido) e nunca são chamadas dentro de uma transação que já segura uma
+ * delas, então não fecham ciclo com nenhuma.
  */
-async function lockLimit(tx: Tx, tenantId: string, metric: LimitMetric) {
-  await tx.execute(sql`select set_config('lock_timeout', ${LIMIT_LOCK_TIMEOUT}, true)`);
+async function lockAndCheck(
+  tx: Tx,
+  tenantId: string,
+  metric: LimitMetric,
+  limit: number,
+  source: LimitSource,
+  options: LimitOptions,
+) {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${limitLockKey(tenantId, metric)}, 0))`,
   );
-  // O prazo vale só para esta espera: as demais travas da transação seguem como eram.
-  await tx.execute(sql`select set_config('lock_timeout', '0', true)`);
+
+  const used = await source.used(tenantId, metric, { ...options, tx });
+  const check = evaluateLimit(metric, limit, used);
+  if (!check.allowed) throw limitReached(check);
 }
+
+const limitOf = async (tenantId: string, metric: LimitMetric, source: LimitSource) =>
+  (await source.limits(tenantId))[metric] ?? null;
 
 /**
  * Confere o limite e deixa o chamador gravar **sob uma trava por organização e métrica**
  * (`pg_advisory_xact_lock`): duas requisições simultâneas esperam uma pela outra, e a segunda já
  * conta a primeira. A mesma regra de `assertWithinLimit` (403 `PLAN_LIMIT_REACHED`), sem mudar o
- * que conta nem a mensagem. `run` recebe a transação de tenant: quem grava o cliente grava nela
- * e o `COMMIT` solta a trava. Quem grava por outra conexão (`members`: o Better Auth) só pode
- * devolver depois de a gravação confirmar, como em `createOrganizationWithinLimit`.
+ * que conta nem a mensagem. `run` recebe a transação de tenant e **grava só por ela** (como
+ * `customers`): o `COMMIT` solta a trava, e `run` nunca pede outra conexão do pool, que a
+ * seção já segura uma. Quem grava por outra conexão (`members`: o Better Auth) usa
+ * `withinLimitNested`.
  *
- * O limite é lido **antes** de abrir a transação: ler o plano por outra conexão, já segurando
- * uma, esgotaria o pool sob concorrência. Plano sem limite na métrica não trava nada.
- * Trava por métrica: `customers` não segura `members`, nem um tenant segura outro.
+ * O limite é lido **antes** de abrir a transação (ler o plano por outra conexão, já segurando
+ * uma, é o que esta função evita). Plano sem limite na métrica não trava nada. A trava é por
+ * métrica: `customers` não segura `members`, nem um tenant segura outro. Quem espera a trava
+ * segura uma conexão; como o dono da trava não pede outra, ele termina e a fila anda.
  */
 export async function withinLimit<T>(
   tenantId: string,
@@ -223,17 +230,41 @@ export async function withinLimit<T>(
   run: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   const source = options.source ?? databaseLimitSource;
-  const limit = (await source.limits(tenantId))[metric] ?? null;
+  const limit = await limitOf(tenantId, metric, source);
 
   return withTenant(tenantId, async (tx) => {
-    if (limit !== null) {
-      await lockLimit(tx, tenantId, metric);
-
-      const used = await source.used(tenantId, metric, { ...options, tx });
-      const check = evaluateLimit(metric, limit, used);
-      if (!check.allowed) throw limitReached(check);
-    }
+    if (limit !== null) await lockAndCheck(tx, tenantId, metric, limit, source, options);
 
     return run(tx);
   });
+}
+
+/**
+ * Como `withinLimit`, para quem grava **por outra conexão do pool** enquanto a trava está tomada
+ * (`members`: `createInvitation` e `acceptInvitation` do Better Auth, que só devolvem depois de
+ * gravar e confirmar). A seção segura uma conexão e `run` pede outra: sem teto, 10 pedidos
+ * simultâneos ocupariam o pool inteiro e o processo pararia. Por isso:
+ *
+ * - plano sem limite na métrica **não abre transação** nem passa pelo teto: `run` roda direto;
+ * - com limite, a seção passa por `nestedSection` (`src/db/nested-section.ts`), que limita quantas
+ *   rodam ao mesmo tempo no processo; as demais esperam sem segurar conexão.
+ */
+export async function withinLimitNested<T>(
+  tenantId: string,
+  metric: LimitMetric,
+  options: LimitOptions,
+  run: () => Promise<T>,
+): Promise<T> {
+  const source = options.source ?? databaseLimitSource;
+  const limit = await limitOf(tenantId, metric, source);
+
+  if (limit === null) return run();
+
+  return nestedSection(() =>
+    withTenant(tenantId, async (tx) => {
+      await lockAndCheck(tx, tenantId, metric, limit, source, options);
+
+      return run();
+    }),
+  );
 }

@@ -9,7 +9,7 @@ import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
-import { withinLimit } from "@/lib/billing/limits";
+import { withinLimitNested } from "@/lib/billing/limits";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { ensureUserVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
@@ -74,8 +74,8 @@ invitationRoutes.post(
     }
 
     // O assento do próprio convite já estava reservado; o plano pode ter encolhido. Conferência e
-    // aceite sob a trava de `members` (`withinLimit`), a mesma do convite.
-    const { member } = await withinLimit(
+    // aceite sob a trava de `members` (`withinLimitNested`), a mesma do convite.
+    const { member } = await withinLimitNested(
       invitation.tenantId,
       "members",
       { ignoreInvitationId: invitationId },

@@ -1765,8 +1765,12 @@ interruptor global e contador de uso. Q2, Q3 e Q4 não foram tocadas.
 - A trava é por organização **e** por métrica: a de `customers` não segura `members`, nem um tenant segura outro. Plano sem limite na métrica
   (chave ausente ou `null`) nem toma a trava.
 - O limite é lido **antes** de abrir a transação: ler o plano por outra conexão, já segurando uma, esgotaria o pool (10 conexões) sob
-  concorrência. Enquanto espera a trava, a requisição segura uma conexão; por isso a espera tem `lock_timeout` de 15 s (Q1-1), restaurado a
-  `0` assim que a trava é obtida, para não alterar as demais travas da transação.
+  concorrência.
+- **Duas formas, por causa do pool (correção posterior à primeira entrega da Q1; ver "Pool travado" abaixo).** `withinLimit` (`customers`)
+  grava só pela própria transação: quem espera a trava segura uma conexão, mas o dono da trava não pede outra e termina. `withinLimitNested`
+  (`members`) é para quem grava **por outra conexão** do pool enquanto a trava está tomada (o `createInvitation` e o `acceptInvitation` do Better
+  Auth): com limite, passa por `nestedSection` (`src/db/nested-section.ts`), um teto de 3 seções ao mesmo tempo no processo, e as demais esperam
+  **sem** segurar conexão; sem limite na métrica, `run` roda direto, sem abrir transação.
 - `assertWithinLimit` continua, para o que não corre: `custom_roles` (teto fixo de 20 do plugin) e canais (que já têm `lockScopeType`).
   A doc dele diz que só confere.
 
@@ -1819,13 +1823,37 @@ fora, depois de a trava cair).
 
 | # | Decisão | Alternativa |
 |---|---|---|
-| Q1-1 | A espera pela trava dura no máximo 15 s (`lock_timeout`); passou disso, o Postgres devolve erro e a requisição responde 500. Só acontece sob fila longa na mesma organização e métrica; evita que uma fila de esperas esgote o pool e trave tudo | Esperar sem prazo (arrisca travar o pool) |
+| Q1-1 (**revista**) | Não há prazo de espera pela trava (o `lock_timeout` de 15 s da primeira entrega saiu: não cobria o plano sem limite nem organizações diferentes). Quem pede outra conexão enquanto segura uma passa por um teto de 3 seções no processo (`nestedSection`); quem só usa a própria transação (`customers`) espera a trava sem teto, porque o dono dela sempre termina | Prazo de espera, ou aumentar o pool (não resolve: só sobe o número de pedidos simultâneos que o travam) |
 | Q1-2 | Plano sem limite na métrica não toma a trava (nada a proteger, e a importação de quem não tem limite não paga a fila) | Travar sempre |
 | Q1-3 | A confirmação do `claim` não confere o limite (CL-12): não aumenta o total quando a ficha antiga existe. Quando ela sumiu antes do link, a ficha nova entra sem conferir | Conferir também na confirmação (muda a regra: o `claim` poderia ser recusado depois de o link ser aceito) |
 | Q1-4 | Reenvio, remoção e cancelamento de convite não tomam a trava | Tomar em todos os caminhos de membro |
 | Q1-5 | A trava de limite é a mais externa (limite, número, conta ou ficha, pedido) | Outra posição na ordem |
 
-**O que não foi testado:** o esgotamento do pool com o `lock_timeout` (Q1-1); a confirmação do `claim` com a ficha antiga já apagada e o
+**Pool travado (achado da conferência da Q1; corrigido num segundo commit)**
+
+- **O problema.** O pool de runtime é um só, de 10 conexões (`src/db/index.ts`), e o Better Auth usa o mesmo (`drizzle(getDb())`). A primeira
+  versão da trava de `members` abria `withTenant` (uma conexão em transação) e, dentro dela, chamava o Better Auth, que pede **outra**. Com 10
+  pedidos simultâneos, as 10 conexões ficam presas em transações que esperam o Better Auth, e o Better Auth fica na fila do pool, que o
+  `postgres.js` não limita no tempo: nada libera, e **todo o acesso ao banco do processo para até reiniciar**. O `lock_timeout` de 15 s só cobria
+  quem esperava a **mesma** trava; não cobria plano sem limite (sem trava, mas com a transação aberta) nem organizações diferentes (cada uma com a
+  trava própria). Quem convida derrubaria a plataforma: o limite de taxa é de 20 por 10 minutos por pessoa.
+- **`createOrganizationWithinLimit` (anterior à Q1) tinha o mesmo desenho** (transação de plataforma e lock por pessoa, com `createOrganization`
+  do Better Auth lá dentro), sem prazo nenhum: 10 criações simultâneas, da mesma pessoa (esperando o lock) ou de pessoas diferentes, travavam o
+  pool do mesmo jeito. Registrado em `docs/context/tech/16-bugs-riscos.md` (RISK-015).
+- **`customers` não tem o problema:** tudo o que roda dentro da trava (INSERT, etiquetas, campos, auditoria, `afterCreate` do atendimento, `openPortalClaim`
+  e `ensureCustomerVerification` do autocadastro) recebe a `tx`; o dono da trava não pede outra conexão. Conferido por teste (14 pedidos).
+- **A correção.** `src/db/nested-section.ts`: `nestedSection` é um semáforo em memória (`NESTED_SECTIONS_MAX = floor(POOL_MAX / 3) = 3`). As seções
+  que seguram uma conexão e pedem outra (`withinLimitNested` com limite, e `createOrganizationWithinLimit`) passam por ele; as demais esperam numa fila de
+  promessas, **sem** conexão. O número é seguro: cada seção segura 1 e o código de dentro usa até 2 ao mesmo tempo (o Better Auth grava em sequência;
+  2 é folga), então no pior caso 3 seções seguram 3 e pedem 6, no total 9 de 10, e sempre sobra conexão para quem está dentro terminar. O pedido
+  comum nunca entra num ciclo, só atrasa. O pool **não** foi aumentado. A seção não aninha outra `nestedSection`.
+- **Testes** (`tests/db/pool-saturation.test.ts`, com prazo de 25 s para não pendurar a suíte; `src/db/nested-section.test.ts` para o semáforo): 14 pedidos
+  (mais que as 10 conexões) de convite com `members` sem limite; de convite em 14 organizações diferentes, cada uma com a trava; de convite numa
+  organização com limite; 14 aceites; 14 criações de organização por pessoas diferentes e 14 da mesma pessoa; e 14 cadastros de cliente (sem limite, com
+  limite folgado e com uma vaga) e 14 confirmações de autocadastro do portal. Antes da correção os de convite e de organização estouram o prazo (pool
+  travado); depois terminam em poucos segundos.
+
+**O que não foi testado:** a confirmação do `claim` com a ficha antiga já apagada e o
 plano cheio; várias instâncias do servidor (a trava é do Postgres, não do processo, e os testes rodam num processo só); e o desempenho da
 contagem de `customers` com muitas fichas (a SPEC deixa o contador de uso para depois).
 
@@ -1849,7 +1877,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") e Q1-1 a Q1-5 da trava dos limites (em "Q1: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") e Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

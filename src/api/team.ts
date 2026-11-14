@@ -21,7 +21,7 @@ import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
-import { withinLimit } from "@/lib/billing/limits";
+import { withinLimitNested } from "@/lib/billing/limits";
 import { changeRoleSchema, inviteSchema } from "@/lib/schemas/team";
 import {
   assertCanGrant,
@@ -84,9 +84,9 @@ teamRoutes.post(
     assertCanGrant(actor, role);
     await assertCanReplaceInvitation(organizationId, email, actor);
     // O convite reserva um assento: reconvidar o mesmo e-mail não reserva outro. A conferência e
-    // a gravação do convite correm sob a trava de `members` (`withinLimit`): dois convites
+    // a gravação do convite correm sob a trava de `members` (`withinLimitNested`): dois convites
     // simultâneos não passam juntos pela última vaga.
-    const invitation = await withinLimit(
+    const invitation = await withinLimitNested(
       organizationId,
       "members",
       { ignoreInvitationEmail: email },

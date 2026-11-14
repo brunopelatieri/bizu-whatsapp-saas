@@ -1,4 +1,5 @@
 import { and, eq, ne, sql } from "drizzle-orm";
+import { nestedSection } from "@/db/nested-section";
 import { type Tx, withPlatformScope } from "@/db/rls";
 import { member, organization, plan, subscription } from "@/db/schema";
 import type { SubscriptionStatus } from "@/db/schema/billing";
@@ -95,20 +96,25 @@ export async function createOrganizationWithinLimit<T>(
   userId: string,
   create: () => Promise<T>,
 ): Promise<T> {
-  return withPlatformScope("organizations: limite do dono", async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`organization-create:${userId}`}, 0))`,
-    );
-    const check = organizationAllowance(await listOwnedOrganizations(tx, userId));
-
-    if (!check.allowed) {
-      throw new TenantRuleError(
-        403,
-        "PLAN_LIMIT_REACHED",
-        `Seu plano permite até ${check.limit} ${LIMIT_LABELS.organizations}. Mude de plano para criar outra.`,
+  // A seção segura uma conexão e `create` pede outra (o Better Auth grava pelo mesmo pool): sem o
+  // teto de `nestedSection`, 10 criações simultâneas (da mesma pessoa, esperando o lock, ou de
+  // pessoas diferentes) ocupariam o pool inteiro e o processo pararia.
+  return nestedSection(() =>
+    withPlatformScope("organizations: limite do dono", async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`organization-create:${userId}`}, 0))`,
       );
-    }
+      const check = organizationAllowance(await listOwnedOrganizations(tx, userId));
 
-    return create();
-  });
+      if (!check.allowed) {
+        throw new TenantRuleError(
+          403,
+          "PLAN_LIMIT_REACHED",
+          `Seu plano permite até ${check.limit} ${LIMIT_LABELS.organizations}. Mude de plano para criar outra.`,
+        );
+      }
+
+      return create();
+    }),
+  );
 }
