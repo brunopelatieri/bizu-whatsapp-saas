@@ -126,20 +126,6 @@ export class VerificationScopeError extends Error {
   }
 }
 
-/**
- * O `claim` (D-1) apaga a ficha de quem tinha o número: o link só sai por modelo (Cloud), que só o
- * dono do número lê. Decisão do proprietário de 2026-11-14 (CL-3): em texto livre (QR Code) o link
- * fica no celular do canal, e quem opera aquele celular se cadastraria no portal com o número de um
- * cliente e confirmaria na própria sessão. Vale na escolha dos candidatos, na tentativa e na função
- * que envia (reenvio e falha assíncrona incluídos).
- */
-export class ClaimDeliveryError extends Error {
-  constructor() {
-    super("O link de um claim só sai por modelo de mensagem.");
-    this.name = "ClaimDeliveryError";
-  }
-}
-
 /** Pedido da plataforma só por canal da plataforma; de organização, só por canal dela. */
 function assertSameScope(request: { tenantId: string | null }, target: { tenantId: string | null }) {
   if ((target.tenantId ?? null) !== (request.tenantId ?? null)) throw new VerificationScopeError();
@@ -193,9 +179,6 @@ async function candidatesFor(tx: Tx, request: Request) {
 
   return rows
     .filter((row) => (row.tenantId ?? null) === (request.tenantId ?? null))
-    // `claim`: só o canal cujo módulo leva o link por modelo (`verificationDelivery`); sem ele, o
-    // padrão é texto livre (CL-3).
-    .filter((row) => request.purpose !== "claim" || Boolean(findModule(row.type)?.verificationDelivery))
     .sort(
       (a, b) =>
         order.indexOf(a.type) - order.indexOf(b.type) ||
@@ -354,13 +337,12 @@ async function deliveryOf(scope: Scope, target: ChannelRow): Promise<Verificatio
  * qualquer chamada, e o envio do canal confere de novo pelo escopo (`requireChannelRow`).
  */
 export async function sendVerificationMessage(
-  request: { tenantId: string | null; phoneNormalized: string; purpose?: Request["purpose"] },
+  request: { tenantId: string | null; phoneNormalized: string },
   target: { id: string; tenantId: string | null },
   delivery: Exclude<VerificationDelivery, { kind: "unavailable" }>,
   token: string,
 ) {
   assertSameScope(request, target);
-  if (request.purpose === "claim" && delivery.kind !== "template") throw new ClaimDeliveryError();
   const scope = scopeOfTenant(request.tenantId);
   const to = request.phoneNormalized;
 
@@ -398,11 +380,6 @@ async function tryChannel(request: Request, target: ChannelRow, now: Date): Prom
   }
   if (delivery.kind === "unavailable") {
     await recordAttempt(request.id, { ...base, outcome: "skipped", error: delivery.reason });
-    return "skipped";
-  }
-  // `claim`: só por modelo (CL-3, `ClaimDeliveryError`), conferido de novo aqui e na função que envia.
-  if (request.purpose === "claim" && delivery.kind !== "template") {
-    await recordAttempt(request.id, { ...base, outcome: "skipped", error: "claim só por modelo" });
     return "skipped";
   }
 

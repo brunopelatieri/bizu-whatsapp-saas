@@ -18,8 +18,8 @@ import { useAuth } from "@/providers/auth-provider";
 /**
  * Ligar a ficha de cliente a uma pessoa da equipe, à mão (SPEC `pre-producao`, "Equipe que também é
  * cliente", D-9): `PUT /api/customers/:id/team-link`, com a lista de
- * `GET /api/customers/:id/team-candidates` (id, nome, papel e se já tem ficha; nada de e-mail ou
- * telefone). O diálogo diz, antes de confirmar, o que a ligação muda (D-11). Quem decide é a API:
+ * `GET /api/customers/:id/team-candidates` (só quem pode ser ligado, isto é, quem tem o WhatsApp
+ * confirmado; id, nome, papel e se já tem ficha; nada de e-mail ou telefone). O diálogo diz, antes de confirmar, o que a ligação muda (D-11). Quem decide é a API:
  * ela recusa ligar a si mesmo, a pessoa que já tem ficha e a ficha já ligada.
  */
 
@@ -100,6 +100,11 @@ export function TeamLinkDialog({
           ) : (
             <fieldset className="space-y-1">
               <legend className="mb-2 font-medium">Pessoa da equipe</legend>
+              {candidates.data.candidates.length === 0 ? (
+                <p className="text-muted-foreground">
+                  Ninguém da equipe pode ser ligado agora: só aparece quem já confirmou o WhatsApp.
+                </p>
+              ) : null}
               {candidates.data.candidates.map((person) => {
                 const self = person.userId === user?.id;
                 const disabled = self || person.hasCustomer;
@@ -127,7 +132,8 @@ export function TeamLinkDialog({
                 );
               })}
               <p className="pt-1 text-xs text-muted-foreground">
-                Ninguém liga a ficha à própria conta: peça a outra pessoa da equipe.
+                Só aparece quem já confirmou o WhatsApp. Ninguém liga a ficha à própria conta: peça
+                a outra pessoa da equipe.
               </p>
             </fieldset>
           )}

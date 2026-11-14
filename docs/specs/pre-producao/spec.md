@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, o `claim` do portal, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-1 a TL-6, CL-2 e CL-4 a CL-14, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, o `claim` do portal, as fases F1 e F2 do bloco F, os blocos L e E e as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-2 a TL-6, CL-2, CL-4 a CL-6 e CL-8 a CL-14, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -609,11 +609,13 @@ Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Ficha de quem é da equipe")
 - **Rota:** `PUT /api/customers/:id/team-link` com `teamLinkSchema { userId }` (`requireAuth` + `requireTenant` +
   `customer:update` + `blockWhileImpersonating`), `linkTeamCustomer` em `src/lib/tenant/team-customer.ts` (o único
   lugar que grava `customer.user_id`). 200 `{ team: { userId, role } }`. Ficha ou pessoa de outra organização (ou
-  que não existe): 404. Ficha ligada a outra pessoa: 409 `CUSTOMER_ALREADY_LINKED`; pessoa que já tem ficha: 409
+  que não existe): 404. Pessoa sem o telefone confirmado no sistema: 409 `TEAM_MEMBER_NOT_LINKABLE` (TL-1, ajuste de
+  2026-11-14). Ficha ligada a outra pessoa: 409 `CUSTOMER_ALREADY_LINKED`; pessoa que já tem ficha: 409
   `TEAM_MEMBER_HAS_CUSTOMER` (o índice único parcial é a rede da corrida). A mesma ligação de novo: 200, sem
   auditoria. Auditoria `customer.team_linked` com `metadata { userId, via: "manual" }`.
 - **Leitura para a tela:** `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`): `userId`,
-  `name`, `role` e `hasCustomer` de cada membro desta organização, sem e-mail, telefone nem estado do telefone.
+  `name`, `role` e `hasCustomer` de cada membro desta organização **que pode ser ligado** (telefone confirmado no
+  sistema, TL-1), sem e-mail nem telefone.
 - **D-11 igual à da ligação automática:** quem decide é `customer.user_id`, venha de onde vier. Removida a pessoa ou
   excluída a conta, a ficha sai com `deleteCustomerIn` e, dela, só os contatos cujo `phone_key` é o do telefone
   **confirmado no sistema** da pessoa; os demais perdem o vínculo. Na prática, a ficha de **outro número** ligada à
@@ -629,7 +631,7 @@ Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Ficha de quem é da equipe")
 
 | # | Ponto que a SPEC não fechava | Escolha | Alternativa |
 |---|---|---|---|
-| TL-1 | Quem pode ser ligado | Qualquer membro desta organização, **inclusive o owner** e quem **não confirmou** o telefone (a SPEC diz "em qualquer outro caso"). Sem telefone confirmado, a remoção apaga a ficha e nenhum contato (E-2) | Exigir telefone confirmado, ou o mesmo e-mail ou telefone da ficha (apagaria menos, mas não atende "qualquer outro caso") |
+| TL-1 (**decidida pelo proprietário em 2026-11-14**) | Quem pode ser ligado | **Só membro desta organização com o telefone confirmado no sistema** (`userPhoneConfirmedGlobally`, o critério da ligação automática); o owner pode, se tiver o telefone confirmado. A lista de candidatos só traz essas pessoas, e o `PUT` recusa as demais com 409 `TEAM_MEMBER_NOT_LINKABLE` (sem dizer mais do que a lista já diz) | Descartada: qualquer membro, inclusive quem não confirmou o telefone |
 | TL-2 | Quem liga pode ligar a si mesmo? | **Não** (403 `SELF_LINK`). Com `customer:update` (o papel `member` tem), um colaborador ligaria a ficha de qualquer cliente à própria conta e, excluindo a conta, a apagaria sem ter `customer:delete`. Outra pessoa da equipe liga | Permitir; ou exigir `customer:delete` para ligar |
 | TL-3 | Como a tela escolhe a pessoa | Rota própria com id, nome, papel e "já tem ficha" (`customer:read` + `customer:update`), sem e-mail nem telefone. `GET /api/team` já mostra nome e e-mail a qualquer membro, mas não diz quem tem ficha | Reaproveitar `GET /api/team` (sem "já tem ficha") |
 | TL-4 | Ligação automática depois da manual | A manual prevalece: a automática só liga ficha sem `user_id` a pessoa sem ficha, então nunca a desfaz nem cria outra. Desfeita a manual, a automática volta a valer (cadastro, aceite de convite, confirmação pelo link) | Marcar a ficha desligada à mão para nunca mais ligar sozinha |
@@ -701,7 +703,8 @@ o número, e o cadastro de **cliente** que o tinha, agora sem telefone, é **apa
 - A troca e a exclusão ocorrem na mesma transação, sob a trava de unicidade. Audita
   `customer.deleted_by_phone_claim` (ficha antiga, ficha nova, 4 últimos dígitos) e avisa o
   owner por e-mail.
-- A ficha antiga ligada a um membro da equipe (D-9) segue a mesma regra.
+- A ficha antiga ligada a um membro da equipe (D-9) segue a mesma regra. **Revisto pelo proprietário em 2026-11-14
+  (CL-7, CL-13):** a ficha com conta no portal, ligada à equipe ou bloqueada nunca é apagada por `claim`.
 | Equipe em `/app/clientes` ou na importação | Membro da organização | **Permitido** (D-9): a ficha de cliente é criada e ligada ao membro |
 
 ### Telefone que já existe (`claim`): o que foi feito (2026-11-14)
@@ -738,57 +741,61 @@ Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Telefone que já existe: `cl
 - **A liberação à mão nunca fecha `claim`** (409 `CLAIM_LINK_ONLY`): sem prova de posse, ninguém perde a ficha. A
   fila de clientes mostra o `claim` como "Número de outra ficha", sem o botão "Liberar", e o owner não recebe o e-mail
   de liberação.
-- **O link do `claim` só sai pela Cloud (decisão do proprietário de 2026-11-14, CL-3).** O canal por QR Code nunca leva
-  link de `claim`, mesmo listado em `PHONE_VERIFICATION_CHANNELS`: a regra está na escolha dos candidatos (só módulo com
-  `verificationDelivery`), na tentativa e na função que envia (`ClaimDeliveryError`), e vale para o reenvio e para a
-  falha assíncrona (o `failed` da Cloud cai na fila, não no QR Code). **Descartada:** a cascata da D-3 (Cloud, depois QR
-  Code) com o risco aceito como na D-13, porque quem lê o WhatsApp do canal por QR Code (o owner, um papel com
-  `channel:manage`, quem pega o celular) se cadastraria no portal com o número de um cliente, leria o link e apagaria a
-  ficha e as conversas dele. Sem Cloud apta, o `claim` fica sem link e vence sem efeito: a ficha antiga fica e o
-  `payload` some. **Em organização sem Cloud,** se a pessoa é a mesma da ficha que já existe, a equipe a convida ao
-  portal por aquela ficha ("Enviar acesso ao portal"), o que preserva o histórico; a fila de clientes diz isso no item
-  do `claim`. `signup` e `change` não mudam.
+- **O link do `claim` segue a regra de envio de todos os pedidos (CL-3, revista pelo proprietário em 2026-11-14):** a
+  cascata de `PHONE_VERIFICATION_CHANNELS`, Cloud primeiro e, sem Cloud apta, o QR Code, também depois de uma falha da
+  Cloud e no reenvio. Continuam: canal sempre do escopo do pedido, 3 links por hora, e a liberação à mão nunca fecha um
+  `claim`. **Risco aceito como na D-13:** quem lê o WhatsApp do canal por QR Code (o owner, um papel com
+  `channel:manage`, quem pega o celular) consegue se autocadastrar no portal com o número de um cliente, ler o link e
+  confirmar na própria sessão; é atenuado pela ficha protegida (abaixo: a ficha com conta no portal, ligada à equipe ou
+  bloqueada nunca é apagada por `claim`). A decisão anterior do mesmo dia, "só pela Cloud", foi desfeita.
+- **Ficha antiga protegida (CL-7 e CL-13, decididas pelo proprietário em 2026-11-14):** o `claim` nunca apaga a ficha que
+  tem conta no portal (`portal_user_id`), que está ligada a uma pessoa da equipe (`user_id`) ou que está bloqueada
+  (`isProtectedFromClaim`). Nesses casos o `claim` nem abre no autocadastro (a resposta é a de sempre, como quando
+  nenhuma ficha é criada), e a confirmação confere de novo com a ficha travada: se ela passou a ter uma dessas
+  condições com o link a caminho, nada é apagado e o pedido responde o 400 de sempre.
 - **Vida do pedido:** sem link válido há mais de `PHONE_VERIFICATION_TTL_MINUTES`, o `maintenance.prune` encerra o
   `claim` e o `payload` some; também o de quem saiu do portal. A exclusão da conta do portal apaga os `claim` dela
   (`deletePortalClaimsOf`).
 - **Importação:** o bloco I ainda não existe; a linha com número de outra ficha será `duplicate`, sem link (registrado
   no bloco I).
-- **Testes:** `tests/db/phone-claim.test.ts` (13 casos: resposta neutra, painel e `/api/portal/me` iguais aos do autocadastro comum, ficha nova
+- **Testes:** `tests/db/phone-claim.test.ts` (18 casos: resposta neutra, painel e `/api/portal/me` iguais aos do autocadastro comum, ficha nova
   só na confirmação, a antiga sai com conversas e arquivos e só ela, token de outro cadastro e reusado, pedido vencido
-  sem `payload`, liberação à mão recusada, QR Code sem link (nada apagado, sem e-mail ao owner), `failed` da Cloud sem
-  passar ao QR Code e reenvio pela Cloud, isolamento entre organizações, conta com `claim` aberto que não cai como órfã,
-  ficha antiga com portal e ligada à equipe, conta do portal que some, bloqueio ligado; e a equipe com número
-  repetido: 409, sem pedido e sem exclusão).
+  sem `payload`, liberação à mão recusada, QR Code levando o link sem Cloud (sem e-mail ao owner), `failed` da Cloud
+  passando ao QR Code, isolamento entre organizações, conta com `claim` aberto que não cai como órfã, ficha com
+  portal, ligada à equipe ou bloqueada protegida na abertura e na confirmação (6 casos), conta do portal que some,
+  bloqueio ligado; e a equipe com número repetido: 409, sem pedido e sem exclusão).
 
 **Conferido no navegador (2026-11-14, servidor de desenvolvimento, dados do seed, banco desfeito depois):** o cartão "Pessoa
 da equipe" e o diálogo de ligação (aviso da D-11, selos de papel, "você" e "já tem ficha" desabilitados) em desktop e em
 375 px; a ligação feita e o cartão "Também é da equipe" com o papel; o 409 do cadastro com número repetido, com a
 orientação e o link da ficha que tem o número, sumindo ao corrigir o telefone; e o item do `claim` na fila de clientes, com
 o selo, a explicação e sem "Liberar". **Não conferidos no navegador:** o autocadastro do portal com `claim` até a
-confirmação (precisa de envio pela Cloud; coberto por `tests/db/phone-claim.test.ts`) e o e-mail aos owners.
+confirmação (precisa de envio por um canal conectado; coberto por `tests/db/phone-claim.test.ts`), o e-mail aos owners
+e as telas dos ajustes de 2026-11-14 (a lista de candidatos só com telefone confirmado e o texto novo da fila).
 
-**Risco residual (revisão de segurança de 2026-11-14):** quem se autocadastra ainda consegue, com esforço, inferir que o
-número já era de um cliente: numa organização só com QR Code o pedido aparece "aguardando liberação" (no autocadastro
-comum, "link enviado"), e a organização some do painel quando o `claim` vence. Antes do `claim`, o mesmo fato vazava na
-hora (a ficha não nascia e a organização nunca aparecia); o `claim` reduz o oráculo e não o fecha. Registrado em
-`tech/16-bugs-riscos.md` (RISK-014).
+**Risco residual (revisão de segurança de 2026-11-14, revisto com os ajustes do mesmo dia):** com o QR Code cobrindo o
+envio, o caso "aguardando liberação" em organização sem Cloud deixou de existir (o `claim` e o autocadastro comum
+seguem o mesmo envio). Sobram dois sinais, que não dá para igualar sem inventar regra: a organização some do painel
+quando o `claim` vence (o lead comum fica, e manter o `claim` contrariaria "vencido, o `payload` some"); e, quando a
+ficha que tem o número é protegida, o `claim` nem abre, então a organização nunca aparece (como era antes do `claim`).
+Registrado em `tech/16-bugs-riscos.md` (RISK-014).
 
-**Decisões do `claim` a confirmar pelo proprietário** (CL-1 e CL-3 já decididas)
+**Decisões do `claim` a confirmar pelo proprietário** (CL-1, CL-3, CL-7 e CL-13 já decididas)
 
 | # | Ponto | Escolha | Alternativa |
 |---|---|---|---|
 | CL-1 (**decidida pelo proprietário em 2026-11-14**) | `claim` pela equipe | Não existe nesta forma: a equipe recebe 409 `PHONE_IN_USE` e troca o número da ficha existente ou a exclui | Descartadas: rota pública só para o `claim` da equipe; confirmação na sessão do atendente |
 | CL-2 | Em que sessão o link fecha | Na do `portal_user` que se autocadastrou (`requested_by_id`), pela rota de confirmação do portal | Rota pública (descartada pela regra do projeto) |
-| CL-3 (**decidida pelo proprietário em 2026-11-14**) | Por que canal o link sai | Só pela Cloud (modelo de verificação válido); o QR Code nunca leva link de `claim`, nem no reenvio nem depois de uma falha | Descartada: a cascata da D-3 com o risco aceito como na D-13 (quem lê o QR Code apagaria a ficha de um cliente) |
+| CL-3 (**revista pelo proprietário em 2026-11-14**) | Por que canal o link sai | A regra de todos os pedidos: Cloud primeiro e, sem Cloud apta, o QR Code (também depois de falha e no reenvio). Risco aceito como na D-13, atenuado pela ficha protegida (CL-7, CL-13) | Desfeita: só pela Cloud (decisão anterior do mesmo dia) |
 | CL-4 | Liberação à mão | Nunca fecha `claim` (409 `CLAIM_LINK_ONLY`); a fila mostra o pedido sem o botão; sem e-mail ao owner | Liberar criaria a ficha sem apagar a antiga (impossível: o número é único) |
 | CL-5 | Quando o autocadastro abre `claim` | Só quando nenhuma ficha tem o e-mail e outra ficha tem o número. Ficha com o e-mail segue a regra de sempre (a `lead` sem portal é ligada; as outras, nada). O `claim` nunca apaga ficha da própria pessoa | Abrir também com o e-mail repetido |
 | CL-6 | Vida do pedido | Um aberto por pessoa e organização; encerrado (com o `payload`) depois do TTL sem link válido; reenvio pelo painel enquanto aberto | Prazo próprio, maior |
-| CL-7 | Ficha antiga com conta no portal ou ligada à equipe | Apagada como qualquer outra (a SPEC fecha); a conta do portal que fica sem ficha cai; a pessoa da equipe fica. Todos os contatos da ficha saem (é `deleteCustomer`, não a regra da D-11) | Recusar o `claim` nesses casos |
+| CL-7 (**decidida pelo proprietário em 2026-11-14**) | Ficha antiga com conta no portal ou ligada à equipe | **Protegida:** o `claim` nem abre, e a confirmação confere de novo com a ficha travada (400, nada apagado). Nas demais, todos os contatos da ficha saem (é `deleteCustomer`, não a regra da D-11) | Descartada: apagar como qualquer outra |
 | CL-8 | Resposta neutra | O painel e o portão do portal mostram o `claim` como ficha pendente comum | Mostrar "nenhuma organização" (diria que o número já tinha cadastro) |
 | CL-9 | E-mail ao owner | Só a organização, os 4 últimos dígitos e o link da ficha nova; sem o nome da ficha apagada | Incluir o nome |
 | CL-10 | Auditoria | 4 últimos dígitos em `customer.deleted_by_phone_claim`, como a SPEC pede (a única exceção a "nada do número na auditoria") | Só ids |
 | CL-11 | `payload` na exportação | Não entra: é cópia do nome e do e-mail da conta do portal (já exportados) e vive no máximo o TTL | Exportar os `claim` abertos |
-| CL-13 | Ficha que tem o número está bloqueada (`blocked`) | Apagada como as outras ("quem verifica fica com o número"); a ficha nova nasce `lead`, sem acesso até o owner promover | Recusar o `claim` de ficha bloqueada |
+| CL-13 (**decidida pelo proprietário em 2026-11-14**) | Ficha que tem o número está bloqueada (`blocked`) | **Protegida**, como na CL-7 | Descartada: apagar como as outras |
 | CL-14 | `claim` que a ficha antiga passou a ter o e-mail de quem se cadastrou | O link responde o 400 de sempre e o pedido vence sem efeito (nunca apaga uma ficha com o e-mail da própria pessoa) | Ligar a conta à ficha antiga |
 | CL-12 | Limite de clientes do plano | Conferido ao abrir o `claim` (como no autocadastro), não na confirmação (a antiga sai na mesma transação) | Conferir de novo |
 
@@ -1764,7 +1771,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), TL-1 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"), CL-2 e CL-4 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1 e CL-3 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito") e R2-1 a R2-10 da limpeza (em "R2: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

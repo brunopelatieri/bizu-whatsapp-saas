@@ -8,6 +8,19 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ## [Não lançado]
 
+### Alterado
+
+- **Ajustes do proprietário no bloco T (2026-11-14)** sobre a ligação manual e o `claim` de `docs/specs/pre-producao/spec.md`:
+  - O link do `claim` segue a mesma cascata dos outros pedidos (Cloud, depois QR Code), também depois de falha e no reenvio
+    (CL-3 revista; risco aceito como na D-13).
+  - O `claim` nunca apaga a ficha com conta no portal, ligada a uma pessoa da equipe ou bloqueada: o pedido nem abre, e a
+    confirmação confere de novo (CL-7, CL-13).
+  - Ligar a ficha à equipe à mão só vale para quem tem o telefone confirmado no sistema; a lista só traz essas pessoas e o `PUT`
+    recusa as demais com 409 `TEAM_MEMBER_NOT_LINKABLE` (TL-1).
+  - A exclusão de ficha foi para `src/lib/tenant/customer-deletion.ts` e a limpeza dos pedidos para
+    `src/lib/phone/verification-records.ts`: sem ciclo de importação nem o aviso `INEFFECTIVE_DYNAMIC_IMPORT` do build.
+  - **Migração:** nenhuma.
+
 ### Adicionado
 
 - **Telefone que já existe: `claim` do autocadastro do portal (bloco T de `docs/specs/pre-producao/spec.md`, P3, D-1)**.
@@ -15,8 +28,8 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
     ficha nova em `payload`. **Confirmado o link na sessão do portal de quem se cadastrou, a ficha antiga é apagada** (contatos,
     conversas, mensagens e arquivos) e a nova nasce com o número confirmado. Auditoria `customer.deleted_by_phone_claim` e e-mail
     `customer-deleted-by-phone-claim` aos owners.
-  - Sem rota pública; a liberação à mão nunca fecha `claim` (409 `CLAIM_LINK_ONLY`); o link só sai pela Cloud, nunca pelo QR Code
-    (nem no reenvio, nem depois de uma falha); o pedido vencido é encerrado pela manutenção e o `payload` some.
+  - Sem rota pública; a liberação à mão nunca fecha `claim` (409 `CLAIM_LINK_ONLY`); o pedido vencido é encerrado pela manutenção
+    e o `payload` some.
   - A equipe não pede `claim` (decisão do proprietário): continua com 409 `PHONE_IN_USE`, e o diálogo diz como trocar o número da
     ficha existente ou excluí-la. A fila de clientes mostra o `claim` sem "Liberar".
   - **Migração:** `0040_telefone_claim` (coluna `payload`, `purpose` com `claim`, dois `CHECK`s e um índice único parcial). Rode

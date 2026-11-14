@@ -128,7 +128,8 @@ ainda sem tela.
    depois da prova do e-mail: cadastro em massa não consome o limite de quem paga.
 4. Só o owner promove a `active`, e a confirmação nunca liga a identidade a uma linha ativa.
 5. **Número que já é de outra ficha (D-1, `claim`):** sem ficha com o e-mail, a confirmação não cria a linha: abre o
-   pedido `claim` e o link vai ao número (só por modelo da Cloud). A ficha nova só nasce quando a própria pessoa
+   pedido `claim` e o link vai ao número (Cloud primeiro, QR Code sem Cloud apta). A ficha com conta no portal, ligada
+   à equipe ou bloqueada não abre `claim` (nada muda nela). A ficha nova só nasce quando a própria pessoa
    confirma o link na sessão do portal, e aí a ficha antiga é apagada com as conversas. Até lá, o painel "Confirme seu
    WhatsApp" mostra a organização como pendente, igual ao autocadastro comum (`tech/28-crm-cadastro.md`).
 

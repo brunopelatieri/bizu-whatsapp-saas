@@ -17,6 +17,7 @@ import { checkLimit } from "@/lib/billing/limits";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { ensurePortalUser } from "@/lib/portal/access";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import { isProtectedFromClaim } from "@/lib/phone/claim";
 import { ensureCustomerVerification, openPortalClaim } from "@/lib/phone/requests";
 import type { PortalSignupInput } from "@/lib/schemas/portal";
 
@@ -186,10 +187,17 @@ export async function confirmPortalSignup(email: string, org: string) {
       .where(and(eq(customer.tenantId, tenant.id), eq(customer.email, person.email)));
     if (!byEmail && person.phone && person.phoneNormalized && person.phoneKey) {
       const [holder] = await tx
-        .select({ id: customer.id, portalUserId: customer.portalUserId })
+        .select({
+          id: customer.id,
+          portalUserId: customer.portalUserId,
+          userId: customer.userId,
+          status: customer.status,
+        })
         .from(customer)
         .where(and(eq(customer.tenantId, tenant.id), eq(customer.phoneKey, person.phoneKey)));
-      if (holder && holder.portalUserId !== person.id) {
+      // A ficha com conta no portal, ligada à equipe ou bloqueada nunca é apagada por `claim`
+      // (CL-7, CL-13): o pedido nem abre, e a resposta é a mesma do número que não ganha ficha.
+      if (holder && !isProtectedFromClaim(holder)) {
         const claim = await openPortalClaim(
           tx,
           tenant.id,

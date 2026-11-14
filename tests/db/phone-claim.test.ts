@@ -80,8 +80,8 @@ async function drain() {
   return outcomes;
 }
 
-/** O token vai como parâmetro do botão do modelo (Cloud), sem `token=` na frente. */
-const tokenIn = (payload: string) => payload.match(/"(c\.[A-Za-z0-9_-]{43})"/)?.[1];
+/** O token: parâmetro do botão do modelo (Cloud) ou dentro do link em texto (QR Code). */
+const tokenIn = (payload: string) => payload.match(/(c\.[A-Za-z0-9_-]{43})/)?.[1];
 
 async function giveTemplate(channelId: string, tenantId: string) {
   const name = `verificacao_${randomUUID().slice(0, 8)}`;
@@ -450,36 +450,32 @@ describe("autocadastro do portal com o número de outra ficha", () => {
     expect(((await released.json()) as { code: string }).code).toBe("CLAIM_LINK_ONLY");
     expect(await count("customer where id = $1", holder.id)).toBe(1);
     expect(await count("customer where email = $1", email)).toBe(0);
-    expect((await claimsOf(tenant.id))[0]?.status).toBe("awaiting_manual");
+    expect((await claimsOf(tenant.id))[0]?.status).toBe("sent");
   });
 
-  it("o link do claim não sai em texto livre (QR Code), nada é apagado e o owner não é chamado a liberar", async () => {
-    const { boss, tenant } = await portalTenant("qr");
+  it("sem Cloud, o QR Code leva o link do claim (CL-3 revista), e a confirmação funciona", async () => {
+    const { boss, tenant, channelId } = await portalTenant("qr");
     const phone = uniquePhone();
     const holder = await createCustomer(boss, { phone });
     const { email } = await portalSignup(tenant.slug, phone);
 
-    expect(await drain()).toEqual(["manual"]);
-    expect(sent).toHaveLength(0);
+    expect(await drain()).toEqual(["sent"]);
+    expect(sent.map(({ channelId: id, kind, to }) => [id, kind, to])).toEqual([
+      [channelId, "text", phoneValues(phone).phoneNormalized],
+    ]);
     expect(await count("customer where id = $1", holder.id)).toBe(1);
-    expect(await count("customer where email = $1", email)).toBe(0);
-    const [row] = await asPlatform(
-      owner,
-      (tx) => tx<{ status: string; attempts: Array<{ outcome: string; error?: string }> }[]>`
-        select status, attempts from phone_verification where tenant_id = ${tenant.id} and purpose = 'claim'
-      `,
-    );
-    expect(row?.status).toBe("awaiting_manual");
-    // O QR Code nem entra na lista de candidatos do `claim`.
-    expect(row?.attempts).toEqual([]);
     expect(mail.sent.filter((m) => m.tags?.template === "phone-verification-manual")).toHaveLength(0);
+
+    expect((await confirm(await portalSignIn(email), tokenIn(sent[0]?.payload ?? "") as string)).status).toBe(200);
+    expect(await count("customer where id = $1", holder.id)).toBe(0);
+    expect(await count("customer where email = $1", email)).toBe(1);
   });
 
-  it("a falha da Cloud (aviso failed do webhook) não passa o claim ao QR Code", async () => {
+  it("a falha da Cloud (aviso failed do webhook) passa o claim ao QR Code, e o reenvio recomeça a ordem", async () => {
     const { boss, tenant, channelId } = await portalTenant();
-    await seedQrChannel(tenantScope(tenant.id));
+    const qr = await seedQrChannel(tenantScope(tenant.id));
     const phone = uniquePhone();
-    const holder = await createCustomer(boss, { phone });
+    await createCustomer(boss, { phone });
     await portalSignup(tenant.slug, phone);
     expect(await drain()).toEqual(["sent"]);
     expect(sent.map(({ channelId: id, kind }) => [id, kind])).toEqual([[channelId, "template"]]);
@@ -498,14 +494,11 @@ describe("autocadastro do portal com o número de outra ficha", () => {
         afterChannelId: request?.channel_id,
         failedMessageId: request?.provider_message_id,
       }),
-    ).toBe("manual");
-    expect(sent).toHaveLength(1);
-    expect(await count("customer where id = $1", holder.id)).toBe(1);
-
-    // O reenvio também não usa o QR Code: volta à Cloud.
-    sent.length = 0;
-    expect(await deliverPhoneVerification({ requestId: request?.id as string, reason: "resend" })).toBe("sent");
-    expect(sent.map(({ kind }) => kind)).toEqual(["template"]);
+    ).toBe("sent");
+    expect(sent.map(({ channelId: id, kind }) => [id, kind])).toEqual([
+      [channelId, "template"],
+      [qr.id, "text"],
+    ]);
   });
 
   it("isolamento: só a ficha desta organização sai; a outra organização não vê nem libera o claim", async () => {
@@ -531,33 +524,71 @@ describe("autocadastro do portal com o número de outra ficha", () => {
     expect(await count("customer where id = $1", inB.id)).toBe(1);
   });
 
-  it("a ficha antiga com conta no portal ou ligada a uma pessoa da equipe também sai (só a ficha)", async () => {
+  /** As três fichas que o `claim` nunca apaga (CL-7, CL-13): com conta no portal, ligada à equipe, bloqueada. */
+  const protections: Array<[string, (tenantId: string, holderId: string) => Promise<void>]> = [
+    [
+      "com conta no portal",
+      async (_tenantId, holderId) => {
+        const id = randomUUID();
+        const values = phoneValues(uniquePhone());
+        await owner`
+          insert into portal_user (id, name, email, phone, phone_normalized, phone_key)
+          values (${id}, 'Conta antiga', ${customerEmail()}, ${values.phone}, ${values.phoneNormalized}, ${values.phoneKey})
+        `;
+        await asPlatform(owner, (tx) => tx`update customer set portal_user_id = ${id} where id = ${holderId}`);
+      },
+    ],
+    [
+      "ligada a uma pessoa da equipe",
+      async (tenantId, holderId) => {
+        const colleague = await createUser(owner);
+        await addMember(owner, tenantId, colleague, "member");
+        await asPlatform(owner, (tx) => tx`update customer set user_id = ${colleague.id} where id = ${holderId}`);
+      },
+    ],
+    [
+      "bloqueada",
+      async (_tenantId, holderId) => {
+        await asPlatform(owner, (tx) => tx`update customer set status = 'blocked' where id = ${holderId}`);
+      },
+    ],
+  ];
+
+  it.each(protections)("ficha %s: o claim nem abre, e a resposta é a de sempre", async (_label, protect) => {
     const { boss, tenant } = await portalTenant();
     const phone = uniquePhone();
     const holder = await createCustomer(boss, { phone });
-    const colleague = await createUser(owner);
-    await addMember(owner, tenant.id, colleague, "member");
-    await asPlatform(owner, (tx) => tx`update customer set user_id = ${colleague.id} where id = ${holder.id}`);
-    // Conta do portal que só existe por causa desta ficha.
-    const oldPortal = randomUUID();
-    const oldPhone = phoneValues(uniquePhone());
-    await owner`
-      insert into portal_user (id, name, email, phone, phone_normalized, phone_key)
-      values (${oldPortal}, 'Conta antiga', ${customerEmail()}, ${oldPhone.phone}, ${oldPhone.phoneNormalized}, ${oldPhone.phoneKey})
-    `;
-    await asPlatform(owner, (tx) => tx`update customer set portal_user_id = ${oldPortal} where id = ${holder.id}`);
+    await protect(tenant.id, holder.id);
 
-    const { email } = await portalSignup(tenant.slug, phone);
-    await drain();
-    expect((await confirm(await portalSignIn(email), tokenIn(sent[0]?.payload ?? "") as string)).status).toBe(200);
-    await waitForBackgroundTasks();
+    const normal = await portalSignup(tenant.slug, uniquePhone());
+    const { email, verified } = await portalSignup(tenant.slug, phone);
+    expect(verified.status).toBe(normal.verified.status);
+    expect(await verified.json()).toEqual(await normal.verified.json());
 
-    expect(await count("customer where id = $1", holder.id)).toBe(0);
-    expect(await count("portal_user where id = $1", oldPortal)).toBe(0);
-    // A pessoa da equipe continua (só a ficha sai).
-    expect(await count(`"user" where id = $1`, colleague.id)).toBe(1);
-    expect(await count("member where user_id = $1", colleague.id)).toBe(1);
+    expect(await claimsOf(tenant.id)).toEqual([]);
+    expect(await count("customer where id = $1", holder.id)).toBe(1);
+    expect(await count("customer where email = $1", email)).toBe(0);
   });
+
+  it.each(protections)(
+    "ficha que passou a estar %s com o link a caminho: a confirmação responde 400 e nada é apagado",
+    async (_label, protect) => {
+      const { boss, tenant } = await portalTenant();
+      const phone = uniquePhone();
+      const holder = await createCustomer(boss, { phone });
+      const { email } = await portalSignup(tenant.slug, phone);
+      await drain();
+      const token = tokenIn(sent[0]?.payload ?? "") as string;
+      expect(token).toBeTruthy();
+
+      await protect(tenant.id, holder.id);
+
+      expect((await confirm(await portalSignIn(email), token)).status).toBe(400);
+      expect(await count("customer where id = $1", holder.id)).toBe(1);
+      expect(await count("customer where email = $1", email)).toBe(0);
+      expect((await claimsOf(tenant.id))[0]?.status).toBe("sent");
+    },
+  );
 
   it("a pessoa que some do portal leva o claim junto (manutenção)", async () => {
     const { boss, tenant } = await portalTenant();

@@ -539,8 +539,8 @@ Código: `src/lib/tenant/team-customer-removal.ts`, `deleteCustomerIn` e `afterC
   (`unlinkTeamCustomer`, auditoria `customer.team_unlinked`). A ficha vira cliente comum, com as conversas, e a
   remoção ou a exclusão da conta deixam de apagá-la. A tela da ficha tem o cartão "Também é da equipe" com a ação.
 - **Ligar à mão (D-9, 2026-11-14):** `PUT /api/customers/:id/team-link` com `{ userId }` (`linkTeamCustomer`,
-  `customer:update`, `blockWhileImpersonating`). Só pessoa que é membro **desta** organização (owner incluído,
-  com ou sem telefone confirmado); ficha ou pessoa de outra organização é 404; ninguém liga a si mesmo (403
+  `customer:update`, `blockWhileImpersonating`). Só pessoa que é membro **desta** organização **com o telefone
+  confirmado no sistema** (owner incluído; TL-1, decidida pelo proprietário; senão 409 `TEAM_MEMBER_NOT_LINKABLE`); ficha ou pessoa de outra organização é 404; ninguém liga a si mesmo (403
   `SELF_LINK`: excluir a própria conta apagaria a ficha de outra pessoa); ficha já ligada a outra pessoa é 409
   `CUSTOMER_ALREADY_LINKED`, pessoa que já tem ficha é 409 `TEAM_MEMBER_HAS_CUSTOMER` (desfazer antes, com a rota
   `DELETE`); a mesma ligação de novo não muda nada. Trava o membro (`FOR SHARE`) e depois a ficha, a ordem de
@@ -549,8 +549,8 @@ Código: `src/lib/tenant/team-customer-removal.ts`, `deleteCustomerIn` e `afterC
   (ficha de outro número ligada à mão perde a ficha, mas os contatos do número dela ficam). A ligação automática
   nunca desfaz nem duplica a manual (só liga ficha sem `user_id` a pessoa sem ficha). A tela é
   `src/components/app/customers/customer-team-link.tsx` (cartão "Pessoa da equipe" na ficha sem ligação), com
-  a lista de `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`; id, nome, papel e
-  `hasCustomer`, sem e-mail nem telefone) e o aviso da D-11 antes de confirmar. Decisões TL-1 a TL-6 na SPEC.
+  a lista de `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`; só quem pode ser ligado,
+  com id, nome, papel e `hasCustomer`, sem e-mail nem telefone) e o aviso da D-11 antes de confirmar. Decisões TL-1 a TL-6 na SPEC.
 - **Avisos (contagem do que será apagado, só dos contatos do telefone confirmado):** `GET /api/team` traz
   `customerRecord: { conversationCount } | null` em cada membro, **só para quem tem `member:delete`** (sem id nem
   nome da ficha); `GET /api/me/deletion` traz `customerRecords: { customers, conversationCount }`;
@@ -653,7 +653,9 @@ novo", "Liberar a troca"). Decisões F2-1 a F2-8 a confirmar na SPEC ("F2 e tela
 
 Código: `src/lib/phone/claim.ts` (efeito da confirmação), `openPortalClaim`, `deletePortalClaimsOf` e os ganchos em
 `src/lib/phone/requests.ts`, `confirmPortalSignup` (`src/lib/portal/login.ts`), `src/lib/phone/gate.ts` (portão),
-`src/lib/phone/delivery.ts` (envio). Migration `0040_telefone_claim`. Decisões CL-1 a CL-12 na SPEC.
+`src/lib/phone/delivery.ts` (envio), a exclusão em `src/lib/tenant/customer-deletion.ts` (sem ciclo de importação com
+`requests.ts`; a limpeza dos pedidos fica em `src/lib/phone/verification-records.ts`). Migration `0040_telefone_claim`.
+Decisões CL-1 a CL-14 na SPEC.
 
 - **Só o autocadastro do portal abre `claim`** (decisão do proprietário de 2026-11-14): a equipe em `/app/clientes`
   continua com 409 `PHONE_IN_USE` (com `customerId`, e `name` para quem lê clientes), sem pedido e sem exclusão; o
@@ -673,11 +675,13 @@ Código: `src/lib/phone/claim.ts` (efeito da confirmação), `openPortalClaim`, 
   sempre) se a pessoa sumiu, trocou de e-mail ou já tem ficha na organização: nunca apaga a ficha dela mesma.
 - **A liberação à mão nunca fecha `claim`** (409 `CLAIM_LINK_ONLY`). A fila de clientes (`phone-release-card.tsx`)
   mostra "Número de outra ficha", sem "Liberar"; o owner não recebe o e-mail de liberação (`fallToManual`).
-- **O link só sai pela Cloud (decisão do proprietário, CL-3):** o QR Code não entra nos candidatos do `claim` (só módulo
-  com `verificationDelivery`), e a tentativa e `sendVerificationMessage` conferem de novo (`ClaimDeliveryError`); vale
-  no reenvio e depois do `failed` da Cloud, que cai na fila. Quem opera o celular do canal leria o link. Sem a conta do
-  portal que pediu, o link não sai. Em organização sem Cloud, a equipe convida ao portal a ficha que já existe (preserva
-  o histórico); a fila diz isso no item do `claim`. Risco residual de enumeração: RISK-014 (`tech/16-bugs-riscos.md`).
+- **Envio (CL-3, revista pelo proprietário):** a cascata de sempre, Cloud primeiro e o QR Code sem Cloud apta (também
+  depois de falha e no reenvio). Risco aceito como na D-13: quem lê o celular do canal por QR Code consegue se
+  autocadastrar com o número de um cliente e confirmar; atenuado pela ficha protegida. Sem a conta do portal que pediu,
+  o link não sai. Risco residual de enumeração: RISK-014 (`tech/16-bugs-riscos.md`).
+- **Ficha protegida (CL-7, CL-13):** a ficha com conta no portal, ligada à equipe ou bloqueada nunca é apagada por
+  `claim` (`isProtectedFromClaim`, em `claim.ts`): o pedido nem abre no autocadastro, e a confirmação confere de novo
+  com a ficha travada (o 400 de sempre, nada apagado).
 - **Vida:** um `claim` aberto por pessoa do portal e organização (pedir de novo substitui). Sem link válido há mais de
   `PHONE_VERIFICATION_TTL_MINUTES`, o `maintenance.prune` o encerra, e o `payload` some (o `CHECK` só aceita `payload`
   no `claim` aberto). A exclusão da conta do portal apaga os `claim` dela; a manutenção encerra o de conta que sumiu.

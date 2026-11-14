@@ -17,6 +17,7 @@ import { getEnv } from "@/lib/env";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
 import { afterCustomerClaim, applyCustomerClaim, type ClaimEffects } from "@/lib/phone/claim";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import { deleteVerificationsOf } from "@/lib/phone/verification-records";
 import { notifyPhoneClaimed } from "@/lib/phone/notify";
 import { userPhoneConfirmed, userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
 import {
@@ -72,6 +73,10 @@ import { linkExistingCustomer, linkVerifiedTeamMember } from "@/lib/tenant/team-
  */
 
 export type VerificationSubject = { type: PhoneVerificationSubject; id: string };
+
+// Apagar os pedidos de um cadastro apagado mora em `verification-records.ts` (sem dependência de
+// regra, para a exclusão de ficha não importar este arquivo); daqui sai para quem já o usava.
+export { deleteVerificationsOf };
 
 type Request = typeof phoneVerification.$inferSelect;
 
@@ -288,20 +293,6 @@ export async function closeVerificationsOf(tx: Tx, subject: VerificationSubject)
   await tx.update(phoneVerification).set(CLOSED).where(and(ofSubject(subject), isOpen));
 }
 
-/** Cadastro apagado ou anonimizado: os pedidos dele saem junto (`subject_id` não tem FK). */
-export async function deleteVerificationsOf(
-  tx: Tx,
-  type: PhoneVerificationSubject,
-  ids: string[],
-) {
-  if (ids.length === 0) return;
-
-  await tx
-    .delete(phoneVerification)
-    .where(
-      and(eq(phoneVerification.subjectType, type), inArray(phoneVerification.subjectId, ids)),
-    );
-}
 
 /** `deleteVerificationsOf` para quem apagou as contas fora de uma transação com bypass. */
 export function deleteUserVerifications(userIds: string[]) {

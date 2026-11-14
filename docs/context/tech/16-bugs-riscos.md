@@ -230,12 +230,16 @@ Better Auth byte a byte. A tela de login passou a oferecer o reenvio sempre, sem
 ### RISK-014 — Autocadastro do portal ainda deixa inferir que o número é de um cliente (risco residual)
 
 Com o `claim` (D-1, `tech/28-crm-cadastro.md`), o autocadastro com o número de uma ficha que já existe aparece no portal
-como uma ficha pendente comum. Sobram dois sinais indiretos para quem se cadastra com o número de outra pessoa: numa
-organização só com canal QR Code, o pedido fica "aguardando liberação" na hora (o `claim` só sai pela Cloud), enquanto
-o autocadastro comum mostra "link enviado"; e a organização some do painel quando o `claim` vence
-(`PHONE_VERIFICATION_TTL_MINUTES`). Cada tentativa custa um e-mail novo confirmado. Antes do `claim` o mesmo fato vazava
-na hora (a ficha não nascia). Fechar de vez exigiria mostrar um estado falso ("link enviado" sem link) ou manter o
-pedido além do prazo; nenhum dos dois foi feito.
+como uma ficha pendente comum, e o link segue o mesmo envio do autocadastro comum (Cloud, depois QR Code). Sobram dois
+sinais para quem se cadastra com o número de outra pessoa (cada tentativa custa um e-mail novo confirmado):
+
+- a organização some do painel quando o `claim` vence (`PHONE_VERIFICATION_TTL_MINUTES`), enquanto o lead comum fica;
+- quando a ficha que tem o número é protegida (conta no portal, ligada à equipe ou bloqueada), o `claim` nem abre e a
+  organização nunca aparece, como antes do `claim`.
+
+Igualar exigiria inventar regra: manter o `claim` (e o `payload`) além do prazo, ou mostrar um pedido que não existe.
+Nenhum dos dois foi feito. O sinal "aguardando liberação" em organização só com QR Code deixou de existir em
+2026-11-14, quando o `claim` passou a usar o QR Code.
 
 ### RISK-007 — Pré-sequestro no autocadastro do portal (risco aceito)
 

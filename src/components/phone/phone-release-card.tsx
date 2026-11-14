@@ -150,10 +150,10 @@ function PhoneReleaseView({
                         {item.purpose === "claim" ? (
                           <p className="text-xs text-muted-foreground">
                             Autocadastro no portal com o número de uma ficha que já existe. Só o link
-                            enviado ao número pelo WhatsApp oficial (Cloud) confirma: confirmado, a ficha
-                            antiga é apagada com as conversas. Não há liberação à mão. Sem número oficial
-                            apto, o pedido vence sem efeito; se a pessoa é a mesma da ficha que já existe,
-                            envie a ela o acesso ao portal por aquela ficha, o que preserva o histórico.
+                            enviado ao número confirma: confirmado, a ficha antiga é apagada com as
+                            conversas. Não há liberação à mão; sem link, o pedido vence sem efeito. Se a
+                            pessoa é a mesma da ficha que já existe, envie a ela o acesso ao portal por
+                            aquela ficha, o que preserva o histórico.
                           </p>
                         ) : null}
                       </div>

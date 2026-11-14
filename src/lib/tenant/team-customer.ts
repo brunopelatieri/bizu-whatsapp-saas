@@ -174,6 +174,18 @@ const SELF_LINK = () =>
     "Você não pode ligar uma ficha de cliente à sua própria conta. Peça a outra pessoa da equipe.",
   );
 
+/**
+ * Só pessoa com o telefone confirmado no sistema inteiro (o critério da ligação automática, TL-1
+ * decidida pelo proprietário em 2026-11-14). A mensagem não diz mais do que a lista de candidatos já
+ * diz (quem não aparece nela não pode ser ligado).
+ */
+const NOT_LINKABLE = () =>
+  new TenantRuleError(
+    409,
+    "TEAM_MEMBER_NOT_LINKABLE",
+    "Só uma pessoa da equipe com o WhatsApp confirmado pode ser ligada a uma ficha de cliente.",
+  );
+
 const ALREADY_LINKED = () =>
   new TenantRuleError(
     409,
@@ -192,9 +204,10 @@ const MEMBER_HAS_CUSTOMER = () =>
 const TEAM_INDEX = "customer_tenant_user_idx";
 
 /**
- * As pessoas da equipe que a tela oferece para ligar à ficha: só id, nome, papel e se já têm ficha
- * nesta organização. Sem e-mail, telefone nem estado do telefone: quem tem `customer:update` não
- * precisa deles para escolher, e a ficha a que alguém está ligado não sai daqui (só "já tem").
+ * As pessoas da equipe que a tela oferece para ligar à ficha: **só quem pode ser ligado** (membro
+ * desta organização com o telefone confirmado no sistema, TL-1), com id, nome, papel e se já tem ficha
+ * nesta organização. Sem e-mail nem telefone: quem tem `customer:update` não precisa deles para
+ * escolher, e a ficha a que alguém está ligado não sai daqui (só "já tem").
  */
 export function teamLinkCandidates(tenantId: string, customerId: string) {
   return withTenant(tenantId, async (tx) => {
@@ -208,7 +221,7 @@ export function teamLinkCandidates(tenantId: string, customerId: string) {
       .select({ userId: user.id, name: user.name, role: member.role })
       .from(member)
       .innerJoin(user, eq(member.userId, user.id))
-      .where(inTenant(tenantId))
+      .where(and(inTenant(tenantId), userPhoneConfirmedGlobally))
       .orderBy(asc(user.name));
 
     const linked = await tx
@@ -230,6 +243,7 @@ export function teamLinkCandidates(tenantId: string, customerId: string) {
  * ligação automática.
  *
  * - Pessoa que não é membro desta organização (ou de outra) e ficha de outra organização: 404.
+ * - Membro sem o telefone confirmado no sistema: 409 `TEAM_MEMBER_NOT_LINKABLE` (TL-1).
  * - Quem liga não liga a si mesmo (403 `SELF_LINK`).
  * - Ficha ligada a outra pessoa, ou pessoa com outra ficha: 409. Desfazer é a rota `DELETE`.
  * - A mesma ligação de novo: nada muda, sem auditoria (idempotente).
@@ -253,6 +267,12 @@ export async function linkTeamCustomer(
         .where(and(inTenant(tenantId), eq(member.userId, userId)))
         .for("share");
       if (!person) throw notFound(PERSON_NOT_FOUND);
+
+      const [confirmed] = await tx
+        .select({ id: user.id })
+        .from(user)
+        .where(and(eq(user.id, userId), userPhoneConfirmedGlobally));
+      if (!confirmed) throw NOT_LINKABLE();
 
       const [current] = await tx
         .select({ id: customer.id, userId: customer.userId })

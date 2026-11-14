@@ -6,6 +6,7 @@ import { auditInTransaction } from "@/lib/audit";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
 import { notifyCustomerClaimed } from "@/lib/phone/notify";
 import { type PhoneClaimPayload, verifiedPhone } from "@/lib/phone/verification";
+import { afterCustomerDeleted, deleteCustomerIn } from "@/lib/tenant/customer-deletion";
 import { TenantRuleError } from "@/lib/tenant/errors";
 import { linkVerifiedTeamMember } from "@/lib/tenant/team-customer";
 
@@ -31,12 +32,6 @@ import { linkVerifiedTeamMember } from "@/lib/tenant/team-customer";
 
 type Request = typeof phoneVerification.$inferSelect;
 
-/**
- * `customers.ts` importa `requests.ts`, que importa este módulo: carregar a exclusão de cliente só na
- * hora evita o ciclo na inicialização dos módulos.
- */
-const customersModule = () => import("@/lib/tenant/customers");
-
 export const CLAIM_LINK_ONLY = () =>
   new TenantRuleError(
     409,
@@ -45,6 +40,19 @@ export const CLAIM_LINK_ONLY = () =>
   );
 
 /** O que fica para depois do commit: os objetos e as contas órfãs das fichas apagadas, e o aviso ao owner. */
+/**
+ * A ficha que o `claim` nunca apaga (CL-7 e CL-13, decididas pelo proprietário em 2026-11-14): a que
+ * tem conta no portal, a ligada a uma pessoa da equipe e a bloqueada. Nesses casos o `claim` nem abre
+ * (`confirmPortalSignup`), e a confirmação confere de novo com a ficha travada.
+ */
+export function isProtectedFromClaim(holder: {
+  portalUserId: string | null;
+  userId: string | null;
+  status: string;
+}) {
+  return holder.portalUserId !== null || holder.userId !== null || holder.status === "blocked";
+}
+
 export type ClaimEffects = {
   tenantId: string;
   newCustomerId: string;
@@ -104,14 +112,21 @@ export async function applyCustomerClaim(
   if (own) throw invalid();
 
   // A ficha que tem o número agora (no máximo uma: índice único por organização). Pode ter sido
-  // apagada ou trocado de número enquanto o link estava a caminho: aí nada é apagado.
+  // apagada ou trocado de número enquanto o link estava a caminho: aí nada é apagado. Se passou a
+  // ter conta no portal, ligação com a equipe ou ficou bloqueada, ela é protegida: o pedido não serve
+  // mais (o 400 de sempre) e nada muda.
   const holders = await tx
-    .select({ id: customer.id })
+    .select({
+      id: customer.id,
+      portalUserId: customer.portalUserId,
+      userId: customer.userId,
+      status: customer.status,
+    })
     .from(customer)
     .where(and(eq(customer.tenantId, tenantId), eq(customer.phoneKey, request.phoneKey)))
     .for("update");
+  if (holders.some(isProtectedFromClaim)) throw invalid();
 
-  const { deleteCustomerIn } = await customersModule();
   const deleted: ClaimEffects["deleted"] = [];
   for (const holder of holders) {
     deleted.push(
@@ -165,7 +180,6 @@ export async function applyCustomerClaim(
 
 /** Depois do commit: objetos e contas órfãs das fichas apagadas, e o e-mail aos owners. Falha vira log. */
 export async function afterCustomerClaim(effects: ClaimEffects) {
-  const { afterCustomerDeleted } = await customersModule();
   for (const removed of effects.deleted) {
     await afterCustomerDeleted(removed).catch((error: unknown) =>
       logError("Falha ao concluir a exclusão da ficha substituída pelo claim", error),

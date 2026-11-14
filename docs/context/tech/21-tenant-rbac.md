@@ -80,7 +80,8 @@ transação, a ficha de cliente **ligada à pessoa** (`customer.user_id`) **naqu
 (contatos do telefone confirmado da pessoa, conversas, mensagens, arquivos); os outros contatos da ficha só perdem o
 vínculo. Nenhuma outra ficha é tocada, e trocar o papel não apaga nada. A equipe mantém a ficha desfazendo a ligação
 antes (`DELETE /api/customers/:id/team-link`, `customer:update`). Ligar à mão também é `customer:update`
-(`PUT /api/customers/:id/team-link`, só a membros desta organização, nunca a si mesmo, fora da personificação), e
+(`PUT /api/customers/:id/team-link`, só a membros desta organização com o telefone confirmado no sistema, nunca a si
+mesmo, fora da personificação), e
 a ligação feita à mão é apagada com a pessoa exatamente como a automática.
 
 **`phone:confirm` e o `claim` (D-1):** a liberação à mão nunca fecha um `claim` (409 `CLAIM_LINK_ONLY`): sem prova de

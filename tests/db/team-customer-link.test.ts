@@ -133,6 +133,8 @@ beforeAll(async () => {
   ownerA = await createUser(owner);
   ownerB = await createUser(owner);
   tenantA = (await createTenant(ownerA, "Clínica Ligação A")).id;
+  // O owner também pode ser ligado, se tem o telefone confirmado (TL-1).
+  await setUserPhone(ownerA, uniquePhone(), true);
   tenantB = (await createTenant(ownerB, "Clínica Ligação B")).id;
   channelA = (await seedCloudChannel(tenantScope(tenantA))).id;
 });
@@ -159,8 +161,8 @@ afterAll(async () => {
 
 describe("PUT /api/customers/:id/team-link", () => {
   it("liga a ficha à pessoa, mostra o selo e audita com via manual", async () => {
-    // Telefone só declarado: a ligação automática não acontece, a manual sim.
-    const { person } = await teamPerson({ verified: false, role: "admin" });
+    // Ficha de outro número (o e-mail seria o motivo): a ligação automática não acontece, a manual sim.
+    const { person } = await teamPerson({ role: "admin" });
     const record = await createCustomer(ownerA, { name: "Ficha por e-mail" });
     expect(await linkedTo(record.id)).toBeNull();
 
@@ -189,6 +191,22 @@ describe("PUT /api/customers/:id/team-link", () => {
     const response = await link(colaborador, record.id, ownerA.id);
     expect(response.status).toBe(200);
     expect(((await response.json()) as { team: { role: string } }).team.role).toBe("owner");
+  });
+
+  it("só liga quem tem o telefone confirmado no sistema (TL-1); a lista também só traz essas pessoas", async () => {
+    const { person } = await teamPerson({ verified: false });
+    const record = await createCustomer(ownerA, { name: "Para quem não confirmou" });
+
+    const response = await link(ownerA, record.id, person.id);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code: string }).code).toBe("TEAM_MEMBER_NOT_LINKABLE");
+    expect(await linkedTo(record.id)).toBeNull();
+    expect(await linkAudits(tenantA, record.id)).toHaveLength(0);
+
+    const list = await call("GET", `/api/customers/${record.id}/team-candidates`, { cookie: ownerA.cookie });
+    const { candidates } = (await list.json()) as { candidates: { userId: string }[] };
+    expect(candidates.some(({ userId }) => userId === person.id)).toBe(false);
+    expect(candidates.some(({ userId }) => userId === ownerA.id)).toBe(true);
   });
 
   it("exige customer:update", async () => {
@@ -373,10 +391,12 @@ describe("D-11 com a ligação manual", () => {
     await expectOnlyOwnContactGone(seeded);
   });
 
-  it("sem telefone confirmado, a ficha ligada à mão sai e nenhum contato é apagado", async () => {
-    const { person, phone } = await teamPerson({ verified: false });
-    const record = await createCustomer(ownerA, { name: "Ligada, telefone pendente" });
+  it("a pessoa que perde a confirmação depois de ligada: a ficha sai e nenhum contato é apagado", async () => {
+    const { person, phone } = await teamPerson();
+    const record = await createCustomer(ownerA, { name: "Ligada, telefone que caiu" });
     expect((await link(ownerA, record.id, person.id)).status).toBe(200);
+    // Outra conta provou o número depois (a confirmação cai).
+    await owner`update "user" set phone_verified_at = null, phone_verified_via = null where id = ${person.id}`;
     const same = await conversationWithMedia(record.id, phone.phoneNormalized);
 
     const membership = await membershipOf(person, tenantA);
