@@ -293,7 +293,7 @@ describe("resultado de cada linha", () => {
   it("texto com NUL é `invalid` e não derruba o resto do lote", async () => {
     const { boss, tenant } = await tenantWith();
     const result = await ok(
-      importRows(boss, [row({ name: "Com NUL" }), row({ name: "Normal" }), row({ tags: ["a b"] })]),
+      importRows(boss, [row({ name: "Com\u0000NUL" }), row({ name: "Normal" }), row({ tags: ["a\u0000b"] })]),
     );
     expect(statusesOf(result)).toEqual(["invalid", "created", "invalid"]);
     expect(await customersOf(tenant.id)).toBe(1);
