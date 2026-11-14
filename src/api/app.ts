@@ -12,6 +12,7 @@ import { auditRoutes } from "@/api/audit-log";
 import { channelRoutes } from "@/api/channels";
 import { customFieldRoutes } from "@/api/custom-fields";
 import { tagRoutes } from "@/api/tags";
+import { customerImportRoutes } from "@/api/customer-import";
 import { customerRoutes } from "@/api/customers";
 import { phoneVerificationRoutes } from "@/api/phone-verification";
 import { fileRoutes } from "@/api/files";
@@ -92,6 +93,8 @@ api.route("/", portalLgpdRoutes);
 api.route("/", tenantRoutes);
 api.route("/", teamRoutes);
 api.route("/", fileRoutes);
+// Antes de `customerRoutes`: o corpo da importação passa do limite de 16 KB daquele grupo.
+api.route("/", customerImportRoutes);
 api.route("/", customerRoutes);
 api.route("/", phoneVerificationRoutes);
 api.route("/", channelRoutes);

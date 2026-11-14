@@ -692,12 +692,12 @@ Decisões CL-1 a CL-14 na SPEC.
 Toda ficha nova passa pela trava `customers` do plano (`withinLimit`, `src/lib/billing/limits.ts`; detalhes em
 `tech/23-billing-planos.md`): cadastro pela equipe e "salvar contato como cliente" (`createCustomer`), autocadastro do portal e abertura do
 `claim` (`confirmPortalSignup`). A **confirmação do `claim`** não confere: apaga a ficha que tinha o número e cria a nova na mesma transação, o
-total não sobe (CL-12). Contato que chega por mensagem (`chat_contact`) não conta como cliente. A importação (bloco I, ainda não feita) deve criar fichas pelo mesmo caminho.
+total não sobe (CL-12). Contato que chega por mensagem (`chat_contact`) não conta como cliente. A importação (bloco I) cria fichas por `withinLimitRoom`, a mesma trava.
 
 ## Importação de clientes (pré-produção, bloco I)
 
-**I1 (leitura da planilha) implementada; a rota e a tela são da I2.** `src/lib/spreadsheet/` é puro e roda no navegador: o arquivo nunca vai
-ao servidor, só as linhas (I2).
+**I1 (leitura da planilha) e I2 (rota e tela) implementadas; a I3 (Google Planilhas por link) não.** `src/lib/spreadsheet/` é puro e roda no navegador: o arquivo
+nunca vai ao servidor, só as linhas.
 
 - **Colunas** (`IMPORT_COLUMNS`, `columns.ts`, fonte única do leitor, do modelo e da tela): `phone` obrigatória (`telefone`, `celular`,
   `whatsapp`, `numero`), `name` (`nome`), `email` (`e-mail`), `document` (`documento`, `cpf`, `cnpj`), `tags` (`etiquetas`; `;` recomendado,
@@ -713,6 +713,23 @@ ao servidor, só as linhas (I2).
 - **Erros** (`SpreadsheetParseError`, código estável e mensagem em português sem conteúdo do arquivo): `file_too_large`, `too_many_rows`,
   `missing_phone_column`, `empty_file`, `unreadable`, `unsupported_format`, `unclosed_quote`.
 - **Testes:** `src/lib/spreadsheet/*.test.ts` (os casos A a K da SPEC 052 da origem estão mapeados na SPEC, "I1: o que foi feito").
+
+**A rota e o serviço (I2)** — `POST /api/customers/import` (`src/api/customer-import.ts`, registrada antes de `customerRoutes`) e `GET .../quota`, ambas `customer:create`;
+serviço em `src/lib/tenant/customer-import.ts`; contrato em `src/lib/schemas/customer-import.ts`.
+
+- **Cada linha passa pelas regras do cadastro** (`prepareRow`, a mesma função da tela: `customerSchema`, `phoneValues`, etiquetas). Resposta por linha, na ordem enviada:
+  `created` (com `teamLinked`), `duplicate`, `invalid` (com `reason`) ou `limit`. **Duplicada** (número já de outra ficha, ou repetido no arquivo) **nunca atualiza** a ficha, nunca abre
+  `claim` e nunca envia mensagem. E-mail de outra ficha é `invalid`. A resposta, a auditoria e o log nunca trazem nome, telefone nem e-mail.
+- **O lote é uma transação com instruções em conjunto** (leituras, um `INSERT` de todas as fichas com `ON CONFLICT DO NOTHING`, um das etiquetas, auditorias), sob a trava de `customers`
+  (`withinLimitRoom`); nada roda por linha e nada dentro dela pede outra conexão. O que precisa de outra (plano, `createTag`) corre antes. Por quê, e as alternativas: SPEC, "I2: o que foi feito".
+- **Limite:** as primeiras linhas que seriam criadas ocupam as vagas, as demais saem `limit` (inválida e duplicada continuam sendo isso). `GET .../quota` → `{ limit, used, available }`.
+- **Telefone** `phone_verified_via = team`; ligação à equipe só pelo telefone **confirmado** do membro (`matchingTeamMembers`); o e-mail nunca liga; `customer.team_linked` com `via: imported`.
+- **Etiquetas:** as existentes são ligadas; as novas só com `tag:manage` e até 100 por organização (sem isso, a ficha entra sem elas e a resposta avisa); mais de 20 por linha é `invalid`.
+- **Tetos:** 500 linhas e 5 MB de corpo por pedido (`jsonBodyLimitOf`), `customer-import` 40 pedidos por 10 minutos por pessoa e organização. Personificação e `read_only` como `POST /api/customers`.
+- **Auditoria:** `customer.imported` por lote que criou ficha, só contagens.
+- **Tela:** `src/components/app/customers/import/customer-import-dialog.tsx` (diálogo em `/app/clientes`; `import-api.ts` para a quota e o envio) sobre `src/lib/spreadsheet/import-plan.ts`
+  (`planImport`, `runImport`): prévia, contadores, aviso "cabem N de M", progresso com cancelar e a lista de não importadas **depois** do resultado.
+- **Testes:** `tests/db/customer-import.test.ts`, mais `pool-saturation.test.ts` (14 importações simultâneas), `rbac.test.ts`, `impersonation.test.ts` e `src/lib/spreadsheet/import-plan.test.ts`.
 
 ## O que a SPEC pede e ainda não existe
 

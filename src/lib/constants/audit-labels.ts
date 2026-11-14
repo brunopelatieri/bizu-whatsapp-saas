@@ -28,6 +28,7 @@ const AUDIT_LABELS: Record<string, string> = {
   "file.uploaded": "Arquivo enviado",
   "file.deleted": "Arquivo excluído",
   "customer.created": "Cliente criado",
+  "customer.imported": "Clientes importados de uma planilha",
   "customer.updated": "Cliente alterado",
   "customer.deleted": "Cliente excluído",
   "customer.invited": "Cliente convidado ao portal",

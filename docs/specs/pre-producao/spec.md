@@ -1658,8 +1658,9 @@ Não existe importador nem dependência de planilha. O cadastro valida com `cust
 - **Etiquetas:** as existentes são ligadas; as novas só são criadas com a permissão de gerir
   etiquetas, respeitando o teto de 100; sem permissão, são ignoradas com aviso.
 - Telefone importado nasce com `phone_verified_via = team` (bloco T). A unicidade é conferida
-  só entre clientes: linha com o telefone ou o e-mail de um membro da equipe é criada e ligada
-  a ele (D-9), e o resultado da linha informa a ligação.
+  só entre clientes. A linha cujo número é o telefone **confirmado** de um membro da equipe é criada
+  e ligada a ele (D-9), e o resultado da linha informa a ligação. **O e-mail nunca liga** (decisão da
+  revisão de segurança do bloco T; este texto dizia "o telefone ou o e-mail").
 - **Tetos:** 10 MB e 10.000 linhas. Rate limit `customer-import`. Auditoria
   `customer.imported` com as contagens.
 - **Tela:** diálogo em `/app/clientes`: soltar arquivo, modelo para baixar, referência de
@@ -1721,7 +1722,7 @@ com nome `.csv`, `.xls` antigo e arquivo vazio têm mensagem própria; mensagem 
 |---|---|---|
 | I1-1 | **Etiquetas: `;` e `,` separam**, com `;` recomendado no modelo e na tela. A SPEC fala em "separador `;`", mas os casos B, E2 e H da origem dependem de a vírgula separar dentro da célula (um `"vip, lead"` virar uma etiqueta só seria pior para quem segue o guia da origem) | Só `;` separar |
 | I1-2 | **Caso J, `999999999999`:** na origem era `invalid_ddd`; aqui entra como número estrangeiro (12 dígitos, DDI 99), porque o projeto só aplica a regra do Brasil ao DDI 55 e o resto passa pelo tamanho do E.164. É regra do telefone (`src/lib/phone/br.ts`), fora desta SPEC; o teste registra o comportamento | Mudar `normalizePhone` (fora do escopo) |
-| I1-3 | **Apóstrofo nunca é removido**, nem o par que envolve a célula (a origem tirava o par: `'Zé'` virava `Zé`). Alterar o que a pessoa digitou em silêncio é pior que um nome com aspas simples; o normalizador de telefone já ignora o que não é dígito | Tirar o par envolvente, como a origem |
+| I1-3 | **Apóstrofo nunca é removido**, nem o par que envolve a célula (a origem tirava o par: `'Zé'` virava `Zé`). Alterar o que a pessoa digitou em silêncio é pior que um nome com aspas simples. **Emenda (I2-10): só no telefone o apóstrofo sai**, porque o cadastro só aceita dígitos e `+ ( ) - .` | Tirar o par envolvente, como a origem |
 | I1-4 | **O modelo usa `;`** (abre em colunas no Excel em português; em Excel configurado para inglês abre numa coluna só, mas o leitor entende os dois). A origem usava `,` | `,` |
 | I1-5 | O CSV é lido **em UTF-8 ou, se não for UTF-8 válido, em Windows-1252** (o "CSV" do Excel em português), e em UTF-16 com marca de ordem. A origem só lia UTF-8 | Só UTF-8 (acentos viram lixo no CSV padrão do Excel) |
 | I1-6 | **Fórmula não é alterada nem recusada:** vira texto como veio (ver "Entrada hostil"). Neutralizar com apóstrofo na entrada mudaria dado válido (telefone com `+`, observação com `-`) | Prefixar `'` nas células de texto que começam com `=`, `+`, `-`, `@` |
@@ -1730,6 +1731,113 @@ com nome `.csv`, `.xls` antigo e arquivo vazio têm mensagem própria; mensagem 
 **O que não foi testado:** a leitura de um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade (os testes montam o arquivo à mão, com
 texto em linha e sem estilos; células mescladas e datas formatadas ficaram sem arquivo real) e o desempenho da biblioteca com 10 MB reais no
 navegador (a etapa de navegador da I2 confere um arquivo de milhares de linhas).
+
+### I2: o que foi feito (2026-11-14)
+
+A rota, o serviço e a tela. **Sem migration.** A leitura é a da I1 (no navegador); o servidor só recebe as linhas.
+
+| O quê | Onde |
+|---|---|
+| `POST /api/customers/import` (lote de até 500 linhas, `customer:create`) e `GET /api/customers/import/quota` | `src/api/customer-import.ts` (registrado **antes** de `customerRoutes` em `app.ts`: o corpo passa de 16 KB) |
+| Contratos, tetos e tipos da resposta | `src/lib/schemas/customer-import.ts` |
+| O serviço (`importCustomers`, `customerImportQuota`) | `src/lib/tenant/customer-import.ts` |
+| A validação de uma linha, **igual na tela e no servidor** (`customerSchema`, `phoneValues`, etiquetas) | `src/lib/spreadsheet/prepare-row.ts` |
+| Contar, separar o que vale enviar e enviar em lotes (puro) | `src/lib/spreadsheet/import-plan.ts` |
+| `withinLimitRoom` (vagas em vez de 403) e `matchingTeamMembers` (a regra da D-9 em lote) | `src/lib/billing/limits.ts`, `src/lib/tenant/team-customer.ts` |
+| Diálogo de importação | `src/components/app/customers/import/`, botão "Importar planilha" em `/app/clientes` |
+
+**Resultado por linha** (`results`, mesma ordem e mesmo `sourceRow`, **nunca com nome, telefone ou e-mail**; `reason` é texto fixo do sistema):
+
+| Status | Quando |
+|---|---|
+| `created` | A ficha foi criada (`teamLinked: true` se nasceu ligada à pessoa da equipe) |
+| `duplicate` | O número (a `phone_key`, com ou sem o 9º dígito) já é de outra ficha da organização, ou se repete no arquivo. **Nunca atualiza** a ficha existente, nunca abre `claim` e nunca envia mensagem |
+| `invalid` | Não passou pelo cadastro (telefone, nome, e-mail, documento, observação, etiqueta) ou o e-mail é de outra ficha |
+| `limit` | O plano não tem mais vaga. **Não é "ignorada"**: com vagas, entra |
+
+**Como o lote usa a transação (decisão I2-1).** Uma transação por lote, e **só instruções em conjunto dentro dela**: uma leitura dos telefones e e-mails
+já cadastrados, uma da equipe, **um `INSERT` de todas as fichas** (`ON CONFLICT DO NOTHING`), um das etiquetas e as auditorias. Nada roda por linha.
+Com a trava de `customers` tomada, o lote custa uns 8 comandos, então a trava da organização cai em dezenas de milissegundos e um cadastro manual ou outro lote da
+mesma organização só espera isso. As alternativas pesadas: **uma transação por linha** pagaria a trava, a contagem e o `COMMIT` 500 vezes por lote (e
+um lote de 500 levaria segundos a 10 ms por linha); **sublotes** só encurtariam a espera às custas de mais ida e volta, sem ganho depois de o lote
+virar um `INSERT`. Medido: 10.000 linhas em 20 lotes terminaram em cerca de 6 s no servidor de desenvolvimento.
+
+**O pool (RISK-015).** Dentro da transação, tudo usa a `tx` recebida: nada chama `getDb()`, `withTenant`, `createTag` (que abre a própria transação) nem o Better Auth.
+O que precisa de outra conexão (ler o plano, resolver e criar etiquetas) corre **antes**, em sequência, sem segurar nada. A trava é a de `withinLimit`: a mais
+externa, tomada antes de qualquer outra (limite, número, conta ou ficha, pedido), e a importação não pede nenhuma das outras depois dela.
+`tests/db/pool-saturation.test.ts` roda 14 importações simultâneas (sem limite, com limite folgado, com poucas vagas, em 14 organizações e junto com 14 cadastros manuais).
+
+**O limite (decisão I2-2).** `withinLimitRoom(tenantId, metric, options, run(tx, room))` é o `withinLimit` que, em vez de recusar com 403 quando falta vaga, entrega a `run`
+quantas vagas restam (`0` com o plano cheio, `null` sem limite, que nem toma a trava). As primeiras linhas **que seriam criadas**, na ordem do arquivo, ocupam
+as vagas e as demais saem `limit` (decisão I2-3: linha inválida ou duplicada continua sendo `invalid` ou `duplicate` mesmo sem vaga, pois mudar de plano não a resolve). O
+servidor para no limite; a tela segue enviando os lotes seguintes (cada um é classificado por ele). `GET .../quota` devolve `{ limit, used, available }` (sem trava, só um aviso:
+"cabem N de M linhas").
+
+**Etiquetas (decisão I2-5).** As existentes (sem diferenciar a caixa) são ligadas. As novas só são criadas por quem tem `tag:manage`, até o teto de 100 por organização
+(`createTag`, com a trava e a auditoria de sempre); sem a permissão ou acima do teto, a ficha entra **sem** a etiqueta e a resposta traz `tags: { created, ignored, ignoredReason }`. A resolução
+corre **antes** da transação das fichas (cada `createTag` tem a própria), então uma etiqueta nova pode ficar criada mesmo que a linha dela saia `duplicate` ou `limit` (não se cria etiqueta
+para a segunda ocorrência de um telefone no lote nem com o plano já cheio). Linha com mais de 20 etiquetas (`CUSTOMER_TAG_LIMIT`) ou etiqueta de mais de 40 caracteres é `invalid`.
+
+**Equipe que também é cliente (D-9).** A ficha nasce ligada **só** quando o número é o telefone **confirmado no sistema** de um membro da organização que ainda não tem ficha (a mesma
+`matchingTeamMember`, agora em lote: `matchingTeamMembers`); **o e-mail nunca liga**. O resultado da linha traz `teamLinked` e a auditoria `customer.team_linked` (`via: imported`).
+
+**Tetos e abuso.** 500 linhas por pedido; corpo de até 5 MB (limite próprio da rota, `jsonBodyLimitOf`; as demais rotas de cliente seguem em 16 KB); `customer-import`: 40 pedidos por
+10 minutos por pessoa e organização (cabem 20.000 linhas); 10 MB e 10.000 linhas no arquivo (na tela). O envelope só limita tamanho (campo fora do contrato é 400; conteúdo ruim é `invalid`).
+**Personificação e `read_only` como o cadastro** (`POST /api/customers`): a importação é permitida na personificação e leva o `impersonator_id`; `read_only` recusa com 403 `TENANT_READ_ONLY`
+(a quota, um `GET`, segue lendo); suspensa, 403 `TENANT_SUSPENDED`; com telefone pendente, a rota nasce bloqueada (nada entra na lista do que passa).
+
+**Auditoria (decisão I2-7).** `customer.imported` por lote, **só se ao menos uma ficha foi criada**, com contagens (`rows`, `created`, `duplicate`, `invalid`, `limit`, `teamLinked`,
+`tagsCreated`, `tagsIgnored`) e nenhum dado de cliente. Não há `customer.created` por ficha (10.000 linhas encheriam o log); cada ligação à equipe tem o próprio `customer.team_linked`.
+Nada de nome, telefone ou e-mail em auditoria, log nem resposta.
+
+**Tela.** Diálogo em `/app/clientes` (só com `customer:create`): soltar o arquivo (ou clicar), modelo para baixar, referência de colunas, seletor de aba (`.xlsx`), prévia das 5 primeiras linhas, contadores
+`lidas · válidas · duplicadas · inválidas`, aviso "cabem N de M", barra de progresso com "Cancelar" (para antes do próximo lote; o que entrou fica), e, **depois do resultado**, a lista das não
+importadas (linha, situação e motivo, 200 por vez) com os contadores finais, o aviso de limite, de etiquetas ignoradas e de fichas ligadas à equipe. Falha de um lote para os seguintes, mostra o motivo e
+o que já entrou; importar de novo é seguro (o que entrou sai `duplicate`).
+
+**Testes.** `tests/db/customer-import.test.ts` (33): permissão e isolamento entre organizações; cada resultado de linha; duplicata na base e no arquivo sem atualizar a ficha; o 9º dígito;
+500 linhas e o 501º; corpo fora do contrato e acima do teto de corpo; o limite parando no meio, entre lotes seguidos, com **três importações simultâneas**, com **importações e cadastros manuais no
+meio** (conferido à mão que, sem a trava, os dois testes de corrida falham) e a trava de uma organização não segurando outra; `read_only` e suspensa; etiquetas existentes, novas, sem permissão,
+no teto de 100, acima de 20 por linha e sem criar para linha que não entra; a ligação pelo telefone confirmado de um membro (e a ausência dela com o telefone pendente, pelo e-mail e entre organizações);
+auditoria só com contagens; rate limit. Mais: a rota em `rbac.test.ts` (e a sessão exigida), o portão de telefone em `phone-gate.test.ts` (que percorre todas as rotas), a personificação em
+`impersonation.test.ts`, a saturação em `pool-saturation.test.ts` e, sem banco, `import-plan.test.ts` (planejamento, lotes, cancelamento e falha).
+
+**Conferido no navegador** (servidor de desenvolvimento, organização seed local, desktop e 375 px; os dados de teste foram removidos): `.xlsx` de duas abas (a capa foi pulada) com linhas válidas, repetida no arquivo e
+sem DDD, num plano de 8 clientes (cabem 6 de 12: entraram 6, 6 `limit`); CSV do Excel em português (`;`, Windows-1252, quebra de linha em aspas, fórmula como texto, duplicata da base, pessoa da equipe
+ligada, etiqueta nova e existente); 10.000 linhas lidas em ~200 ms e importadas em ~6 s; mensagens de erro para arquivo de 11 MB, binário com nome `.csv`, PDF, `.xls`, sem telefone e aspas sem fechar. No celular
+o conteúdo do diálogo estourava a largura (a tabela esticava a coluna do grid); corrigido com `grid-cols-[minmax(0,1fr)]`.
+
+**Decisões da I2 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I2-1 | O lote é **uma transação com instruções em conjunto** (acima) | Uma transação por linha, ou sublotes |
+| I2-2 | `withinLimitRoom` é um helper novo em `limits.ts` (mesma trava, mesma ordem, a regra do limite não mudou): entrega as vagas em vez de lançar 403 | Capturar o 403 e marcar tudo como `limit` (não diz quantas linhas cabiam) |
+| I2-3 | Sem vaga, linha **inválida ou duplicada** segue sendo isso; só o que seria criado vira `limit` | Tudo o que sobra vira `limit` |
+| I2-4 | **E-mail de outra ficha é `invalid`** ("Já existe um cliente com este e-mail."), a ficha não é criada sem o e-mail; só o telefone define `duplicate` | Criar a ficha sem o e-mail |
+| I2-5 | Etiquetas novas são criadas **antes** da transação (podem sobrar sem uso; sem permissão a ficha entra sem elas, com aviso) | Criar dentro da transação (exigiria reescrever `createTag`) ou recusar a linha |
+| I2-6 | A tela **não envia** linha que já sabe inválida nem a repetida no arquivo (o servidor revalida tudo o que recebe, com a mesma função) | Enviar tudo |
+| I2-7 | Um `customer.imported` por lote, só se criou ficha; sem `customer.created` por ficha | Um evento por ficha |
+| I2-8 | Personificação e `read_only` como `POST /api/customers` | Bloquear a importação na personificação (`blockWhileImpersonating`) |
+| I2-9 | `customer-import`: 40 pedidos em 10 minutos por pessoa e organização; corpo de até 5 MB | Outros números |
+| I2-10 | No **telefone** (e só nele), o apóstrofo que marca texto no Excel (`'1198...`) sai na leitura (I1-3, emenda): o cadastro só aceita dígitos e `+ ( ) - .` | Recusar a linha |
+
+**Revisões da I1 e da I2 (`/code-review` e `/security-review`, 2026-11-14)**
+
+| Achado | Destino |
+|---|---|
+| Caractere NUL num campo derrubava o `INSERT` do lote inteiro (500 do pedido; reenviar repetia o erro) | **Corrigido:** `prepareRow` recusa a linha (`invalid`); o arquivo de texto com byte nulo em qualquer ponto é recusado na leitura. Teste em `import-plan.test.ts`, `read-file.test.ts` e `customer-import.test.ts` |
+| Célula de **texto** como `1E5` virava `100000` no `.xlsx` (a conversão de notação científica valia para texto também) | **Corrigido:** só o `parseNumber` da biblioteca converte; texto fica como foi digitado. Testes em `parse-xlsx.test.ts` (inclusive com um `.xlsx` real) |
+| `pickSheet` convertia todas as linhas de cada aba só para achar o cabeçalho | **Corrigido:** para no primeiro cabeçalho (teste com `Proxy`) |
+| Releitura das etiquetas criadas comparava `lower()` do JS com o do Postgres | **Corrigido:** relê todas as da organização (no máximo 100) e compara só em JS |
+| A tela descarta a repetição de um telefone no arquivo mesmo quando a **primeira** ocorrência é recusada pelo servidor (e-mail de outra ficha): a segunda nunca é enviada | **Não corrigido, aceito:** é consequência da decisão I2-6 (a tela não envia o repetido); caso raro, e a lista diz "repetido no arquivo". Alternativa: enviar também as repetidas e deixar o servidor classificar tudo |
+| Cada lote lê o plano e conta clientes duas vezes (`customerImportQuota` e `withinLimitRoom`) | **Não corrigido:** duas consultas por lote de 500; a leitura sem trava serve para não criar etiquetas com o plano cheio |
+| `withinLimitRoom` repete a estrutura de `withinLimit` | **Não corrigido:** manter o código da Q1 intacto; unificar é refatoração à parte |
+| `/security-review` | **Nenhum achado com confiança acima de 8.** Conferidos: autorização e isolamento entre organizações, `tag:manage` no servidor, `INSERT` com colunas explícitas (sem atribuição em massa), consultas parametrizadas, resposta e auditoria sem dado de cliente, leitura do arquivo só no navegador, o que a personificação pode fazer (igual ao cadastro) |
+
+**O que não foi testado:** vários processos do servidor ao mesmo tempo (a trava é do Postgres, e os testes rodam num processo só); um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade;
+Firefox e Safari (só o navegador do painel); queda do processo no meio de um lote (as fichas dos sublotes já confirmados ficam sem o evento de auditoria do lote, e importar de novo as pula); o tempo da
+trava sob carga de produção (medido só em desenvolvimento); a lista de rejeitadas com milhares de linhas (renderiza 200 por vez).
 
 ---
 
@@ -1927,7 +2035,7 @@ contagem de `customers` com muitas fichas (a SPEC deixa o contador de uso para d
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
 | 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2, R3a e R3b implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem, aviso da conversa esvaziada e tela de retenção do `/admin`); falta a revisão jurídica do texto de privacidade (ver "R3b: o que foi feito", com o roteiro manual). Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
-| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito") |
+| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito"). **I1 e I2 implementadas** (importação de clientes: leitura no navegador, rota, tela; "I1: o que foi feito" e "I2: o que foi feito"); falta a I3 (Google Planilhas) |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
 `npm run build` e `/code-review`; `/security-review` onde a tabela de fases indica.
@@ -1937,7 +2045,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") e Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito").
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito"), I1-1 a I1-7 da leitura da planilha (em "I1: o que foi feito") e I2-1 a I2-10 da rota e da tela de importação (em "I2: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

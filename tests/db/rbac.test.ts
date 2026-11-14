@@ -59,6 +59,8 @@ const endpoints = [
   ["DELETE", `/api/roles/${anyId}`, "role:delete"],
   ["GET", "/api/customers", "customer:read"],
   ["POST", "/api/customers", "customer:create"],
+  ["POST", "/api/customers/import", "customer:create"],
+  ["GET", "/api/customers/import/quota", "customer:create"],
   ["GET", `/api/customers/${anyId}`, "customer:read"],
   ["PATCH", `/api/customers/${anyId}`, "customer:update"],
   ["DELETE", `/api/customers/${anyId}`, "customer:delete"],

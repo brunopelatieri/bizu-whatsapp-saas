@@ -37,6 +37,14 @@ describe("decodeSpreadsheetText", () => {
     expect(decodeSpreadsheetText(le)).toBe(text);
   });
 
+  it("byte nulo em qualquer ponto (também depois dos primeiros 4096 bytes): não é texto", () => {
+    const late = new Uint8Array(10_000).fill(0x61);
+    late[9_000] = 0;
+    expect(() => decodeSpreadsheetText(late)).toThrowError(
+      expect.objectContaining({ code: "unsupported_format" }),
+    );
+  });
+
   it("byte nulo no começo: não é texto", () => {
     expect(() => decodeSpreadsheetText(new Uint8Array([0x50, 0x00, 0x01, 0x02]))).toThrowError(
       expect.objectContaining({ code: "unsupported_format" }),

@@ -38,6 +38,16 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Importação de clientes por planilha: rota e tela (bloco I de `docs/specs/pre-producao/spec.md`, fase I2)**.
+  - `POST /api/customers/import` (`customer:create`): lotes de até 500 linhas, cada uma pelas regras do cadastro (`customerSchema`, telefone, unicidade por organização). Resposta por linha:
+    `created`, `duplicate` (número já cadastrado ou repetido no arquivo; **nunca atualiza** a ficha existente, sem `claim` nem mensagem), `invalid` (com o motivo) ou `limit`. `GET /api/customers/import/quota` devolve as vagas do plano.
+  - O limite do plano vale na trava de `customers` (novo `withinLimitRoom`): com poucas vagas entram as primeiras linhas e as demais saem `limit`, mesmo com lotes simultâneos e cadastros manuais no meio. O lote é uma transação com instruções
+    em conjunto (um `INSERT` por lote), sem segurar a trava por mais que dezenas de milissegundos nem pedir outra conexão do pool.
+  - Telefone importado nasce `team`; liga à pessoa da equipe só pelo telefone **confirmado** dela (o e-mail nunca liga). Etiquetas existentes são ligadas; as novas só por quem gerencia etiquetas, até 100.
+  - Corpo próprio de até 5 MB, rate limit `customer-import` (40 por 10 minutos), auditoria `customer.imported` só com contagens, sem dado de cliente em resposta, auditoria ou log.
+  - Diálogo "Importar planilha" em `/app/clientes`: prévia, contadores, "cabem N de M", progresso com cancelar e a lista das linhas não importadas depois do resultado.
+  - **Migração:** nenhuma.
+
 - **Leitura de planilha para a importação de clientes (bloco I de `docs/specs/pre-producao/spec.md`, fase I1)**.
   - `src/lib/spreadsheet/`: leitor de CSV (delimitador `,` `;` ou tab, UTF-8 ou Windows-1252, aspas e quebra de linha dentro de aspas, apóstrofo preservado) e de XLSX
     (aba com coluna de telefone), modelo para baixar e a lista das colunas (`phone`, `name`, `email`, `document`, `tags`, `notes`, com apelidos em português). Roda no navegador;

@@ -225,6 +225,21 @@ describe("personificação", () => {
       });
     });
 
+    it("a importação de clientes segue o cadastro: permitida na personificação e com o impersonator_id", async () => {
+      await grant();
+      const cookie = await enterAs(tenantOwner);
+
+      const response = await call("POST", "/api/customers/import", {
+        cookie,
+        body: { rows: [{ sourceRow: 2, phone: "11987654399", name: "Importado pelo suporte", tags: [] }] },
+      });
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { counts: { created: number } }).counts.created).toBe(1);
+
+      const [row] = await auditRows("customer.imported");
+      expect(row).toMatchObject({ actor_id: tenantOwner.id, impersonator_id: support.id });
+    });
+
     it("a sessão termina junto com o consentimento", async () => {
       const grantId = await grant();
       const soon = new Date(Date.now() + 10 * 60 * 1000);

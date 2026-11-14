@@ -32,8 +32,8 @@ export function decodeSpreadsheetText(bytes: Uint8Array): string {
   if (startsWith(bytes, 0xff, 0xfe)) return new TextDecoder("utf-16le").decode(bytes.subarray(2));
   if (startsWith(bytes, 0xfe, 0xff)) return new TextDecoder("utf-16be").decode(bytes.subarray(2));
 
-  const head = bytes.subarray(0, 4096);
-  if (head.includes(0)) {
+  // Byte nulo em qualquer ponto: não é texto (e o banco não o guardaria).
+  if (bytes.includes(0)) {
     throw new SpreadsheetParseError(
       "unsupported_format",
       "Este arquivo não é uma planilha de texto. Envie um .csv ou um .xlsx.",

@@ -104,8 +104,11 @@ O banner de `/app` (`BillingBanner`) só informa; quem barra é a API.
   passa por `nestedSection` (`src/db/nested-section.ts`), um teto de 3 seções ao mesmo tempo no processo (`floor(POOL_MAX / 3)`: cada seção segura 1
   conexão e pede até 2, no pior caso 9 de 10), com a fila **sem** conexão. Sem o teto, 10 pedidos simultâneos travavam o acesso ao banco do processo inteiro
   (SPEC, "Pool travado"). Seção nova que segure uma conexão e peça outra entra por `nestedSection`; ela não aninha outra.
+- `withinLimitRoom(tenantId, metric, options, run(tx, room))` (bloco I): a mesma trava e a mesma ordem, mas, em vez de lançar 403 quando falta vaga, entrega a `run` as vagas que
+  restam (`0` com o plano cheio, `null` sem limite, que não toma a trava). Serve a quem cria **vários de uma vez**: a importação de clientes (`src/lib/tenant/customer-import.ts`), que
+  ocupa as vagas com as primeiras linhas e marca as demais `limit`. Grava só pela `tx`, como `withinLimit`.
 - `UsageOptions.tx` faz `used` contar pela transação de `withinLimit` (`customers` e `members`).
-- **Quem passa por `withinLimit` ou `withinLimitNested`:** `createCustomer` (equipe e "salvar contato como cliente"; a transação do cadastro é a da trava),
+- **Quem passa por `withinLimit`, `withinLimitRoom` ou `withinLimitNested`:** a importação de clientes (`withinLimitRoom`), `createCustomer` (equipe e "salvar contato como cliente"; a transação do cadastro é a da trava),
   `confirmPortalSignup` (autocadastro do portal, inclusive a abertura do `claim` e ligar o lead; plano cheio devolve a mesma resposta neutra),
   convite (`POST /api/team/invitations`) e aceite (`POST /api/invitations/:id/accept`), por `withinLimitNested`: nestes dois o `createInvitation` e o
   `acceptInvitation` do Better Auth correm **dentro** da trava, por outra conexão, e só voltam depois de gravar.

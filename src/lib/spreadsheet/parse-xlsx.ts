@@ -31,8 +31,12 @@ function numberToText(value: number): string {
   }
 }
 
-/** Texto cru de um número da planilha, que pode vir em notação científica (`5.511988887777E12`). */
-function numberTextToString(raw: string): string {
+/**
+ * Texto cru de um **número** da planilha (o `parseNumber` da biblioteca), que pode vir em notação
+ * científica (`5.511988887777E12`). Só números passam por aqui: uma célula de **texto** como `1E5`
+ * (um código, um documento) continua como foi digitada.
+ */
+export function numberTextToString(raw: string): string {
   // Só texto que é inteiramente um número em notação científica; "phone" e "e-mail" ficam como estão.
   if (!/^\s*[+-]?\d+(?:\.\d+)?e[+-]?\d+\s*$/i.test(raw)) return raw.trim();
   return numberToText(Number(raw));
@@ -46,7 +50,7 @@ export function cellToString(cell: XlsxCell): string {
   if (cell instanceof Date) {
     return Number.isNaN(cell.getTime()) ? "" : cell.toISOString().slice(0, 10);
   }
-  return numberTextToString(String(cell)).slice(0, MAX_CELL_CHARS + 1);
+  return String(cell).trim().slice(0, MAX_CELL_CHARS + 1);
 }
 
 function rowToCells(row: XlsxCell[] | undefined): string[] {
@@ -66,7 +70,15 @@ export function pickSheet(sheets: readonly XlsxSheet[], wanted?: string): XlsxSh
   if (requested) return requested;
 
   for (const sheet of sheets) {
-    const header = sheet.data.map(rowToCells).find((cells) => !isBlank(cells));
+    // Só até o primeiro cabeçalho: a aba pode ter centenas de milhares de linhas.
+    let header: string[] | undefined;
+    for (const row of sheet.data) {
+      const cells = rowToCells(row);
+      if (!isBlank(cells)) {
+        header = cells;
+        break;
+      }
+    }
     if (header && hasPhoneColumn(header)) return sheet;
   }
 
@@ -128,7 +140,7 @@ export async function readXlsxBytes(
     const { default: readXlsxFile } = await import("read-excel-file/browser");
     const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     sheets = (await readXlsxFile(buffer as ArrayBuffer, {
-      parseNumber: (text: string) => text,
+      parseNumber: numberTextToString,
     })) as unknown as XlsxSheet[];
   } catch (error) {
     if (error instanceof SpreadsheetParseError) throw error;

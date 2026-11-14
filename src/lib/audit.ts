@@ -37,6 +37,8 @@ export type AuditAction =
   | "file.uploaded"
   | "file.deleted"
   | "customer.created"
+  // Um lote da importação de planilha (bloco I): só contagens em `metadata`, nunca dado de cliente.
+  | "customer.imported"
   | "customer.updated"
   | "customer.deleted"
   | "customer.invited"

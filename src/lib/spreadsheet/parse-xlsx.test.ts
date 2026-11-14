@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { normalizePhone } from "@/lib/phone/br";
-import { cellToString, parseXlsxSheets, pickSheet, readXlsxBytes } from "@/lib/spreadsheet/parse-xlsx";
+import {
+  cellToString,
+  numberTextToString,
+  parseXlsxSheets,
+  pickSheet,
+  readXlsxBytes,
+} from "@/lib/spreadsheet/parse-xlsx";
 import { buildXlsx } from "@/lib/spreadsheet/testing/xlsx-builder";
 import { MAX_IMPORT_ROWS, SpreadsheetParseError } from "@/lib/spreadsheet/types";
 
@@ -22,16 +28,17 @@ describe("cellToString", () => {
     expect(cellToString(1.5)).toBe("1.5");
   });
 
-  it("texto numérico em notação científica é expandido", () => {
-    expect(cellToString("5.511988887777E12")).toBe("5511988887777");
-    expect(cellToString("5511988887777")).toBe("5511988887777");
+  it("número em notação científica é expandido (só pelo parseNumber, que recebe números)", () => {
+    expect(numberTextToString("5.511988887777E12")).toBe("5511988887777");
+    expect(numberTextToString("5511988887777")).toBe("5511988887777");
+    expect(numberTextToString("1e5")).toBe("100000");
+    expect(numberTextToString("phone")).toBe("phone");
   });
 
-  it("texto com a letra e (phone, e-mail, nome) não é confundido com notação científica", () => {
-    expect(cellToString("phone")).toBe("phone");
-    expect(cellToString("e-mail")).toBe("e-mail");
-    expect(cellToString("1e5")).toBe("100000");
-    expect(cellToString("12e")).toBe("12e");
+  it("célula de TEXTO como 1E5 (código, documento) nunca é convertida", () => {
+    expect(cellToString("1E5")).toBe("1E5");
+    expect(cellToString("2e10")).toBe("2e10");
+    expect(cellToString("  12E3 ")).toBe("12E3");
   });
 
   it("vazio, data, booleano e infinito", () => {
@@ -108,6 +115,16 @@ describe("parseXlsxSheets", () => {
     expect(parseXlsxSheets(sheets, { sheetName: "B" }).rows[0]?.phone).toBe("5511977776666");
     expect(parseXlsxSheets(sheets, { sheetName: "Z" }).sheetName).toBe("A");
     expect(pickSheet([], "A")).toBeNull();
+    // Só olha até o primeiro cabeçalho: uma aba enorme não vira texto inteira.
+    const touched: number[] = [];
+    const big = { sheet: "Grande", data: new Proxy([["phone"], ...Array(1_000).fill(["x"])] as string[][], {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^d+$/.test(key)) touched.push(Number(key));
+        return Reflect.get(target, key, receiver);
+      },
+    }) };
+    expect(pickSheet([big])?.sheet).toBe("Grande");
+    expect(Math.max(...touched)).toBeLessThan(5);
   });
 
   it("nenhuma aba com telefone: o erro leva as abas para a tela trocar", () => {
@@ -165,6 +182,14 @@ describe("readXlsxBytes (read-excel-file)", () => {
       { name: "B", rows: [["phone"], ["5511977776666"]] },
     ]);
     expect((await readXlsxBytes(bytes, { sheetName: "B" })).rows[0]?.phone).toBe("5511977776666");
+  });
+
+  it("lê um .xlsx com célula de texto 1E5 e número 5.5E12 sem alterar o texto", async () => {
+    const bytes = buildXlsx([
+      { name: "A", rows: [["phone", "document"], [5511988887777, "1E5"]] },
+    ]);
+    const { rows } = await readXlsxBytes(bytes);
+    expect(rows[0]).toMatchObject({ phone: "5511988887777", document: "1E5" });
   });
 
   it("arquivo zip que não é Excel é um erro legível, não uma exceção solta", async () => {

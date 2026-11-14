@@ -34,29 +34,61 @@ export type TeamLink = { userId: string; role: string };
 const inTenant = (tenantId: string) => eq(member.organizationId, tenantId);
 
 /**
+ * Para vários números de uma vez (a importação): `phone_key` → id do membro da organização cujo
+ * telefone **confirmado** é esse. Fica de fora o número que não tem membro, que tem mais de um, ou
+ * cujo membro já tem ficha de cliente na organização. É a regra de `matchingTeamMember`, em duas
+ * consultas em vez de duas por número.
+ */
+export async function matchingTeamMembers(tx: Tx, tenantId: string, phoneKeys: string[]) {
+  const matches = new Map<string, string>();
+  if (phoneKeys.length === 0) return matches;
+
+  const rows = await tx
+    .select({ id: user.id, phoneKey: user.phoneKey })
+    .from(user)
+    .innerJoin(member, eq(member.userId, user.id))
+    .where(and(inTenant(tenantId), inArray(user.phoneKey, phoneKeys), userPhoneConfirmedGlobally));
+
+  const byKey = new Map<string, string[]>();
+  for (const { id, phoneKey } of rows) {
+    if (phoneKey) byKey.set(phoneKey, [...(byKey.get(phoneKey) ?? []), id]);
+  }
+  const single = [...byKey].flatMap(([phoneKey, ids]) =>
+    ids.length === 1 && ids[0] ? [{ phoneKey, id: ids[0] }] : [],
+  );
+  if (single.length === 0) return matches;
+
+  const taken = new Set(
+    (
+      await tx
+        .select({ userId: customer.userId })
+        .from(customer)
+        .where(
+          and(
+            eq(customer.tenantId, tenantId),
+            inArray(
+              customer.userId,
+              single.map(({ id }) => id),
+            ),
+          ),
+        )
+    ).flatMap(({ userId }) => (userId ? [userId] : [])),
+  );
+
+  for (const { phoneKey, id } of single) {
+    if (!taken.has(id)) matches.set(phoneKey, id);
+  }
+  return matches;
+}
+
+/**
  * O membro da organização cujo telefone **confirmado** é o desta ficha. `null` quando não há,
  * quando há mais de um com o número, ou quando ele já tem ficha de cliente na organização.
  */
 export async function matchingTeamMember(tx: Tx, tenantId: string, phoneKey: string | null) {
   if (!phoneKey) return null;
 
-  const rows = await tx
-    .select({ id: user.id })
-    .from(user)
-    .innerJoin(member, eq(member.userId, user.id))
-    .where(and(inTenant(tenantId), eq(user.phoneKey, phoneKey), userPhoneConfirmedGlobally))
-    .limit(2);
-
-  const [only] = rows;
-  if (rows.length !== 1 || !only) return null;
-
-  const [taken] = await tx
-    .select({ id: customer.id })
-    .from(customer)
-    .where(and(eq(customer.tenantId, tenantId), eq(customer.userId, only.id)))
-    .limit(1);
-
-  return taken ? null : only.id;
+  return (await matchingTeamMembers(tx, tenantId, [phoneKey])).get(phoneKey) ?? null;
 }
 
 /**

@@ -189,6 +189,11 @@ export const limitLockKey = (tenantId: string, metric: LimitMetric) =>
  * a conta ou a ficha; o pedido) e nunca são chamadas dentro de uma transação que já segura uma
  * delas, então não fecham ciclo com nenhuma.
  */
+const lockMetric = (tx: Tx, tenantId: string, metric: LimitMetric) =>
+  tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${limitLockKey(tenantId, metric)}, 0))`,
+  );
+
 async function lockAndCheck(
   tx: Tx,
   tenantId: string,
@@ -197,9 +202,7 @@ async function lockAndCheck(
   source: LimitSource,
   options: LimitOptions,
 ) {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${limitLockKey(tenantId, metric)}, 0))`,
-  );
+  await lockMetric(tx, tenantId, metric);
 
   const used = await source.used(tenantId, metric, { ...options, tx });
   const check = evaluateLimit(metric, limit, used);
@@ -236,6 +239,32 @@ export async function withinLimit<T>(
     if (limit !== null) await lockAndCheck(tx, tenantId, metric, limit, source, options);
 
     return run(tx);
+  });
+}
+
+/**
+ * Como `withinLimit`, para quem cria **vários de uma vez** (a importação de clientes, bloco I): em
+ * vez de recusar com 403 quando falta vaga, entrega a `run` quantas restam (`room`, `0` com o plano
+ * cheio, `null` sem limite) e deixa `run` decidir quais linhas entram. A trava, a ordem das travas, a
+ * leitura do plano **antes** da transação e a regra de grava-só-pela-`tx` são as de `withinLimit`; plano
+ * sem limite na métrica não toma a trava. A contagem é a mesma de `assertWithinLimit`, feita sob a trava.
+ */
+export async function withinLimitRoom<T>(
+  tenantId: string,
+  metric: LimitMetric,
+  options: LimitOptions,
+  run: (tx: Tx, room: number | null) => Promise<T>,
+): Promise<T> {
+  const source = options.source ?? databaseLimitSource;
+  const limit = await limitOf(tenantId, metric, source);
+
+  return withTenant(tenantId, async (tx) => {
+    if (limit === null) return run(tx, null);
+
+    await lockMetric(tx, tenantId, metric);
+    const used = await source.used(tenantId, metric, { ...options, tx });
+
+    return run(tx, Math.max(0, limit - used));
   });
 }
 
