@@ -595,6 +595,60 @@ describe("limpeza de mensagens (R2)", () => {
       expect(kept?.lastMessagePreview).toBe("oi");
     });
 
+    const conversationOf = async (id: string) => {
+      const [row] = await read((tx) => tx.select().from(conversation).where(eq(conversation.id, id)));
+      return row;
+    };
+
+    it("última mensagem apagada por idade, com favorita mais antiga sobrando: a prévia sai, as âncoras ficam", async () => {
+      const lastAt = ago(40 * DAY);
+      const t = await thread(tenantScope(tenantA), "whatsapp_cloud", { lastMessageAt: lastAt, lastInboundAt: lastAt, unreadCount: 1 });
+      const fav = await msg(tenantScope(tenantA), t, 50 * DAY, { favorite: true });
+      const last = await msg(tenantScope(tenantA), t, 40 * DAY);
+      await setPolicy(tenantA, "whatsapp_cloud", { retentionDays: 30 });
+
+      await runRetention(targetA(), { config: config() });
+
+      expect(await existing([fav, last])).toEqual(new Set([fav]));
+      const row = await conversationOf(t.conversationId);
+      expect(row).toMatchObject({ lastMessagePreview: null, lastMessageDirection: "in", unreadCount: 1 });
+      expect(row?.lastMessageAt?.getTime()).toBe(lastAt.getTime());
+      expect(row?.lastInboundAt?.getTime()).toBe(lastAt.getTime());
+    });
+
+    it("última mensagem apagada pela contagem, com favorita mais antiga sobrando: a prévia sai", async () => {
+      const lastAt = ago(20 * DAY);
+      const x = await thread(tenantScope(tenantA), "whatsapp_cloud", { lastMessageAt: lastAt, lastInboundAt: lastAt });
+      const fav = await msg(tenantScope(tenantA), x, 50 * DAY, { favorite: true });
+      const lastX = await msg(tenantScope(tenantA), x, 20 * DAY);
+      // Outra conversa do mesmo escopo, mais nova: com teto 1, a última de X passa do teto.
+      const y = await seedConversation(tenantScope(tenantA), x.channelId);
+      const lastY = await msg(tenantScope(tenantA), { conversationId: y.id, channelId: x.channelId }, 5 * DAY);
+      await setPolicy(tenantA, "whatsapp_cloud", { maxMessages: 1 });
+
+      const outcome = await runRetention(targetA(), { config: config() });
+
+      expect(outcome.result).toMatchObject({ byCount: 1 });
+      expect(await existing([fav, lastX, lastY])).toEqual(new Set([fav, lastY]));
+      const rowX = await conversationOf(x.conversationId);
+      expect(rowX?.lastMessagePreview).toBeNull();
+      expect(rowX?.lastMessageAt?.getTime()).toBe(lastAt.getTime());
+      expect(rowX?.lastInboundAt?.getTime()).toBe(lastAt.getTime());
+      expect((await conversationOf(y.id))?.lastMessagePreview).toBe("oi");
+    });
+
+    it("só mensagens antigas saem e a última fica: a prévia continua", async () => {
+      const t = await thread(tenantScope(tenantA));
+      const old = await msg(tenantScope(tenantA), t, 40 * DAY);
+      const last = await msg(tenantScope(tenantA), t, 10 * DAY);
+      await setPolicy(tenantA, "whatsapp_cloud", { retentionDays: 30 });
+
+      await runRetention(targetA(), { config: config() });
+
+      expect(await existing([old, last])).toEqual(new Set([last]));
+      expect((await conversationOf(t.conversationId))?.lastMessagePreview).toBe("oi");
+    });
+
     it("mensagem citada por outra pode sair: a citação fica sem alvo e a resposta continua", async () => {
       const scope = tenantScope(tenantA);
       const t = await thread(scope);

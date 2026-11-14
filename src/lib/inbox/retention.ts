@@ -352,6 +352,26 @@ async function purgeInScope(
           .orderBy(asc(conversation.id))
           .for("update")
       : [];
+  const touchedIds = touched.map(({ id }) => id);
+
+  // A mensagem mais recente de cada conversa travada, lida **depois** da trava (nada novo entra até o
+  // commit). Se ela estiver entre as apagadas, a prévia do texto da conversa sai (abaixo). Comparar
+  // ids evita comparar `created_at`, que perde os microssegundos no caminho para o JavaScript.
+  const newestBefore =
+    touchedIds.length > 0
+      ? await tx
+          .select({
+            id: conversation.id,
+            newest: sql<string | null>`(${tx
+              .select({ id: message.id })
+              .from(message)
+              .where(and(eq(message.conversationId, conversation.id), tenantIs(message.tenantId, target.tenantId)))
+              .orderBy(desc(message.createdAt), desc(message.id))
+              .limit(1)})`,
+          })
+          .from(conversation)
+          .where(and(anyId(conversation.id, touchedIds), tenantIs(conversation.tenantId, target.tenantId)))
+      : [];
 
   // Cada sentença confere de novo escopo, tipo, estrela e corte: o que mudou desde a seleção
   // (uma estrela marcada agora) não sai.
@@ -428,23 +448,21 @@ async function purgeInScope(
           .returning({ conversationId: message.conversationId })
       : [];
 
-  // A conversa esvaziada fica (com `last_message_at`, `last_inbound_at` e a direção, âncoras da
-  // janela de 24 h e do aviso da tela); só a prévia do texto, que guardava a última, é zerada.
-  if (touched.length > 0) {
+  // A prévia do texto (`last_message_preview`) guarda a última mensagem: sai sempre que a mais
+  // recente da conversa foi apagada, esvaziada a conversa ou não (sobrando uma favorita mais antiga,
+  // por exemplo). Não é recalculada a partir de uma mais antiga. `last_message_at`,
+  // `last_inbound_at` (âncora da janela de 24 h e do aviso da tela) e a direção ficam como estão.
+  const removed = new Set(deletedIds);
+  const lostLatest = newestBefore.flatMap(({ id, newest }) => (newest && removed.has(newest) ? [id] : []));
+  if (lostLatest.length > 0) {
     await tx
       .update(conversation)
       .set({ lastMessagePreview: null })
       .where(
         and(
-          anyId(
-            conversation.id,
-            touched.map(({ id }) => id),
-          ),
+          anyId(conversation.id, lostLatest),
           tenantIs(conversation.tenantId, target.tenantId),
           isNotNull(conversation.lastMessagePreview),
-          notExists(
-            tx.select({ id: message.id }).from(message).where(eq(message.conversationId, conversation.id)),
-          ),
         ),
       );
   }

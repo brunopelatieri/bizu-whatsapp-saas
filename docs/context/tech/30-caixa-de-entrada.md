@@ -534,7 +534,8 @@ cascata com o arquivo órfão.
     **e** com `tenant_id` explícito (ou `IS NULL`) e o tipo de canal em toda sentença. Trava as conversas afetadas
     (`FOR UPDATE`, por id) antes de apagar, a mesma ordem da ingestão e do envio. A mídia das apagadas (`file` dona ou apontada
     por `file_id`, no escopo, que nenhuma mensagem que sobrou aponte) sai na transação e o objeto depois do commit, como
-    `purgeContacts`. A conversa esvaziada fica, só com `last_message_preview` zerado. `notifyInbox` com `k: "message"` e só ids,
+    `purgeContacts`. A conversa esvaziada fica. `last_message_preview` sai sempre que a mensagem mais recente da conversa estava entre as
+    apagadas (esvaziada ou não; nunca recalculada de uma mais antiga); a conversa em que só saíram as antigas mantém a prévia. `notifyInbox` com `k: "message"` e só ids,
     por conversa afetada. Depois do commit grava `message_retention_state` (upsert por escopo, `withPlatformData`).
   - **Prévia** (`dryRun: true`): `plan.effective` (funciona com a retenção desligada), não altera nada nem grava o estado;
     `messagesTotal`/`favoritesTotal` são o estado atual. O que ela conta bate com o que a execução apaga no mesmo estado (teste).

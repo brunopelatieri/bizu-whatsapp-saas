@@ -870,6 +870,7 @@ type RetentionRunResult, emptyRunResult, readRunResult(value: unknown)    // for
    como `purgeContacts`). `message.file_id` e `reply_to_message_id` já são `set null`.
 5. A conversa esvaziada **permanece**. Não zere `last_message_at`, `last_inbound_at` (âncora da janela de 24 h) nem `last_message_direction`. Zere
    `last_message_preview` das conversas que ficaram sem mensagem (ele guarda o texto da última). `unread_count` fica como está.
+   (A R2 ampliou: a prévia sai sempre que a mensagem mais recente da conversa foi apagada, esvaziada ou não; ver "R2: o que foi feito".)
 6. Depois de uma execução de verdade, grave `message_retention_state` por escopo (upsert; `last_run_at`, `last_result` no formato de
    `RetentionRunResult`). Conversa afetada: `notifyInbox` só com ids, como a regra do domínio.
 7. Job com `singletonKey` e cron diário (`JOBS_MODE`); sem `INTERVAL`. Erro vai a `logError`, nunca com texto de mensagem.
@@ -946,7 +947,10 @@ getRetentionView(target, config?), retentionTenantExists(id), saveRetentionPolic
 - Antes de apagar, trava as conversas afetadas (`FOR UPDATE`, por id): a mesma ordem da ingestão e do envio (conversa, depois mensagem).
 - Mídia: a linha `file` da mensagem apagada (`owner_type = 'message'` com `owner_id` dela, ou a apontada por `file_id`), no escopo e **que nenhuma mensagem
   que sobrou aponte**, sai na transação; o objeto sai do armazenamento depois do commit (falha vai a `logError`), como `purgeContacts`.
-- Conversa esvaziada: fica; só `last_message_preview` vira nulo (e só quando ela ficou sem mensagem). `last_message_at`, `last_inbound_at`,
+- Prévia do texto: `last_message_preview` vira nulo sempre que a mensagem **mais recente** da conversa (`created_at DESC, id DESC`, lida depois da
+  trava das conversas) está entre as apagadas, a conversa tendo ficado vazia ou não (sobrando uma favorita mais antiga, por exemplo); nunca é
+  recalculada a partir de uma mensagem mais antiga. A conversa em que só saíram mensagens antigas mantém a prévia. A conversa esvaziada fica.
+  `last_message_at`, `last_inbound_at`,
   `last_message_direction`, `unread_count`, situação e dono ficam.
 - `notifyInbox` por conversa afetada (apagada ou rebaixada), `k: "message"`, só ids (`s`, `c`, `a`).
 - Depois do commit, upsert de `message_retention_state` (`last_run_at = now`, `last_result` no formato de `RetentionRunResult`).
@@ -995,7 +999,8 @@ rota nova, com `PHONE_VERIFICATION_REQUIRED=true` a conta com telefone pendente 
 **Testes:** `tests/db/inbox-retention.test.ts` (desligada, sem limite e `0` não apagam; o piso nas três fases e nunca abaixo de 24 h; idade, contagem
 pelo escopo inteiro, desempate por id, favoritas rebaixadas que só somem no ciclo seguinte, as três fases juntas; a prévia bate com a execução, com a
 retenção desligada e com o lote cortado; isolamento entre organizações, entre a plataforma e as organizações e entre tipos de canal; `batchLimit` e
-`truncated`; lote acima de 65.535 ids (um parâmetro de array só); `file` e objeto; conversa esvaziada com as âncoras; mensagem citada; estado gravado; `pg_notify` só com ids; reentrega de aviso antigo;
+`truncated`; lote acima de 65.535 ids (um parâmetro de array só); `file` e objeto; conversa esvaziada com as âncoras; prévia do texto zerada quando a última sai por idade ou por contagem (sobrando favorita mais antiga) e mantida
+quando só as antigas saem; mensagem citada; estado gravado; `pg_notify` só com ids; reentrega de aviso antigo;
 o job: fila, agendamento, escopos e uma organização que falha). `tests/db/admin-retention.test.ts` (papéis, organização inexistente ou excluída,
 tetos e campos, `sources`, auditoria sem `tenant_id`, prévia sem apagar, última execução). `rbac.test.ts` e `impersonation.test.ts` ganharam as rotas.
 O escopo da plataforma só é limpo nos testes com o corte de 3650 dias e mensagens com mais de 10 anos; o ciclo, só com escopos explícitos.

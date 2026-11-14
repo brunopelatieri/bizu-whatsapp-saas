@@ -14,7 +14,7 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
   apagadas sem volta.**
   - Serviço `src/lib/inbox/retention.ts`: por organização (e plataforma) e tipo de canal, nas fases idade, contagem (o teto vale para o escopo
     inteiro) e favoritas acima do teto (perdem a estrela e só somem no ciclo seguinte), com o piso de idade nas três, `MESSAGE_RETENTION_BATCH_LIMIT`
-    por fase e `truncated`. Apaga a mídia da mensagem (linha `file` e objeto depois do commit); a conversa esvaziada fica, sem a prévia do texto.
+    por fase e `truncated`. Apaga a mídia da mensagem (linha `file` e objeto depois do commit); a conversa esvaziada fica, e a prévia do texto sai sempre que a última mensagem da conversa é apagada.
   - Prévia (`dryRun`) pelo mesmo código da execução: conta o que seria apagado, sem alterar nada, mesmo com a retenção desligada.
   - Job diário `inbox.retention` (04:45 UTC, fila `exclusive` com `singletonKey`); uma organização que falha não impede as outras.
     `scheduleDefinitions` aceita `singletonKey`.
