@@ -10,6 +10,20 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Retenção de mensagens, fase R1 (bloco R de `docs/specs/pre-producao/spec.md`)**: só a base; **nenhuma mensagem é apagada ainda**
+  (a limpeza é a R2).
+  - Migration `0039_retencao_mensagens`: `message.is_favorite`, `favorited_at` e `favorited_by` (a estrela é da conversa); tabelas
+    `retention_policy` (política por organização e tipo de canal: `max_messages`, `retention_days`, `max_favorites`; `NULL` herda, `0` é sem
+    limite) e `message_retention_state` (última execução por escopo), ambas só da plataforma (`platformOnlyPolicy()` + `FORCE`); índices
+    `message_favorite_idx`, `message_tenant_created_idx` e `message_favorited_by_idx`.
+  - Variáveis novas: `MESSAGE_RETENTION_ENABLED` (padrão `false`; **ligada em `docker/.env.prod.example`**),
+    `MESSAGE_RETENTION_WHATSAPP_QR_*` e `MESSAGE_RETENTION_WHATSAPP_CLOUD_*` (`MAX_MESSAGES`, `DAYS`, `MAX_FAVORITES`; ausente ou `0` = sem limite),
+    `MESSAGE_RETENTION_MIN_AGE_HOURS` (piso, 24 a 8760, padrão 72) e `MESSAGE_RETENTION_BATCH_LIMIT` (padrão 5000). Valor torto derruba a subida.
+  - Módulo puro `src/lib/inbox/retention-policy.ts`: precedência (linha da política, depois `.env`, depois sem limite) e piso de idade
+    que vale sobre qualquer política; desligada ou sem configuração, nunca apaga.
+  - Anonimizar a conta zera `message.favorited_by` (a estrela fica).
+  - **Migração:** rodar `npm run db:migrate`. Projeto derivado que usa `docker/.env.prod.example` passa a ter a retenção **ligada** quando a R2
+    existir; hoje a variável não tem efeito.
 - **Pré-produção: senha forte, bloqueio de login e telefone verificado (blocos S, B e fase T1 de
   `docs/specs/pre-producao/spec.md`)**:
   - **Senha forte:** toda senha nova exige 10 a 128 caracteres, com maiúscula, minúscula, número e caractere especial,

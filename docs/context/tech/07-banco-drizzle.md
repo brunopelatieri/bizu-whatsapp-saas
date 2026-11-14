@@ -214,6 +214,20 @@ Detalhes em `tech/29-canais-whatsapp.md`.
 renomeada; a migration foi gerada em duas passadas (criar a nova, depois apagar a antiga) e unida.
 Detalhes em `tech/30-caixa-de-entrada.md`.
 
+### Retenção de mensagens (bloco R, migration `0039_retencao_mensagens`)
+
+`message` ganha `is_favorite` (padrão `false`), `favorited_at` e `favorited_by` (`set null`), com `CHECK` de que o carimbo só
+existe com a estrela, e três índices: `message_favorite_idx` (parcial, `(conversation_id, created_at) WHERE is_favorite`),
+`message_tenant_created_idx` (`(tenant_id, created_at)`, para a varredura por idade) e `message_favorited_by_idx` (parcial, para o
+`set null`). O `(conversation_id, created_at)` que a SPEC pedia já existe (`message_conversation_created_idx`, decrescente).
+`retention_policy` (PK `(tenant_id, channel_type)`, `max_messages`, `retention_days` e `max_favorites` inteiros nulos com `CHECK >= 0`,
+`updated_by` `set null`) e `message_retention_state` (`last_run_at`, `last_result` jsonb objeto; único por `(tenant_id, channel_type)`
+e, com `tenant_id` nulo, por `channel_type`) têm `tenant_id`, mas usam **`platformOnlyPolicy()`** + `FORCE`: o dado é da
+plataforma **sobre** o tenant, e o tenant não lê nem grava (`withTenant` devolve vazio; o `bizu_app` cru também). Leitura e escrita:
+`withPlatformData` (e `withPlatformScope`, que atravessa tudo, no job). `channel_type` não tem `CHECK` no banco (como `channel.type`):
+um tipo de canal novo não exige migration. `tests/db/retention-schema.test.ts`; o inventário de `tests/db/rls.test.ts` passou a listar
+quatro tabelas só da plataforma.
+
 ## Tabelas da fase 10
 
 - `consent_log` (sem tenant, sem RLS): aceite e recusa por `subject_type`/`subject_id`, `kind`, `version`, hash de IP.

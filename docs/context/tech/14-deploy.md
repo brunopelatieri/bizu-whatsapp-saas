@@ -150,6 +150,11 @@ Runtime (a lista completa está em `.env.example`; a validação, em `src/lib/en
 - Verificação de telefone: `PHONE_VERIFICATION_REQUIRED` (opcional, padrão `true`: a conta com
   WhatsApp pendente só vê "Confirme seu WhatsApp"; `false` deixa entrar com um aviso),
   `PHONE_VERIFICATION_TTL_MINUTES` (opcional, padrão 30: validade do link) e `PHONE_VERIFICATION_CHANNELS` (ordem dos tipos de canal que enviam o link, ex.: `whatsapp_cloud,whatsapp_qr`; vazio = todo pedido espera a liberação à mão). O job `phone.verify` precisa de um consumidor da fila (`JOBS_MODE=inline` ou o worker)
+- Retenção de mensagens (bloco R): `MESSAGE_RETENTION_ENABLED` (padrão `false`; **ligado em `docker/.env.prod.example`**, D-7),
+  `MESSAGE_RETENTION_WHATSAPP_QR_*` e `MESSAGE_RETENTION_WHATSAPP_CLOUD_*` (`MAX_MESSAGES`, `DAYS`, `MAX_FAVORITES`: padrões por tipo de
+  canal; ausente ou `0` = sem limite; no exemplo 5000, 90 e 200), `MESSAGE_RETENTION_MIN_AGE_HOURS` (piso, 24 a 8760, padrão 72) e
+  `MESSAGE_RETENTION_BATCH_LIMIT` (1 a 100000, padrão 5000). Valor torto derruba a subida. A R1 só valida e repassa as variáveis (o
+  `compose.prod.yml` as expõe sem padrão de limite: sem a variável não há limite); a limpeza que as usa chega na R2
 - Canais de mensagem: `CHANNEL_PROVIDERS` (vazio = sem WhatsApp), `CHANNEL_EVENT_RETENTION_DAYS` (opcional, padrão 30: dias que o aviso de canal tratado, com telefone e texto, fica guardado) e, com `whatsapp_qr`, `EVOLUTION_API_URL` e `EVOLUTION_GLOBAL_API_KEY` (obrigatórias; a chave de exemplo `change-me*` é recusada em produção), mais `EVOLUTION_WEBHOOK_PUBLIC_URL` (também é a base do endereço de 5 min do anexo de saída, `GET /api/inbox/media-out/:token`: o servidor Evolution precisa alcançá-lo), `EVOLUTION_INSTANCE_PREFIX`, `EVOLUTION_MAX_INSTANCES_TOTAL`, `EVOLUTION_MEDIA_ORIGINS` e os dois timeouts. A Cloud API não tem variável (credenciais por canal)
 - Pagamentos: só `STRIPE_*` (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`), obrigatórias com `stripe` em `PAYMENT_PROVIDERS`. Variáveis de outros provedores entram junto com o módulo em `src/lib/payments/providers/<id>/`
 

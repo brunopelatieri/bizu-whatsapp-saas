@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { loginLockoutScopes } from "@/lib/auth/login-throttle";
 import { channelTypes } from "@/lib/channels/types";
+import { RETENTION_LIMIT_MAX } from "@/lib/inbox/retention-policy";
 
 /**
  * Variáveis de ambiente do servidor, validadas uma vez na inicialização.
@@ -36,6 +37,13 @@ const booleanString = (defaultValue: boolean) =>
       .default(defaultValue ? "true" : "false")
       .transform((value) => value === "true" || value === "1"),
   );
+
+/**
+ * Limite de retenção de mensagens (bloco R): ausente ou vazio é "sem limite" e `0` também (nunca
+ * "apague tudo"). Valor torto derruba a subida, em vez de virar limite em silêncio.
+ */
+const retentionLimit = (max: number) =>
+  z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(max).optional());
 
 const integerString = (defaultValue: number) =>
   z.preprocess(
@@ -187,6 +195,29 @@ export const envSchema = z
     CHANNEL_EVENT_RETENTION_DAYS: z.preprocess(
       emptyToUndefined,
       z.coerce.number().int().min(1).max(365).default(30),
+    ),
+    // Retenção de mensagens (bloco R, `docs/context/tech/30-caixa-de-entrada.md`). Ausente é
+    // desligada (nunca apaga); o exemplo de produção já vem ligado (D-7). Os limites por tipo de
+    // canal herdam daqui quando o proprietário da plataforma não fixa a organização:
+    // ausente ou 0 = sem limite. O nome vem do tipo (`MESSAGE_RETENTION_<TIPO>_...`), e a precedência
+    // mora em `src/lib/inbox/retention-policy.ts`.
+    MESSAGE_RETENTION_ENABLED: booleanString(false),
+    MESSAGE_RETENTION_WHATSAPP_QR_MAX_MESSAGES: retentionLimit(RETENTION_LIMIT_MAX.maxMessages),
+    MESSAGE_RETENTION_WHATSAPP_QR_DAYS: retentionLimit(RETENTION_LIMIT_MAX.retentionDays),
+    MESSAGE_RETENTION_WHATSAPP_QR_MAX_FAVORITES: retentionLimit(RETENTION_LIMIT_MAX.maxFavorites),
+    MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_MESSAGES: retentionLimit(RETENTION_LIMIT_MAX.maxMessages),
+    MESSAGE_RETENTION_WHATSAPP_CLOUD_DAYS: retentionLimit(RETENTION_LIMIT_MAX.retentionDays),
+    MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_FAVORITES: retentionLimit(RETENTION_LIMIT_MAX.maxFavorites),
+    // Piso de idade: nenhuma mensagem mais nova que isto é apagada, qualquer que seja a política
+    // (protege a reentrega do provedor e a citação recente). 24 a 8760 h; padrão 72.
+    MESSAGE_RETENTION_MIN_AGE_HOURS: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(24).max(8760).default(72),
+    ),
+    // Teto de linhas que uma fase da limpeza altera por escopo e execução.
+    MESSAGE_RETENTION_BATCH_LIMIT: z.preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(100_000).default(5000),
     ),
     EVOLUTION_API_URL: z.preprocess(emptyToUndefined, z.url({ protocol: /^https?$/ }).optional()),
     EVOLUTION_GLOBAL_API_KEY: optionalString,

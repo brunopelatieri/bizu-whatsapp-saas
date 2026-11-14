@@ -1,6 +1,6 @@
 # SPEC: correções e complementos antes da produção
 
-- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F e os blocos L e E (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, as fases F1 e F2 do bloco F, os blocos L e E e a fase R1 do bloco R (decisões R1-1 a R1-10 a confirmar; R2 e R3 pendentes) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
 - **Data:** 2026-11-11
 - **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
   registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
@@ -786,9 +786,131 @@ conversa encerrada antiga perde as mensagens e permanece na lista.
 
 | Fase | Entrega | Verificação | LLM |
 |---|---|---|---|
-| R1 | Migration, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga | Sonnet 5.5 |
+| R1 (**implementada**; ver "R1: o que foi feito", com o contrato da R2 e da R3) | Migration `0039` com **todo** o schema do bloco, variáveis, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga; desligado nunca apaga; o piso vence. `tests/db/retention-schema.test.ts`: RLS, `CHECK`s, padrões | Sonnet 5.5 |
 | R2 | Serviço de limpeza, prévia, job; exclusão do arquivo | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
 | R3 | Estrela, aviso da conversa vazia, tela do `/admin` | Roteiro manual com o interruptor ligado em banco de teste | Sonnet 5.5 |
+
+**Nenhuma fase depois da R1 gera migration** (o Postgres local é compartilhado e a numeração colidiria). Faltou coluna? Pare e fale com a sessão
+da R1: a `0040` é de quem a pedir, uma só, depois de combinar.
+
+### R1: o que foi feito (2026-11-14)
+
+Só schema, variáveis, precedência e testes: **nenhum código apaga mensagem**. Migration `0039_retencao_mensagens`, já aplicada no
+Postgres local (`drizzle/meta` e o snapshot vão no mesmo commit).
+
+**Schema, coluna por coluna** (`src/db/schema/inbox.ts`; detalhe em `tech/07-banco-drizzle.md`):
+
+| Tabela | Coluna ou índice | Forma |
+|---|---|---|
+| `message` | `is_favorite` | `boolean not null default false` (`isFavorite`) |
+| `message` | `favorited_at` | `timestamptz` nulo (`favoritedAt`) |
+| `message` | `favorited_by` | `uuid` nulo, FK `user`, `ON DELETE SET NULL` (`favoritedBy`) |
+| `message` | `CHECK message_favorite_stamp` | `is_favorite or (favorited_at is null and favorited_by is null)`: **desfavoritar zera os três juntos** |
+| `message` | `message_favorite_idx` | parcial `(conversation_id, created_at) WHERE is_favorite` |
+| `message` | `message_tenant_created_idx` | `(tenant_id, created_at)`: a varredura por idade e por contagem de um escopo |
+| `message` | `message_favorited_by_idx` | parcial `(favorited_by) WHERE favorited_by IS NOT NULL`: o `set null` |
+| `message` | `(conversation_id, created_at)` | **já existia** (`message_conversation_created_idx`, com `created_at DESC, id DESC`): não foi duplicado |
+| `retention_policy` (`retentionPolicy`) | PK `(tenant_id, channel_type)` | `tenant_id uuid` FK `organization` `cascade`; `channel_type text` (`whatsapp_cloud` ou `whatsapp_qr`, sem `CHECK` no banco) |
+| `retention_policy` | `max_messages`, `retention_days`, `max_favorites` | `integer` nulos, `CHECK (… is null or … >= 0)`; `NULL` herda, `0` é sem limite |
+| `retention_policy` | `updated_by`, `created_at`, `updated_at` | `updated_by` FK `user` `set null`; `updated_at` com `$onUpdate` |
+| `message_retention_state` (`messageRetentionState`) | `id` | `uuid` PK |
+| `message_retention_state` | `tenant_id`, `channel_type` | `tenant_id` **nulo = escopo da plataforma**; único `(tenant_id, channel_type)` quando `tenant_id` não é nulo e único `(channel_type)` quando é nulo |
+| `message_retention_state` | `last_run_at`, `last_result`, `updated_at` | `timestamptz` nulo; `jsonb not null default '{}'` com `CHECK` de objeto; `updated_at` com `$onUpdate` |
+
+As duas tabelas novas usam **`platformOnlyPolicy()`** com `FORCE ROW LEVEL SECURITY` e `GRANT` ao `bizu_app`: o tenant (e o owner) não as
+lê nem grava. Leia e escreva com `withPlatformData` (que também alcança `message` com `tenant_id` nulo) ou, no job que atravessa
+organizações, `withPlatformScope("…")`. `message` segue com `scopedPolicy()`: para apagar mensagem de uma organização, ou `withTenant` (que **não**
+enxerga as tabelas de retenção na mesma transação: resolva a política antes, em `withPlatformData`) ou `withPlatformScope` com `tenant_id`
+explícito em toda sentença.
+
+**Variáveis** (`src/lib/env.ts`, `.env.example` com `ENABLED=false`, `docker/.env.prod.example` com `ENABLED=true`, `docker/compose.prod.yml`):
+`MESSAGE_RETENTION_ENABLED` (padrão `false`), `MESSAGE_RETENTION_WHATSAPP_QR_*` e `MESSAGE_RETENTION_WHATSAPP_CLOUD_*` (`MAX_MESSAGES`, `DAYS`,
+`MAX_FAVORITES`; ausente ou `0` = sem limite; exemplos 5000, 90 e 200), `MESSAGE_RETENTION_MIN_AGE_HOURS` (24 a 8760, padrão 72),
+`MESSAGE_RETENTION_BATCH_LIMIT` (1 a 100000, padrão 5000). **Não existe variável de intervalo**: o job é diário. No compose os limites
+saem sem padrão (sem a variável, sem limite). O núcleo não importa pasta de módulo de canal: o nome vem do tipo
+(`MESSAGE_RETENTION_<TIPO>_…`, mapa exaustivo sobre `ChannelType` em `retention-policy.ts`; um tipo novo não compila até ganhar o dele, e
+sem variável não apaga nada).
+
+**Módulo puro `src/lib/inbox/retention-policy.ts`** (sem banco, sem `getEnv`; só importa `channels/types`):
+
+```ts
+retentionConfigFromEnv(env: Readonly<Record<string, unknown>>): RetentionConfig   // passe getEnv()
+//   RetentionConfig = { enabled; minAgeHours (>= 24); batchLimit; defaults: Record<ChannelType, RetentionLimits> }
+planRetention(config, channelType, row: RetentionPolicyRow | null | undefined): RetentionPlan
+//   RetentionPlan = { channelType; enabled; floorHours; batchLimit;
+//                     effective: RetentionLimits;  sources: Record<dimensão, "policy" | "default" | "unlimited">;
+//                     run: RetentionLimits;        canPurge: boolean }
+retentionCutoffs(floorHours: number, retentionDays: number | null, now: Date): { floorAt: Date; ageCutoff: Date | null }
+resolveRetention(row, defaults): { limits; sources }          // a mesma resolução, sem olhar `enabled`
+effectiveMinAgeHours(value: unknown): number                   // nunca abaixo de MIN_AGE_HOURS_FLOOR (24)
+retentionEnvKeys(channelType), RETENTION_LIMIT_MAX             // nomes das variáveis; tetos 10.000.000 / 3650 / 1.000.000 (Zod da rota do /admin)
+type RetentionLimits = { maxMessages; retentionDays; maxFavorites }   // number | null, null = sem limite (o 0 já virou null)
+type RetentionPolicyRow = { maxMessages?; retentionDays?; maxFavorites? }  // number | null | undefined: a linha do Drizzle serve
+type RetentionRunResult, emptyRunResult, readRunResult(value: unknown)    // formato de last_result e da prévia
+```
+
+- `plan.effective` é o que a política manda, ligada a retenção ou não: use na **tela** e na **prévia**. `plan.run` é o que uma limpeza de verdade
+  pode aplicar: **todo nulo com `MESSAGE_RETENTION_ENABLED` desligado**. Quem apaga lê só `plan.run`; se `!plan.canPurge`, não há o que fazer.
+- Valor torto na linha (negativo, fracionário) vale **sem limite**, sem herdar o padrão. Tipo de canal sem variável: sem limite.
+- `RetentionRunResult` = `{ byAge, byCount, favoritesDemoted, filesDeleted, messagesTotal, favoritesTotal, truncated }`: só contagens (nunca texto de
+  mensagem). É o formato do `last_result` e da prévia (na prévia, o que **seria** apagado; os totais são o estado atual).
+
+**O que a R2 pode assumir e deve cumprir** (serviço `src/lib/inbox/retention.ts`, job `inbox.retention`):
+
+1. Escopo = organização × tipo de canal (e plataforma × tipo): `message` → `conversation` → `channel.type`. **`max_messages` e `max_favorites` valem
+   para o escopo inteiro** (C-3: "por organização e tipo de canal"), não por conversa; o ranking é `created_at DESC, id DESC` (o desempate por `id` é
+   obrigatório: um lote do webhook empata `created_at`).
+2. Ordem **idade, contagem, favoritas acima do teto**. Idade: `NOT is_favorite AND created_at < ageCutoff`. Contagem: `NOT is_favorite`, ranque
+   `> max_messages` **e `created_at < floorAt`**. Favoritas: `UPDATE message SET is_favorite = false, favorited_at = NULL, favorited_by = NULL`
+   nas favoritas de ranque `> max_favorites` **e `created_at < floorAt`** (o `CHECK` exige os três juntos); elas só somem no ciclo seguinte.
+   O piso (`floorAt`) vale nas três; `LIMIT plan.batchLimit` em cada fase.
+3. Só executa com `plan.canPurge`. Prévia (`dryRun`) usa `plan.effective` (funciona com a retenção desligada, para o proprietário ver antes de
+   ligar) e **não altera nada nem grava `message_retention_state`**.
+4. Apagar mensagem apaga também o `file` dela (`owner_type = 'message'`, `owner_id = message.id`; a linha na transação e o objeto **depois do commit**,
+   como `purgeContacts`). `message.file_id` e `reply_to_message_id` já são `set null`.
+5. A conversa esvaziada **permanece**. Não zere `last_message_at`, `last_inbound_at` (âncora da janela de 24 h) nem `last_message_direction`. Zere
+   `last_message_preview` das conversas que ficaram sem mensagem (ele guarda o texto da última). `unread_count` fica como está.
+6. Depois de uma execução de verdade, grave `message_retention_state` por escopo (upsert; `last_run_at`, `last_result` no formato de
+   `RetentionRunResult`). Conversa afetada: `notifyInbox` só com ids, como a regra do domínio.
+7. Job com `singletonKey` e cron diário (`JOBS_MODE`); sem `INTERVAL`. Erro vai a `logError`, nunca com texto de mensagem.
+
+**O que a R3 pode assumir:**
+
+1. `message.is_favorite`, `favorited_at` e `favorited_by` existem; favoritar grava os três (`favorited_at = now()`, `favorited_by` = quem está na sessão),
+   desfavoritar zera os três. A estrela é **da conversa**, não da pessoa: quem tem acesso à conversa vê a mesma marca.
+2. `PUT /api/inbox/messages/:id/favorite` é da R3 (`inbox:reply` + `visibleConversation`, auditoria sem texto, bloqueada em personificação); o
+   teto de favoritas do escopo é aviso de tela (a limpeza é quem rebaixa), não recusa.
+3. **Aviso da conversa vazia sem coluna nova:** a thread vazia com `conversation.last_message_at` não nulo mostra "Mensagens antigas removidas pela
+   política de retenção" (sem números). A R2 garante o item 5 acima para isso valer.
+4. A tela do `/admin` lê e grava `retention_policy` (por `(tenant_id, channel_type)`, `updated_by` = quem ajustou) e lê `message_retention_state` com
+   `readRunResult`; os campos da linha têm teto `RETENTION_LIMIT_MAX` no Zod; `NULL` no campo da tela é "herda" (mostre o `plan.sources`: "padrão do
+   sistema" × "fixado"). A parte do `/admin` **depende da R2** (prévia e rotas `/api/admin/retention/*` ficam com a R2, que é quem tem o serviço); a
+   estrela e o aviso não dependem.
+
+**LGPD:** as colunas novas não são dado pessoal do titular. `favorited_by` aponta para uma conta: a anonimização (`detachUserFromInbox`) a zera,
+mantendo a estrela, como faz com `sender_user_id` (teste em `tests/db/inbox-lgpd.test.ts`); a exportação do titular não ganhou campo (a favorita é
+marca da equipe, não do cliente). `retention_policy` e `message_retention_state` saem com a organização (`cascade`). `lgpd.md` tem a linha nova;
+a linha das mensagens continua "sem prazo automático" até a R2.
+
+**Testes:** `src/lib/inbox/retention-policy.test.ts` (a matriz da precedência: `0` nunca apaga, ausência nunca apaga, desligado nunca apaga, o piso vence,
+valor torto, `.env` por tipo de canal, resultado da execução) e as validações novas de `src/lib/env.test.ts`; `tests/db/retention-schema.test.ts`
+(padrões das colunas novas, `CHECK` da favorita e das três dimensões, unicidade, `set null`, `cascade`, índices, e o isolamento: o tenant e o `bizu_app`
+cru não leem, não gravam nem alteram as duas tabelas; a plataforma sim); `tests/db/rls.test.ts` (as duas tabelas no inventário das só-da-plataforma).
+
+**Decisões da R1 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R1-1 | Como a tela sabe que a conversa teve mensagens removidas | Sem coluna: conversa sem mensagem e com `last_message_at` (como na origem). Aviso só na conversa **esvaziada**; a parcialmente podada não tem aviso | `conversation.retention_purged_at`, que também avisaria a parcialmente podada |
+| R1-2 | Escopo de `max_messages` e `max_favorites` | A organização inteira, por tipo de canal (leitura de C-3 e da origem), não por conversa | Por conversa (o índice parcial das favoritas, por conversa, também serviria) |
+| R1-3 | Piso | Nunca abaixo de 24 h, como na origem; o `.env` abaixo disso **derruba a subida** (padrão 72) | Aceitar e levantar em silêncio para 24 |
+| R1-4 | Variável torta no `.env` | Derruba a subida (convenção do projeto), em vez de virar "sem limite" com aviso, como na origem | O comportamento da origem |
+| R1-5 | Última execução | Uma linha por escopo (`message_retention_state`), não um singleton, e sem `running_since` (o `singletonKey` do job basta) | Singleton do deploy inteiro, como na origem |
+| R1-6 | Índices além dos da SPEC | `message_tenant_created_idx` e `message_favorited_by_idx`, e o `CHECK` do carimbo da favorita | Só os da SPEC (a varredura passa a depender dos índices de conversa) |
+| R1-7 | `channel_type` | Sem `CHECK` no banco (como `channel.type`): tipo novo não pede migration | `CHECK … in ('whatsapp_cloud','whatsapp_qr')` |
+| R1-8 | Tetos de cada limite | Só no `.env` e na rota do `/admin` (`RETENTION_LIMIT_MAX`: 10.000.000, 3650 e 1.000.000); o banco só exige `>= 0` | Teto também em `CHECK` |
+| R1-9 | Anonimizar a conta | Zera `favorited_by`, mantém a estrela | Deixar o id da conta anonimizada |
+| R1-10 | Compose | Limites sem padrão no `compose.prod.yml` (só o `.env.prod.example` traz 5000/90/200); `ENABLED` padrão `false` | Padrões também no compose |
 
 ---
 
@@ -1235,7 +1357,7 @@ Comparação com a SPEC 059 da origem.
 | 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
 | 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
 | 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
-| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada |
+| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1 implementada** (schema e precedência); R2 (limpeza) e R3 (estrela, aviso e tela) pendentes: **até a R2 nada apaga mensagem** |
 | 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe |
 
 Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
@@ -1246,7 +1368,7 @@ Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run 
 Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
 proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
 que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
-de telefone pelo pedido: o que foi feito") e F1-1 a F1-5 do perfil (em "F1: o que foi feito").
+de telefone pelo pedido: o que foi feito"), F1-1 a F1-5 do perfil (em "F1: o que foi feito") e R1-1 a R1-10 da retenção (em "R1: o que foi feito").
 
 **Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
 

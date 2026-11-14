@@ -508,9 +508,19 @@ cascata com o arquivo órfão.
   confirmado, e o número que a pessoa troca em `/portal/conta`, ou declara no cadastro, fica pendente até ser confirmado
   (`tech/28`, "Telefone verificado e único"). A regra de não exportar nem apagar pelo vínculo com `user` continua.
 - **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
-  `maintenance.prune`. Conversas e mensagens não têm prazo automático (o PRD deixa a retenção automática fora do
-  escopo): ficam enquanto o owner as mantiver, e saem com o cliente, a pessoa ou a organização. **Decisão pendente do
-  proprietário** se quiser um prazo (`lgpd.md`).
+  `maintenance.prune`. Conversas e mensagens **ainda não** têm prazo automático: ficam enquanto o owner as mantiver, e saem
+  com o cliente, a pessoa ou a organização (`lgpd.md`). O bloco R da pré-produção (`docs/specs/pre-producao/spec.md`) muda
+  isso em três fases; **a R1 está feita e só entrega schema, variáveis e a precedência**:
+  - `message.is_favorite`, `favorited_at`, `favorited_by` (a favorita é da conversa, não de quem marcou; a anonimização da conta
+    zera só o autor), `retention_policy` e `message_retention_state` (só o proprietário da plataforma; `tech/07`).
+  - `src/lib/inbox/retention-policy.ts` (puro): linha da política, depois padrão do `.env` do tipo de canal, depois sem
+    limite; `0` é sem limite e `NULL` herda; retenção desligada, valor torto ou tipo sem variável **nunca apaga**; o piso de
+    idade (`MESSAGE_RETENTION_MIN_AGE_HOURS`, nunca abaixo de 24 h) vale nas três fases. `planRetention` devolve `run` (o que
+    uma limpeza pode aplicar, tudo nulo com a retenção desligada) e `retentionCutoffs` os instantes do piso e da idade.
+  - A conversa esvaziada **não ganha coluna**: o aviso "Mensagens antigas removidas pela política de retenção" nasce de a conversa
+    ter `last_message_at` e nenhuma mensagem. Por isso a limpeza (R2) **não pode** zerar `last_message_at`, `last_inbound_at`
+    (âncora da janela de 24 h) nem `last_message_direction`; só `last_message_preview`, que guarda o texto da última mensagem.
+  - O contrato inteiro para a R2 e a R3 está na SPEC, em "R1: o que foi feito".
 
 ## Testes
 

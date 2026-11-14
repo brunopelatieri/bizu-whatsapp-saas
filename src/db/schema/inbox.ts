@@ -1,16 +1,19 @@
 import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
+  boolean,
   check,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { channelTypes } from "../../lib/channels/types";
 import {
   chatContactOrigins,
   chatIdentityKinds,
@@ -22,7 +25,7 @@ import {
   messageTypes,
   PREVIEW_MAX,
 } from "../../lib/inbox/constants";
-import { scopedPolicy } from "../tenant-policy";
+import { platformOnlyPolicy, scopedPolicy } from "../tenant-policy";
 import { user } from "./auth";
 import { channel } from "./channels";
 import { customer } from "./customer";
@@ -223,6 +226,13 @@ export const message = pgTable(
     errorMessage: text("error_message"),
     /** Hora informada pelo provedor. */
     providerTimestamp: timestamptz("provider_timestamp"),
+    /**
+     * Favorita (bloco R): a limpeza por idade e por contagem não a leva. É da conversa, não de
+     * quem marcou: `favorited_by` só diz quem marcou (auditoria) e vira nulo se a conta sair.
+     */
+    isFavorite: boolean("is_favorite").notNull().default(false),
+    favoritedAt: timestamptz("favorited_at"),
+    favoritedBy: uuid("favorited_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: updatedAt(),
   },
@@ -239,6 +249,21 @@ export const message = pgTable(
       table.createdAt.desc(),
       table.id.desc(),
     ),
+    // Só as favoritas: o tamanho é o do conjunto de favoritas, não o da tabela (limpeza, bloco R).
+    index("message_favorite_idx")
+      .on(table.conversationId, table.createdAt)
+      .where(sql`${table.isFavorite}`),
+    // `set null` da conta que favoritou consulta por esta coluna.
+    index("message_favorited_by_idx")
+      .on(table.favoritedBy)
+      .where(sql`${table.favoritedBy} is not null`),
+    // A limpeza varre por escopo (organização e tipo de canal) e por idade (bloco R).
+    index("message_tenant_created_idx").on(table.tenantId, table.createdAt),
+    // Favorita e seus carimbos andam juntos: ou tudo ou nada.
+    check(
+      "message_favorite_stamp",
+      sql`${table.isFavorite} or (${table.favoritedAt} is null and ${table.favoritedBy} is null)`,
+    ),
     // Varredura de `queued` sem resposta (`inbox.sweep`).
     index("message_queued_idx")
       .on(table.createdAt)
@@ -251,5 +276,78 @@ export const message = pgTable(
       .on(table.replyToMessageId)
       .where(sql`${table.replyToMessageId} is not null`),
     scopedPolicy(),
+  ],
+).enableRLS();
+
+/**
+ * Política de retenção de mensagens por organização e tipo de canal (bloco R, SPEC `pre-producao`).
+ * Só o proprietário da plataforma lê e grava (`platformOnlyPolicy()`): `withTenant` e o `bizu_app`
+ * cru leem vazio, e o owner nunca a alcança. Tem `tenant_id`, mas a política não é de tenant: é dado
+ * da plataforma **sobre** o tenant (mesmo desenho de `organization_tag`).
+ *
+ * `NULL` herda o padrão do `.env`; `0` é "sem limite" explícito; ausência de linha herda tudo. A
+ * precedência mora em `src/lib/inbox/retention-policy.ts`. `channel_type` é o tipo, não o canal:
+ * a política não morre com a instância pareada.
+ */
+export const retentionPolicy = pgTable(
+  "retention_policy",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    channelType: text("channel_type", { enum: channelTypes }).notNull(),
+    /** Teto de mensagens do escopo (organização e tipo de canal). */
+    maxMessages: integer("max_messages"),
+    /** Idade máxima, em dias. */
+    retentionDays: integer("retention_days"),
+    /** Teto de favoritas do escopo; as mais antigas acima dele perdem a estrela. */
+    maxFavorites: integer("max_favorites"),
+    updatedBy: uuid("updated_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.channelType] }),
+    check(
+      "retention_policy_max_messages_nonneg",
+      sql`${table.maxMessages} is null or ${table.maxMessages} >= 0`,
+    ),
+    check(
+      "retention_policy_retention_days_nonneg",
+      sql`${table.retentionDays} is null or ${table.retentionDays} >= 0`,
+    ),
+    check(
+      "retention_policy_max_favorites_nonneg",
+      sql`${table.maxFavorites} is null or ${table.maxFavorites} >= 0`,
+    ),
+    platformOnlyPolicy(),
+  ],
+).enableRLS();
+
+/**
+ * Última execução da limpeza por escopo: só `last_run_at` e `last_result`, não um log nem um claim
+ * (o `singletonKey` do job já impede duas execuções). `tenant_id` nulo é o escopo da plataforma
+ * (conversas sem tenant), que usa só os padrões do `.env`. Mesmo isolamento de `retention_policy`.
+ */
+export const messageRetentionState = pgTable(
+  "message_retention_state",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
+    channelType: text("channel_type", { enum: channelTypes }).notNull(),
+    lastRunAt: timestamptz("last_run_at"),
+    /** Contagens do último ciclo (nunca texto de mensagem): ver `RetentionRunResult` (R2). */
+    lastResult: jsonb("last_result").$type<Record<string, unknown>>().notNull().default({}),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex("message_retention_state_tenant_idx")
+      .on(table.tenantId, table.channelType)
+      .where(sql`${table.tenantId} is not null`),
+    uniqueIndex("message_retention_state_platform_idx")
+      .on(table.channelType)
+      .where(sql`${table.tenantId} is null`),
+    check("message_retention_state_result_object", sql`jsonb_typeof(${table.lastResult}) = 'object'`),
+    platformOnlyPolicy(),
   ],
 ).enableRLS();

@@ -177,7 +177,8 @@ export function purgeTenantInbox(tx: Tx, tenantId: string): Promise<InboxPurge> 
 
 /**
  * Anonimização de `user`. Como atendente: as mensagens que enviou ficam sem autor (e os anexos,
- * sem `created_by`) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila
+ * sem `created_by`), as que favoritou perdem só quem marcou (`favorited_by`; a estrela fica, é da
+ * conversa) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila
  * por `releaseAssignments`). Como contato: só perde o vínculo, no tenant e na plataforma (SPEC). O
  * vínculo com `user` nasce do telefone que a pessoa declarou, sem verificação: apagar ou exportar
  * conversas por ele entregaria a quem declarou o número de outro as mensagens desse outro.
@@ -188,6 +189,7 @@ export async function detachUserFromInbox(tx: Tx, userId: string): Promise<void>
     .set({ userId: null, updatedAt: sql`now()` })
     .where(eq(chatContact.userId, userId));
   await tx.update(message).set({ senderUserId: null }).where(eq(message.senderUserId, userId));
+  await tx.update(message).set({ favoritedBy: null }).where(eq(message.favoritedBy, userId));
   await tx
     .update(file)
     .set({ createdBy: null })
