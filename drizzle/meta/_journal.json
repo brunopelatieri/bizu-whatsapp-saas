@@ -281,6 +281,13 @@
       "when": 1794631450822,
       "tag": "0039_retencao_mensagens",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794665944622,
+      "tag": "0040_telefone_claim",
+      "breakpoints": true
     }
   ]
 }

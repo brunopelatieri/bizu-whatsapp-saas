@@ -227,6 +227,16 @@ usada no cadastro, respondia 403 `EMAIL_NOT_VERIFIED` se a conta era nova e 401 
 Corrigido com `hideUnverified` (`src/api/auth-ext.ts`), o mesmo do portal, que devolve o 401 do
 Better Auth byte a byte. A tela de login passou a oferecer o reenvio sempre, sem depender do erro.
 
+### RISK-014 — Autocadastro do portal ainda deixa inferir que o número é de um cliente (risco residual)
+
+Com o `claim` (D-1, `tech/28-crm-cadastro.md`), o autocadastro com o número de uma ficha que já existe aparece no portal
+como uma ficha pendente comum. Sobram dois sinais indiretos para quem se cadastra com o número de outra pessoa: numa
+organização só com canal QR Code, o pedido fica "aguardando liberação" na hora (o `claim` só sai pela Cloud), enquanto
+o autocadastro comum mostra "link enviado"; e a organização some do painel quando o `claim` vence
+(`PHONE_VERIFICATION_TTL_MINUTES`). Cada tentativa custa um e-mail novo confirmado. Antes do `claim` o mesmo fato vazava
+na hora (a ficha não nascia). Fechar de vez exigiria mostrar um estado falso ("link enviado" sem link) ou manter o
+pedido além do prazo; nenhum dos dois foi feito.
+
 ### RISK-007 — Pré-sequestro no autocadastro do portal (risco aceito)
 
 É o RISK-006 no portal, só em tenant com `portal_self_signup` ligado. Quem cadastra o e-mail de

@@ -23,7 +23,7 @@ export type PhoneRelease = {
    * `signup`: o número do cadastro. `change`: a troca de número pedida; `phone` é então o número
    * NOVO, e o cadastro segue com o antigo até a liberação ou o link.
    */
-  purpose: "signup" | "change";
+  purpose: "signup" | "change" | "claim";
   phone: string;
   name: string;
   createdAt: string;
@@ -81,6 +81,8 @@ export function releaseErrorMessage(error: unknown) {
       return "Outra conta já confirmou este número. A liberação à mão não prova que ele é desta pessoa, por isso não tira o número de quem já o tem.";
     case "PLATFORM_ONLY":
       return "Esta conta responde só à plataforma: o telefone dela não é liberado por uma organização. O pedido foi encaminhado ao proprietário da plataforma.";
+    case "CLAIM_LINK_ONLY":
+      return "Este número já é de outra ficha: só o link enviado ao número confirma. A liberação à mão não apaga a ficha de ninguém.";
     case "VERIFICATION_STALE":
       return "Este pedido não vale mais: o telefone ou a equipe mudou. A lista foi atualizada.";
     default:

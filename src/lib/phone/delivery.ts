@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
 import { type Scope, type Tx, withPlatformScope } from "@/db/rls";
-import { channel, customer, phoneVerification, user } from "@/db/schema";
+import { channel, customer, phoneVerification, portalUser, user } from "@/db/schema";
 import type { PhoneVerifyJob } from "@/jobs/queues";
 import { appLink } from "@/lib/auth/links";
 import { findModule } from "@/lib/channels/registry";
@@ -126,6 +126,20 @@ export class VerificationScopeError extends Error {
   }
 }
 
+/**
+ * O `claim` (D-1) apaga a ficha de quem tinha o número: o link só sai por modelo (Cloud), que só o
+ * dono do número lê. Decisão do proprietário de 2026-11-14 (CL-3): em texto livre (QR Code) o link
+ * fica no celular do canal, e quem opera aquele celular se cadastraria no portal com o número de um
+ * cliente e confirmaria na própria sessão. Vale na escolha dos candidatos, na tentativa e na função
+ * que envia (reenvio e falha assíncrona incluídos).
+ */
+export class ClaimDeliveryError extends Error {
+  constructor() {
+    super("O link de um claim só sai por modelo de mensagem.");
+    this.name = "ClaimDeliveryError";
+  }
+}
+
 /** Pedido da plataforma só por canal da plataforma; de organização, só por canal dela. */
 function assertSameScope(request: { tenantId: string | null }, target: { tenantId: string | null }) {
   if ((target.tenantId ?? null) !== (request.tenantId ?? null)) throw new VerificationScopeError();
@@ -179,6 +193,9 @@ async function candidatesFor(tx: Tx, request: Request) {
 
   return rows
     .filter((row) => (row.tenantId ?? null) === (request.tenantId ?? null))
+    // `claim`: só o canal cujo módulo leva o link por modelo (`verificationDelivery`); sem ele, o
+    // padrão é texto livre (CL-3).
+    .filter((row) => request.purpose !== "claim" || Boolean(findModule(row.type)?.verificationDelivery))
     .sort(
       (a, b) =>
         order.indexOf(a.type) - order.indexOf(b.type) ||
@@ -307,6 +324,18 @@ async function plan(job: PhoneVerifyJob, now: Date): Promise<Plan> {
       if (!record?.portalUserId) return { kind: "go", request, candidates: [] };
     }
 
+    // O `claim` (D-1) só se confirma na sessão do portal de quem se cadastrou: se a conta sumiu, o
+    // link não serviria a ninguém.
+    if (request.purpose === "claim") {
+      const [person] = request.requestedById
+        ? await tx
+            .select({ id: portalUser.id })
+            .from(portalUser)
+            .where(eq(portalUser.id, request.requestedById))
+        : [];
+      if (!person) return { kind: "go", request, candidates: [] };
+    }
+
     const candidates = startingAt(await candidatesFor(tx, request), request.channelId, job.reason);
     return { kind: "go", request, candidates };
   });
@@ -325,12 +354,13 @@ async function deliveryOf(scope: Scope, target: ChannelRow): Promise<Verificatio
  * qualquer chamada, e o envio do canal confere de novo pelo escopo (`requireChannelRow`).
  */
 export async function sendVerificationMessage(
-  request: { tenantId: string | null; phoneNormalized: string },
+  request: { tenantId: string | null; phoneNormalized: string; purpose?: Request["purpose"] },
   target: { id: string; tenantId: string | null },
   delivery: Exclude<VerificationDelivery, { kind: "unavailable" }>,
   token: string,
 ) {
   assertSameScope(request, target);
+  if (request.purpose === "claim" && delivery.kind !== "template") throw new ClaimDeliveryError();
   const scope = scopeOfTenant(request.tenantId);
   const to = request.phoneNormalized;
 
@@ -368,6 +398,11 @@ async function tryChannel(request: Request, target: ChannelRow, now: Date): Prom
   }
   if (delivery.kind === "unavailable") {
     await recordAttempt(request.id, { ...base, outcome: "skipped", error: delivery.reason });
+    return "skipped";
+  }
+  // `claim`: só por modelo (CL-3, `ClaimDeliveryError`), conferido de novo aqui e na função que envia.
+  if (request.purpose === "claim" && delivery.kind !== "template") {
+    await recordAttempt(request.id, { ...base, outcome: "skipped", error: "claim só por modelo" });
     return "skipped";
   }
 
@@ -408,11 +443,14 @@ async function fallToManual(requestId: string, now: Date): Promise<DeliveryOutco
     const request = await lockRequest(tx, requestId);
     if (!request) return null;
 
+    // O `claim` não se libera à mão (sem prova de posse não se apaga a ficha de ninguém): não há o
+    // que avisar ao owner.
     const inQueue =
-      request.tenantId !== null ||
+      request.purpose !== "claim" &&
+      (request.tenantId !== null ||
       request.subjectType === "customer" ||
       request.purpose === "change" ||
-      (await answersToPlatform(tx, request.subjectId));
+      (await answersToPlatform(tx, request.subjectId)));
     const notify = inQueue && request.manualNotifiedAt === null;
 
     await tx

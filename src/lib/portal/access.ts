@@ -215,7 +215,11 @@ export async function ensurePortalUser(email: string, name: string, phone: strin
   return row.id;
 }
 
-/** Sem cliente em nenhum tenant, a identidade é só dado pessoal parado. */
+/**
+ * Sem cliente em nenhum tenant, a identidade é só dado pessoal parado. A conta que espera a
+ * confirmação de um `claim` (autocadastro com o número de outra ficha, D-1) ainda não tem ficha, mas
+ * não é órfã: é ela que vai confirmar o link.
+ */
 export function dropOrphanPortalUser(portalUserId: string) {
   return withPlatformScope("portal: remove identidade sem cliente", (tx) =>
     tx
@@ -224,6 +228,7 @@ export function dropOrphanPortalUser(portalUserId: string) {
         and(
           eq(portalUser.id, portalUserId),
           sql`not exists (select 1 from ${customer} where ${customer.portalUserId} = ${portalUser.id})`,
+          sql`not exists (select 1 from phone_verification pv where pv.purpose = 'claim' and pv.status in ('sent', 'awaiting_manual') and pv.requested_by_type = 'portal_user' and pv.requested_by_id = ${portalUser.id})`,
         ),
       ),
   );

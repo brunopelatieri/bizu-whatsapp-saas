@@ -39,10 +39,20 @@ export type PhoneVerificationSubject = (typeof phoneVerificationSubjects)[number
  * Para que serve o pedido: `signup` confirma o número que o cadastro **tem** (cadastro, convite,
  * autocadastro, número que caiu); `change` é a troca de número, e o número do pedido é o **novo**:
  * o cadastro mantém o antigo, e a confirmação que ele tinha, até o pedido ser confirmado
- * (`src/lib/phone/requests.ts`). `claim` (P3, D-1) ainda não existe.
+ * (`src/lib/phone/requests.ts`). `claim` (P3, D-1) é o autocadastro do portal com o número de um
+ * cliente que já existe: a ficha nova ainda não existe (`subject_id` é o id que ela vai ganhar), os
+ * dados dela ficam em `payload`, e o link só confirma na sessão do portal de quem se cadastrou
+ * (`src/lib/phone/claim.ts`).
  */
-export const phoneVerificationPurposes = ["signup", "change"] as const;
+export const phoneVerificationPurposes = ["signup", "change", "claim"] as const;
 export type PhoneVerificationPurpose = (typeof phoneVerificationPurposes)[number];
+
+/**
+ * Os dados validados da ficha que nasce quando o `claim` é confirmado. Dado pessoal: vive só
+ * enquanto o pedido está aberto (`CHECK` `phone_verification_payload_open_claim`), nunca vai a log,
+ * auditoria nem payload de job.
+ */
+export type PhoneClaimPayload = { name: string; email: string };
 
 /** Quem pediu a troca: a própria conta da equipe (ou alguém da equipe), ou a pessoa do portal. */
 export const phoneRequesterTypes = ["user", "portal_user"] as const;

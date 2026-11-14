@@ -169,6 +169,9 @@ inteiro, só os 4 últimos dígitos (`tech/28-crm-cadastro.md`).
   responsável. Pede que o número seja conferido por outro meio antes da liberação.
 - `phone-number-claimed`: outra conta confirmou pelo link o número que esta conta tinha
   confirmado (celular troca de dono); a conta voltou a pendente.
+- `customer-deleted-by-phone-claim` (D-1, `claim`): alguém se autocadastrou no portal com o número de uma ficha e
+  confirmou pelo link; a ficha antiga foi apagada com as conversas. Vai aos owners da organização, com os 4 últimos
+  dígitos e o link da ficha nova, sem o nome da ficha apagada.
 
 ## Templates do `/admin` (admin-crud)
 

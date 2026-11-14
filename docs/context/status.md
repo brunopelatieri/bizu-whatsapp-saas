@@ -41,7 +41,7 @@
   um link por número, reenvio com limite, modelo de verificação da Cloud com a URL conferida,
   página `/verificar-telefone`, confirmação do lead do portal, e-mails ao responsável e a quem
   perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficou de fora da T2b e
-  segue pendente o `claim` do portal (D-1). **Troca de telefone pelo pedido** implementada no servidor
+  o `claim` do portal (D-1), feito em 2026-11-14 (migration `0040`; a equipe não pede `claim`, decisão do proprietário). **Troca de telefone pelo pedido** implementada no servidor
   (`…/phone-change` na equipe, no portal e na ficha pela equipe; `PATCH` e `/admin` passam pelo pedido; o
   cadastro mantém o número antigo até a confirmação; migration `0038`), com as decisões TC-1 a TC-10 a
   confirmar (as telas entraram na F2). **F1 do bloco F** implementada (API do perfil:
@@ -70,8 +70,8 @@
   confirmar pelo proprietário (SPEC, "T3: o que foi feito"). **T4 parcial**: telas das filas
   de liberação em `/admin/usuarios` (aba "Telefones", só o proprietário), `/app/equipe` e `/app/clientes`, modelo de
   verificação na tela do canal Cloud (a leitura do canal traz `verificationTemplate`) e acertos de texto da tela da
-  T3; roteiro manual com número real na SPEC. Pendentes: `claim` e ligação da ficha à equipe (SPEC, "T4: o que foi feito"; a
-  tela da troca de telefone saiu na F2). Os blocos S, B, T, F, E, L e R
+  T3; roteiro manual com número real na SPEC. A ligação manual da ficha à equipe e o `claim` do portal saíram em 2026-11-14
+  (decisões TL e CL na SPEC); o `claim` pela equipe não será feito nesta forma (a tela da troca de telefone saiu na F2). Os blocos S, B, T, F, E, L e R
   seguram o deploy.
 
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09

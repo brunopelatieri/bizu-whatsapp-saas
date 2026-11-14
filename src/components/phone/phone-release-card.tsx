@@ -138,6 +138,8 @@ function PhoneReleaseView({
                           <span className="truncate">{item.name}</span>
                           {item.purpose === "change" ? (
                             <Badge variant="outline">Troca de número</Badge>
+                          ) : item.purpose === "claim" ? (
+                            <Badge variant="outline">Número de outra ficha</Badge>
                           ) : null}
                         </p>
                         <p className="text-sm text-muted-foreground">
@@ -145,6 +147,15 @@ function PhoneReleaseView({
                           <span className="break-all">{item.phone}</span> · pedido em{" "}
                           {formatWhen(item.createdAt)}
                         </p>
+                        {item.purpose === "claim" ? (
+                          <p className="text-xs text-muted-foreground">
+                            Autocadastro no portal com o número de uma ficha que já existe. Só o link
+                            enviado ao número pelo WhatsApp oficial (Cloud) confirma: confirmado, a ficha
+                            antiga é apagada com as conversas. Não há liberação à mão. Sem número oficial
+                            apto, o pedido vence sem efeito; se a pessoa é a mesma da ficha que já existe,
+                            envie a ela o acesso ao portal por aquela ficha, o que preserva o histórico.
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <Badge
@@ -152,17 +163,19 @@ function PhoneReleaseView({
                         >
                           {STATUS_LABEL[item.status]}
                         </Badge>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={pending}
-                          onClick={() => {
-                            setSelected(item);
-                            setOpen(true);
-                          }}
-                        >
-                          Liberar
-                        </Button>
+                        {item.purpose === "claim" ? null : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={pending}
+                            onClick={() => {
+                              setSelected(item);
+                              setOpen(true);
+                            }}
+                          >
+                            Liberar
+                          </Button>
+                        )}
                       </div>
                     </li>
                   ))}

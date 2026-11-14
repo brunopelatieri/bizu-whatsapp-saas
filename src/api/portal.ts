@@ -72,6 +72,7 @@ import { phoneValues } from "@/lib/phone/columns";
 import { requestPhoneVerificationSend, sendLimitReached } from "@/lib/phone/dispatch";
 import {
   confirmPhoneVerificationByToken,
+  portalClaimTenants,
   portalPhoneOverview,
   portalResendTarget,
   portalTokenSubject,
@@ -309,6 +310,20 @@ portalRoutes.get("/api/portal/me", authRateLimit, requirePortalAuth, async (c) =
   const { id, name, email, phone, phoneNormalized } = c.get("portalUser");
   const session = c.get("portalSession");
   const tenants = await listPortalTenants(id);
+  // O `claim` aberto (D-1) aparece como a organização de um lead (sem acesso ainda), igual ao
+  // autocadastro comum: a lista não revela que o número já tinha cadastro.
+  for (const claim of await portalClaimTenants(id)) {
+    if (!tenants.some((tenant) => tenant.id === claim.tenantId)) {
+      tenants.push({
+        id: claim.tenantId,
+        slug: claim.slug,
+        name: claim.name,
+        // A ficha que o `claim` vai virar nasce `lead`, como no autocadastro comum.
+        status: "lead",
+        available: false,
+      });
+    }
+  }
   const available = tenants.filter((tenant) => tenant.available);
 
   let active =

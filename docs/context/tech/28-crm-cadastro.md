@@ -260,7 +260,8 @@ pelos canais e a página `/verificar-telefone`; a T3, o bloqueio de acesso com t
   quem é da equipe.
 - **Permissão `phone:confirm`:** reservada ao owner (`tech/21`); é a das rotas de liberação
   manual da organização (seção seguinte).
-- **Ainda não existe (T4, troca com pedido e `claim`):** a troca de telefone que
+- **Ainda não existe (T4, troca com pedido):** o `claim` do portal existe desde 2026-11-14 (seção "Telefone que já
+  existe"); a troca de telefone que
   mantém o número antigo até a confirmação (`POST …/phone-change`; hoje a equipe troca direto e o
   cliente do portal volta a pendente, com link para o número novo), o `claim` do portal (D-1), as
   telas das filas e do modelo de verificação, o selo e o filtro na tela. Ligar a ficha à mão existe desde
@@ -647,6 +648,40 @@ Só tela, sobre as rotas acima: `PhoneChangeSection` (`src/components/phone/phon
 (`src/components/app/customers/customer-phone-change-card.tsx`). A "Confirme seu WhatsApp" da equipe deixou de mandar
 falar com a plataforma. As filas (`phone-release-card.tsx`) distinguem `purpose = change` ("Troca de número", "Número
 novo", "Liberar a troca"). Decisões F2-1 a F2-8 a confirmar na SPEC ("F2 e telas da troca: o que foi feito").
+
+## Telefone que já existe: `claim` do portal (pré-produção, P3, D-1)
+
+Código: `src/lib/phone/claim.ts` (efeito da confirmação), `openPortalClaim`, `deletePortalClaimsOf` e os ganchos em
+`src/lib/phone/requests.ts`, `confirmPortalSignup` (`src/lib/portal/login.ts`), `src/lib/phone/gate.ts` (portão),
+`src/lib/phone/delivery.ts` (envio). Migration `0040_telefone_claim`. Decisões CL-1 a CL-12 na SPEC.
+
+- **Só o autocadastro do portal abre `claim`** (decisão do proprietário de 2026-11-14): a equipe em `/app/clientes`
+  continua com 409 `PHONE_IN_USE` (com `customerId`, e `name` para quem lê clientes), sem pedido e sem exclusão; o
+  diálogo de cadastro diz que ela pode trocar o número da ficha existente pelo pedido de troca ou excluí-la, com o
+  link da ficha. A importação (bloco I, ainda não existe) marcará a linha como `duplicate`.
+- **Abertura:** no `confirmPortalSignup`, se nenhuma ficha da organização tem o e-mail e uma ficha tem o número (de
+  outra conta), abre o pedido `purpose = claim` (`subject_type = customer`, `subject_id` = o id que a ficha nova vai
+  ganhar, `requested_by = portal_user`, `payload { name, email }`) em vez de criar a ficha. A resposta é a de sempre;
+  o painel do portal e o portão tratam o `claim` como a ficha pendente que ele vai virar (`portalPhoneOverview`,
+  `portalPhoneGatePasses`), e o reenvio do portal acha o `claim` (`portalResendTarget`).
+- **Confirmação:** só na sessão do portal de quem se cadastrou (`portalTokenSubject` procura o token entre os `claim`
+  da própria pessoa). Trava a ficha que tem o número (`lockForConfirmation`), apaga-a por `deleteCustomerIn` e cria a
+  nova (`lead`, `whatsapp`, ligada à conta do portal), tudo numa transação; depois do commit, os objetos e a conta
+  órfã do portal da ficha antiga saem, e os owners recebem `customer-deleted-by-phone-claim`. Auditoria
+  `customer.deleted_by_phone_claim` (alvo: a ficha antiga; `metadata { newCustomerId, phoneHint }`), `customer.deleted`
+  (`via: phone_claim`), `portal.signed_up` e `phone.claim_requested` na abertura. O `claim` não serve mais (400 de
+  sempre) se a pessoa sumiu, trocou de e-mail ou já tem ficha na organização: nunca apaga a ficha dela mesma.
+- **A liberação à mão nunca fecha `claim`** (409 `CLAIM_LINK_ONLY`). A fila de clientes (`phone-release-card.tsx`)
+  mostra "Número de outra ficha", sem "Liberar"; o owner não recebe o e-mail de liberação (`fallToManual`).
+- **O link só sai pela Cloud (decisão do proprietário, CL-3):** o QR Code não entra nos candidatos do `claim` (só módulo
+  com `verificationDelivery`), e a tentativa e `sendVerificationMessage` conferem de novo (`ClaimDeliveryError`); vale
+  no reenvio e depois do `failed` da Cloud, que cai na fila. Quem opera o celular do canal leria o link. Sem a conta do
+  portal que pediu, o link não sai. Em organização sem Cloud, a equipe convida ao portal a ficha que já existe (preserva
+  o histórico); a fila diz isso no item do `claim`. Risco residual de enumeração: RISK-014 (`tech/16-bugs-riscos.md`).
+- **Vida:** um `claim` aberto por pessoa do portal e organização (pedir de novo substitui). Sem link válido há mais de
+  `PHONE_VERIFICATION_TTL_MINUTES`, o `maintenance.prune` o encerra, e o `payload` some (o `CHECK` só aceita `payload`
+  no `claim` aberto). A exclusão da conta do portal apaga os `claim` dela; a manutenção encerra o de conta que sumiu.
+- **Testes:** `tests/db/phone-claim.test.ts`.
 
 ## O que a SPEC pede e ainda não existe
 

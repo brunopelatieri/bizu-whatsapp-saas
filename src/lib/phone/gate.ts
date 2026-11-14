@@ -7,7 +7,7 @@ import {
   userPhoneConfirmedGlobally,
   userPhoneConfirmedIn,
 } from "@/lib/phone/confirmed";
-import { confirmableRecord } from "@/lib/phone/requests";
+import { confirmableRecord, openClaimTenants } from "@/lib/phone/requests";
 import { isOwnerOrPlatformStaff } from "@/lib/phone/uniqueness";
 
 /**
@@ -78,10 +78,20 @@ export function portalPhoneGatePasses(portalUserId: string, activeTenantId: stri
       .innerJoin(organization, eq(organization.id, customer.tenantId))
       .where(and(eq(customer.portalUserId, portalUserId), confirmableRecord));
 
-    if (records.length === 0) return true;
-
+    // A ficha da organização em uso decide sozinha (o caso comum, sem consulta a mais).
     const current = records.find(({ tenantId }) => tenantId === activeTenantId);
     if (current) return current.confirmed;
+
+    // O `claim` aberto (D-1) conta como a ficha pendente que ele vai virar: o autocadastro com o
+    // número de outra ficha fica na mesma tela do autocadastro comum (resposta neutra).
+    for (const claim of await openClaimTenants(tx, portalUserId)) {
+      if (claim.tenantId === activeTenantId) return false;
+      if (!records.some(({ tenantId }) => tenantId === claim.tenantId)) {
+        records.push({ tenantId: claim.tenantId, confirmed: false });
+      }
+    }
+
+    if (records.length === 0) return true;
 
     return records.some(({ confirmed }) => confirmed);
   });

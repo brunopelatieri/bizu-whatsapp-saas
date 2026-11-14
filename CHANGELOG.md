@@ -10,6 +10,17 @@ incompatível: leia sempre a seção **Migração** antes de atualizar um projet
 
 ### Adicionado
 
+- **Telefone que já existe: `claim` do autocadastro do portal (bloco T de `docs/specs/pre-producao/spec.md`, P3, D-1)**.
+  - O autocadastro com o número de uma ficha que já existe responde como sempre e abre o pedido `purpose = claim`, com os dados da
+    ficha nova em `payload`. **Confirmado o link na sessão do portal de quem se cadastrou, a ficha antiga é apagada** (contatos,
+    conversas, mensagens e arquivos) e a nova nasce com o número confirmado. Auditoria `customer.deleted_by_phone_claim` e e-mail
+    `customer-deleted-by-phone-claim` aos owners.
+  - Sem rota pública; a liberação à mão nunca fecha `claim` (409 `CLAIM_LINK_ONLY`); o link só sai pela Cloud, nunca pelo QR Code
+    (nem no reenvio, nem depois de uma falha); o pedido vencido é encerrado pela manutenção e o `payload` some.
+  - A equipe não pede `claim` (decisão do proprietário): continua com 409 `PHONE_IN_USE`, e o diálogo diz como trocar o número da
+    ficha existente ou excluí-la. A fila de clientes mostra o `claim` sem "Liberar".
+  - **Migração:** `0040_telefone_claim` (coluna `payload`, `purpose` com `claim`, dois `CHECK`s e um índice único parcial). Rode
+    `npm run db:migrate`.
 - **Ligar a ficha de cliente à pessoa da equipe, à mão (bloco T de `docs/specs/pre-producao/spec.md`, D-9)**.
   - `PUT /api/customers/:id/team-link` (`customer:update`, fora da personificação, auditada como `customer.team_linked` com
     `via: manual`): só pessoa da equipe desta organização (404 de outra), nunca a si mesmo (403 `SELF_LINK`), uma ficha por pessoa e

@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, type SQL, sql } from "drizzle-orm";
 import { logError } from "@/api/log";
 import { isUniqueViolation } from "@/db/errors";
@@ -15,6 +15,7 @@ import {
 import { auditInTransaction } from "@/lib/audit";
 import { getEnv } from "@/lib/env";
 import { linkUnlinkedContactToCustomer } from "@/lib/inbox/contacts";
+import { afterCustomerClaim, applyCustomerClaim, type ClaimEffects } from "@/lib/phone/claim";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
 import { notifyPhoneClaimed } from "@/lib/phone/notify";
 import { userPhoneConfirmed, userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
@@ -26,6 +27,7 @@ import {
   lockPhoneKey,
 } from "@/lib/phone/uniqueness";
 import {
+  type PhoneClaimPayload,
   type PhoneRequesterType,
   type PhoneVerificationPurpose,
   type PhoneVerificationSubject,
@@ -33,7 +35,7 @@ import {
   verifiedPhone,
 } from "@/lib/phone/verification";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
-import { linkExistingCustomer, matchingTeamMember } from "@/lib/tenant/team-customer";
+import { linkExistingCustomer, linkVerifiedTeamMember } from "@/lib/tenant/team-customer";
 
 /**
  * Pedidos de confirmação de telefone (`phone_verification`; SPEC `pre-producao`, bloco T).
@@ -94,6 +96,45 @@ const isSignup = eq(phoneVerification.purpose, "signup");
 /** Pedido de troca: o número do pedido é o novo, e o cadastro guarda o antigo até a confirmação. */
 const isChange = eq(phoneVerification.purpose, "change");
 
+/** Número que já é de outra ficha (P3, D-1): a ficha nova só nasce na confirmação pelo link. */
+const isClaim = eq(phoneVerification.purpose, "claim");
+
+/** Os `claim` abertos que esta pessoa do portal pediu (autocadastro com o número de outra ficha). */
+const openClaimsBy = (portalUserId: string) =>
+  and(
+    isClaim,
+    isOpen,
+    eq(phoneVerification.requestedByType, "portal_user"),
+    eq(phoneVerification.requestedById, portalUserId),
+  ) as SQL;
+
+/**
+ * As organizações (ativas) em que a pessoa do portal tem um `claim` aberto. O portão, o painel e
+ * `/api/portal/me` as tratam como a ficha pendente que o `claim` vai virar (resposta neutra).
+ */
+export function openClaimTenants(tx: Tx, portalUserId: string) {
+  return tx
+    .select({
+      subjectId: phoneVerification.subjectId,
+      tenantId: sql<string>`${phoneVerification.tenantId}`,
+      slug: organization.slug,
+      name: organization.name,
+      status: phoneVerification.status,
+      phoneNormalized: phoneVerification.phoneNormalized,
+    })
+    .from(phoneVerification)
+    .innerJoin(organization, eq(organization.id, phoneVerification.tenantId))
+    .where(and(openClaimsBy(portalUserId), eq(organization.status, "active")))
+    .orderBy(asc(organization.name));
+}
+
+/** `openClaimTenants` na transação própria, para a rota `/api/portal/me`. */
+export function portalClaimTenants(portalUserId: string) {
+  return withPlatformScope("telefone: claims abertos da pessoa do portal", (tx) =>
+    openClaimTenants(tx, portalUserId),
+  );
+}
+
 /**
  * A ficha de cliente que confirma o número no portal: `lead` ou `active`, de organização ativa (a
  * consulta faz o `join` com `organization`). A bloqueada e a de organização suspensa ficam de fora,
@@ -110,7 +151,8 @@ const inScope = (scope: Scope) =>
     ? eq(phoneVerification.tenantId, scope.tenantId)
     : isNull(phoneVerification.tenantId);
 
-const CLOSED = { status: "canceled", tokenHash: null, expiresAt: null } as const;
+// `payload` (dados da ficha do `claim`) só existe com o pedido aberto: encerrado, some.
+const CLOSED = { status: "canceled", tokenHash: null, expiresAt: null, payload: null } as const;
 
 /**
  * Abre o pedido do cadastro para o número que ele tem, perante um responsável. Substitui o que ele
@@ -650,7 +692,30 @@ export function portalPhoneOverview(portalUserId: string) {
           }
         : null;
 
-    return records.map((record) => {
+    // O `claim` aberto (autocadastro com o número de outra ficha, D-1) aparece como a ficha pendente
+    // que ele vai virar: a tela é a mesma do autocadastro comum, e não revela que o número já tinha
+    // cadastro. O id é o que a ficha vai ganhar.
+    const claims = await openClaimTenants(tx, portalUserId);
+    const claimRows = claims.flatMap((claim) =>
+      !records.some(({ tenantId }) => tenantId === claim.tenantId)
+        ? [
+            {
+              customerId: claim.subjectId,
+              view: {
+                responsible: "organization",
+                tenantId: claim.tenantId,
+                tenantName: claim.name,
+                status: claim.status as (typeof OPEN)[number],
+              } satisfies ResponsibleView,
+              enterable: false,
+              phoneHint: phoneHint(claim.phoneNormalized),
+              change: null as PhoneChangeView,
+            },
+          ]
+        : [],
+    );
+
+    const fromRecords = records.map((record) => {
       const request = record.request === "sent" || record.request === "awaiting_manual" ? record.request : "none";
       const view: ResponsibleView = {
         responsible: "organization",
@@ -667,6 +732,10 @@ export function portalPhoneOverview(portalUserId: string) {
         change: changeOf(record),
       };
     });
+
+    return [...fromRecords, ...claimRows].sort((a, b) =>
+      (a.view.tenantName ?? "").localeCompare(b.view.tenantName ?? ""),
+    );
   });
 }
 
@@ -693,7 +762,22 @@ export function portalTokenSubject(token: string, portalUserId: string) {
         ),
       );
 
-    return row ? ({ type: "customer", id: row.id } as const) : null;
+    if (row) return { type: "customer", id: row.id } as const;
+
+    // O `claim` (D-1): a ficha ainda não existe, e o pedido é de quem se cadastrou no portal.
+    const [claim] = await tx
+      .select({ id: phoneVerification.subjectId })
+      .from(phoneVerification)
+      .innerJoin(organization, eq(organization.id, phoneVerification.tenantId))
+      .where(
+        and(
+          eq(phoneVerification.tokenHash, hashToken(token)),
+          openClaimsBy(portalUserId),
+          eq(organization.status, "active"),
+        ),
+      );
+
+    return claim ? ({ type: "customer", id: claim.id } as const) : null;
   });
 }
 
@@ -770,7 +854,11 @@ export function portalResendTarget(
           confirmableRecord,
         ),
       );
-    if (!record) return null;
+    if (!record) {
+      // Sem ficha: o `claim` aberto da pessoa nesta organização (reenviar é o mesmo que no cadastro).
+      const claim = purpose === "change" ? undefined : await openClaimOf(tx, portalUserId, tenantId);
+      return claim ? { requestId: claim.id, customerId: claim.subjectId } : null;
+    }
 
     const requestId =
       purpose === "change"
@@ -838,7 +926,7 @@ async function demote(tx: Tx, holderIds: string[], phoneKey: string) {
   }
 }
 
-type Outcome = { demoted: string[]; global: boolean; changed?: boolean };
+type Outcome = { demoted: string[]; global: boolean; changed?: boolean; claimed?: ClaimEffects };
 
 /** As colunas de telefone que a troca grava no cadastro: as do pedido, calculadas quando ele abriu. */
 const changedPhone = (request: Request) => ({
@@ -1065,16 +1153,7 @@ async function confirmCustomerChange(
   // faria a exclusão dele levar a ficha junto (D-11). As próximas conversas do número ela atrai.
   if (proven) {
     if (!record.userId) {
-      const teamUserId = await matchingTeamMember(tx, record.tenantId, request.phoneKey);
-      if (teamUserId) {
-        await tx.update(customer).set({ userId: teamUserId }).where(eq(customer.id, record.id));
-        await auditInTransaction(tx, "customer.team_linked", {
-          actor: { id: null, type: "system" },
-          tenantId: record.tenantId,
-          target: { type: "customer", id: record.id },
-          metadata: { userId: teamUserId, via: "verified" },
-        });
-      }
+      await linkVerifiedTeamMember(tx, record.tenantId, record.id, request.phoneKey);
     }
     await linkUnlinkedContactToCustomer(tx, record.tenantId, request.phoneKey, record.id);
   }
@@ -1089,6 +1168,15 @@ async function confirmCustomer(
   confirmation: Confirmation,
 ): Promise<Outcome> {
   if (request.purpose === "change") return confirmCustomerChange(tx, request, confirmation);
+  if (request.purpose === "claim") {
+    const claimed = await applyCustomerClaim(
+      tx,
+      request,
+      confirmation.via === "whatsapp",
+      INVALID_LINK,
+    );
+    return { demoted: [], global: false, claimed };
+  }
 
   const [record] = await tx
     .select({
@@ -1131,16 +1219,7 @@ async function confirmCustomer(
   if (!proven) return { demoted: [] as string[], global: false };
 
   if (!record.userId) {
-    const teamUserId = await matchingTeamMember(tx, record.tenantId, request.phoneKey);
-    if (teamUserId) {
-      await tx.update(customer).set({ userId: teamUserId }).where(eq(customer.id, record.id));
-      await auditInTransaction(tx, "customer.team_linked", {
-        actor: { id: null, type: "system" },
-        tenantId: record.tenantId,
-        target: { type: "customer", id: record.id },
-        metadata: { userId: teamUserId, via: "verified" },
-      });
-    }
+    await linkVerifiedTeamMember(tx, record.tenantId, record.id, request.phoneKey);
   }
 
   await linkUnlinkedContactToCustomer(tx, record.tenantId, request.phoneKey, record.id);
@@ -1158,6 +1237,14 @@ async function lockForConfirmation(tx: Tx, found: Request) {
     // segurando a trava do número, e duas provas cruzadas se travariam na ordem contrária.
     await lockPhoneKey(tx, found.phoneKey);
     await lockUser(tx, found.subjectId);
+  } else if (found.purpose === "claim" && found.tenantId) {
+    // A ficha nova ainda não existe: a trava é a da ficha que tem o número agora (a que o `claim`
+    // apaga), na mesma ordem dos outros fluxos de ficha (a ficha, depois o pedido).
+    await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(and(eq(customer.tenantId, found.tenantId), eq(customer.phoneKey, found.phoneKey)))
+      .for("update");
   } else {
     await tx
       .select({ id: customer.id })
@@ -1189,6 +1276,7 @@ async function confirm(tx: Tx, request: Request, confirmation: Confirmation, now
       expiresAt: null,
       confirmedAt: now,
       confirmedBy: actorOf(confirmation),
+      payload: null,
     })
     .where(eq(phoneVerification.id, request.id));
 
@@ -1236,7 +1324,7 @@ async function confirm(tx: Tx, request: Request, confirmation: Confirmation, now
     },
   });
 
-  return { demoted: outcome.demoted, opened };
+  return { demoted: outcome.demoted, opened, claimed: outcome.claimed };
 }
 
 /** Depois do commit: o link dos pedidos que a troca de número abriu. */
@@ -1263,6 +1351,7 @@ export async function confirmPhoneVerificationByToken(
   }
 
   await sendOpened(claimed.opened, subject);
+  if (claimed.claimed) await afterCustomerClaim(claimed.claimed);
 
   // Depois do commit: quem perdeu a confirmação para quem provou o número fica sabendo. Falha
   // no aviso não desfaz a confirmação.
@@ -1304,9 +1393,9 @@ function consumeToken(token: string, subject: VerificationSubject, now: Date) {
       throw INVALID_LINK();
     }
 
-    const { demoted, opened } = await confirm(tx, locked, { via: "whatsapp" }, now);
+    const { demoted, opened, claimed } = await confirm(tx, locked, { via: "whatsapp" }, now);
 
-    return { demoted, opened, hint: phoneHint(locked.phoneNormalized) };
+    return { demoted, opened, claimed, hint: phoneHint(locked.phoneNormalized) };
   }).catch(phoneInUseOnUnique);
 }
 
@@ -1384,7 +1473,7 @@ export function listPhoneVerifications(scope: Scope, page = 1) {
   // com a plataforma quando a conta já era confirmada no sistema inteiro, e só a plataforma a fecha.
   const stillThere =
     scope.kind === "tenant"
-      ? sql`(${customer.id} is not null or exists (select 1 from member where member.user_id = ${user.id} and member.organization_id = ${scope.tenantId}))`
+      ? sql`(${customer.id} is not null or ${phoneVerification.purpose} = 'claim' or exists (select 1 from member where member.user_id = ${user.id} and member.organization_id = ${scope.tenantId}))`
       : sql`(${user.id} is not null and (
           ${phoneVerification.purpose} = 'change'
           or ${user.role} in ('platform_owner', 'platform_support')
@@ -1402,7 +1491,8 @@ export function listPhoneVerifications(scope: Scope, page = 1) {
         subjectId: phoneVerification.subjectId,
         purpose: phoneVerification.purpose,
         phone: phoneVerification.phoneNormalized,
-        name: sql<string>`coalesce(${user.name}, ${customer.name})`,
+        // No `claim` a ficha ainda não existe: o nome é o que a pessoa informou no autocadastro.
+        name: sql<string>`coalesce(${user.name}, ${customer.name}, ${phoneVerification.payload}->>'name')`,
         createdAt: phoneVerification.createdAt,
       })
       .from(phoneVerification)
@@ -1448,6 +1538,24 @@ export function listPhoneVerifications(scope: Scope, page = 1) {
  */
 export async function prunePhoneVerifications(now = new Date()) {
   return withPlatformScope("telefone: limpa pedidos antigos", async (tx) => {
+    // O `claim` vencido (sem link válido há mais de `PHONE_VERIFICATION_TTL_MINUTES`) é encerrado, e os
+    // dados da ficha que nasceria (`payload`) somem com ele. Também o de quem não está mais no portal.
+    const ttlAgo = new Date(now.getTime() - getEnv().PHONE_VERIFICATION_TTL_MINUTES * 60_000);
+    await tx
+      .update(phoneVerification)
+      .set(CLOSED)
+      .where(
+        and(
+          isClaim,
+          isOpen,
+          sql`(
+            ((${phoneVerification.expiresAt} is null or ${phoneVerification.expiresAt} <= ${now.toISOString()}::timestamptz)
+              and ${phoneVerification.updatedAt} <= ${ttlAgo.toISOString()}::timestamptz)
+            or not exists (select 1 from portal_user where portal_user.id = ${phoneVerification.requestedById})
+          )`,
+        ),
+      );
+
     await tx
       .update(phoneVerification)
       .set({ status: "awaiting_manual", tokenHash: null, expiresAt: null })
@@ -1472,7 +1580,7 @@ export async function prunePhoneVerifications(now = new Date()) {
       .delete(phoneVerification)
       .where(
         sql`(${phoneVerification.subjectType} = 'user' and not exists (select 1 from "user" where "user"."id" = ${phoneVerification.subjectId}))
-          or (${phoneVerification.subjectType} = 'customer' and not exists (select 1 from customer where customer.id = ${phoneVerification.subjectId}))`,
+          or (${phoneVerification.subjectType} = 'customer' and ${phoneVerification.purpose} <> 'claim' and not exists (select 1 from customer where customer.id = ${phoneVerification.subjectId}))`,
       )
       .returning({ id: phoneVerification.id });
 
@@ -1779,3 +1887,80 @@ export async function changeUserPhoneByPlatform(
 /** Envia os links dos pedidos abertos por `changeUserPhoneByPlatform`, depois do commit. */
 export const sendOpenedAfterChange = (opened: string[], userId: string) =>
   sendOpened(opened, { type: "user", id: userId });
+
+// ---------------------------------------------------------------------------------------------
+// Número que já é de outra ficha (`purpose = claim`, P3, D-1): só o autocadastro do portal
+// ---------------------------------------------------------------------------------------------
+
+/** O `claim` aberto da pessoa do portal numa organização, se houver. */
+async function openClaimOf(tx: Tx, portalUserId: string, tenantId: string) {
+  const [row] = await tx
+    .select({ id: phoneVerification.id, subjectId: phoneVerification.subjectId })
+    .from(phoneVerification)
+    .where(and(openClaimsBy(portalUserId), eq(phoneVerification.tenantId, tenantId)));
+  return row ?? null;
+}
+
+/**
+ * Autocadastro do portal com o número de uma ficha que já existe (`confirmPortalSignup`): abre o
+ * `claim` em vez de criar a ficha. O id da ficha nova é sorteado agora (`subject_id`) e os dados dela
+ * ficam em `payload` até a confirmação. Substitui o `claim` aberto que a pessoa já tinha nesta
+ * organização. Roda no `withTenant` da organização. Quem chama responde como sempre (neutro) e manda
+ * o link depois do commit (`requestPhoneVerificationSend` com o `subject` devolvido).
+ */
+export async function openPortalClaim(
+  tx: Tx,
+  tenantId: string,
+  portalUserId: string,
+  phone: NewPhone,
+  payload: PhoneClaimPayload,
+) {
+  await tx
+    .update(phoneVerification)
+    .set(CLOSED)
+    .where(and(openClaimsBy(portalUserId), eq(phoneVerification.tenantId, tenantId)));
+
+  const subject = { type: "customer", id: randomUUID() } as const;
+  const [row] = await tx
+    .insert(phoneVerification)
+    .values({
+      tenantId,
+      subjectType: subject.type,
+      subjectId: subject.id,
+      purpose: "claim",
+      phone: phone.phone,
+      phoneNormalized: phone.phoneNormalized,
+      phoneKey: phone.phoneKey,
+      status: "awaiting_manual",
+      requestedByType: "portal_user",
+      requestedById: portalUserId,
+      payload,
+    })
+    .returning({ id: phoneVerification.id });
+  if (!row) throw new Error("claim não criado");
+
+  await auditInTransaction(tx, "phone.claim_requested", {
+    actor: { type: "portal_user", id: portalUserId },
+    tenantId,
+    target: { type: "customer", id: subject.id },
+  });
+
+  return { requestId: row.id, subject };
+}
+
+/**
+ * A pessoa do portal saiu (exclusão da conta): os `claim` dela saem junto, com o `payload`. Roda na
+ * transação de quem apaga, com bypass.
+ */
+export async function deletePortalClaimsOf(tx: Tx, portalUserIds: string[]) {
+  if (portalUserIds.length === 0) return;
+  await tx
+    .delete(phoneVerification)
+    .where(
+      and(
+        isClaim,
+        eq(phoneVerification.requestedByType, "portal_user"),
+        inArray(phoneVerification.requestedById, portalUserIds),
+      ),
+    );
+}

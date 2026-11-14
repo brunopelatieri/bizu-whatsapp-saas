@@ -17,7 +17,7 @@ import { checkLimit } from "@/lib/billing/limits";
 import { portalEmailBarred } from "@/lib/lgpd/deletion";
 import { ensurePortalUser } from "@/lib/portal/access";
 import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
-import { ensureCustomerVerification } from "@/lib/phone/requests";
+import { ensureCustomerVerification, openPortalClaim } from "@/lib/phone/requests";
 import type { PortalSignupInput } from "@/lib/schemas/portal";
 
 /**
@@ -176,6 +176,31 @@ export async function confirmPortalSignup(email: string, org: string) {
   if (!allowed) return;
 
   const opened = await withTenant(tenant.id, async (tx) => {
+    // O número do autocadastro já é de uma ficha desta organização, e nenhuma ficha tem o e-mail
+    // (o e-mail decide antes: a ficha `lead` com ele é ligada abaixo, como sempre). Quem verifica
+    // fica com o número (D-1): abre o `claim`, e a ficha nova só nasce quando o link do número for
+    // confirmado na sessão do portal desta pessoa. A resposta não muda (neutra).
+    const [byEmail] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(and(eq(customer.tenantId, tenant.id), eq(customer.email, person.email)));
+    if (!byEmail && person.phone && person.phoneNormalized && person.phoneKey) {
+      const [holder] = await tx
+        .select({ id: customer.id, portalUserId: customer.portalUserId })
+        .from(customer)
+        .where(and(eq(customer.tenantId, tenant.id), eq(customer.phoneKey, person.phoneKey)));
+      if (holder && holder.portalUserId !== person.id) {
+        const claim = await openPortalClaim(
+          tx,
+          tenant.id,
+          person.id,
+          { phone: person.phone, phoneNormalized: person.phoneNormalized, phoneKey: person.phoneKey },
+          { name: person.name, email: person.email },
+        );
+        return { requestId: claim.requestId, customerId: claim.subject.id };
+      }
+    }
+
     const [row] = await tx
       .insert(customer)
       .values({
@@ -216,9 +241,9 @@ export async function confirmPortalSignup(email: string, org: string) {
 
     return { requestId, customerId: row.id };
   }).catch((error: unknown) => {
-    // O telefone do autocadastro é de outro cliente do tenant (índice único por `phone_key`).
-    // Quem se cadastrou escolhe o número: responder diferente (500) viraria um oráculo de quem é
-    // cliente do tenant. Sem linha de cliente, a resposta é a mesma de sempre; a equipe cadastra.
+    // Corrida: outra ficha ganhou o número (ou o e-mail) entre a conferência e a gravação (índice
+    // único). Responder diferente (500) viraria um oráculo de quem é cliente do tenant: sem linha
+    // de cliente, a resposta é a mesma de sempre.
     if (isUniqueViolation(error)) return null;
     throw error;
   });

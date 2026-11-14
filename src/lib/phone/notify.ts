@@ -4,6 +4,7 @@ import { organization, user } from "@/db/schema";
 import { appLink } from "@/lib/auth/links";
 import { listTenantOwners } from "@/lib/billing/notify";
 import { sendEmail } from "@/lib/email/send";
+import { customerDeletedByPhoneClaimTemplate } from "@/lib/email/templates/customer-deleted-by-phone-claim";
 import { phoneNumberClaimedTemplate } from "@/lib/email/templates/phone-number-claimed";
 import { phoneVerificationManualTemplate } from "@/lib/email/templates/phone-verification-manual";
 import type { PhoneVerificationSubject } from "@/lib/phone/verification";
@@ -85,6 +86,35 @@ export async function notifyManualRelease(notice: ManualNotice) {
         url: appLink(isCustomer ? "/app/clientes" : "/app/equipe"),
       }),
       tags: { template: "phone-verification-manual" },
+    });
+  }
+}
+
+/**
+ * `claim` confirmado (D-1): avisa os owners da organização de que a ficha que tinha o número foi
+ * apagada e outra nasceu para quem provou a posse. Só os 4 últimos dígitos e o link da ficha nova.
+ */
+export async function notifyCustomerClaimed(notice: {
+  tenantId: string;
+  newCustomerId: string;
+  phoneHint: string;
+}) {
+  const [tenant] = await getDb()
+    .select({ name: organization.name })
+    .from(organization)
+    .where(eq(organization.id, notice.tenantId));
+  if (!tenant) return;
+
+  for (const person of await listTenantOwners(notice.tenantId)) {
+    await sendEmail({
+      to: person.email,
+      ...customerDeletedByPhoneClaimTemplate({
+        name: person.name,
+        tenantName: tenant.name,
+        phoneHint: notice.phoneHint,
+        url: appLink(`/app/clientes/${notice.newCustomerId}`),
+      }),
+      tags: { template: "customer-deleted-by-phone-claim" },
     });
   }
 }

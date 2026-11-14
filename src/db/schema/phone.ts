@@ -11,6 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import {
+  type PhoneClaimPayload,
   type PhoneDeliveryAttempt,
   phoneRequesterTypes,
   phoneVerificationPurposes,
@@ -80,6 +81,12 @@ export const phoneVerification = pgTable(
      */
     requestedByType: text("requested_by_type", { enum: phoneRequesterTypes }),
     requestedById: uuid("requested_by_id"),
+    /**
+     * `claim`: os dados validados da ficha que nasce na confirmação (nome e e-mail; o número é o do
+     * pedido). Só existe com o pedido aberto: encerrado ou vencido, some (`CHECK` abaixo e
+     * `prunePhoneVerifications`). Dado pessoal: nunca a log, auditoria ou job.
+     */
+    payload: jsonb("payload").$type<PhoneClaimPayload>(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at")
       .notNull()
@@ -115,7 +122,25 @@ export const phoneVerification = pgTable(
       sql`${table.status} in ('sent', 'awaiting_manual', 'confirmed', 'canceled')`,
     ),
     check("phone_verification_subject_known", sql`${table.subjectType} in ('user', 'customer')`),
-    check("phone_verification_purpose_known", sql`${table.purpose} in ('signup', 'change')`),
+    check(
+      "phone_verification_purpose_known",
+      sql`${table.purpose} in ('signup', 'change', 'claim')`,
+    ),
+    // Um `claim` aberto por pessoa do portal e organização (pedir de novo substitui).
+    uniqueIndex("phone_verification_open_claim_idx")
+      .on(table.tenantId, table.requestedByType, table.requestedById)
+      .where(sql`${table.status} in ('sent', 'awaiting_manual') and ${table.purpose} = 'claim'`),
+    // O `claim` é sempre de uma ficha de organização, pedido pela pessoa do portal, com o número
+    // digitado e os dados da ficha nova enquanto está aberto.
+    check(
+      "phone_verification_claim_complete",
+      sql`${table.purpose} <> 'claim' or (${table.subjectType} = 'customer' and ${table.tenantId} is not null and ${table.phone} is not null and ${table.requestedByType} = 'portal_user' and (${table.payload} is not null or ${table.status} not in ('sent', 'awaiting_manual')))`,
+    ),
+    // `payload` só existe no `claim` aberto: encerrado (confirmado, cancelado, vencido), some.
+    check(
+      "phone_verification_payload_open_claim",
+      sql`${table.payload} is null or (${table.purpose} = 'claim' and ${table.status} in ('sent', 'awaiting_manual'))`,
+    ),
     check(
       "phone_verification_requester_known",
       sql`${table.requestedByType} is null or ${table.requestedByType} in ('user', 'portal_user')`,

@@ -37,7 +37,11 @@ import type {
   DeletionSubjectType,
 } from "@/db/schema/lgpd";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
-import { deleteVerificationsOf, releaseTenantPhoneResponsibility } from "@/lib/phone/requests";
+import {
+  deletePortalClaimsOf,
+  deleteVerificationsOf,
+  releaseTenantPhoneResponsibility,
+} from "@/lib/phone/requests";
 import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { appLink } from "@/lib/auth/links";
 import { getPortalAuth } from "@/lib/auth/portal";
@@ -848,6 +852,8 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
     "customer",
     customers.map((row) => row.id),
   );
+  // O `claim` aberto da pessoa (autocadastro com o número de outra ficha) guarda nome e e-mail dela.
+  await deletePortalClaimsOf(tx, [id]);
 
   await tx
     .update(portalUser)

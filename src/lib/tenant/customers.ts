@@ -45,6 +45,7 @@ import {
   type PhoneChangeOpened,
 } from "@/lib/phone/requests";
 import { type PhoneVerifiedVia, verifiedPhone } from "@/lib/phone/verification";
+import { CUSTOMER_NOT_FOUND } from "@/lib/tenant/customer-constants";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
 import {
   isTeamCustomer,
@@ -63,7 +64,7 @@ export type CustomerActor = {
 
 type CustomerRow = typeof customer.$inferSelect;
 
-export const CUSTOMER_NOT_FOUND = "Cliente não encontrado.";
+export { CUSTOMER_NOT_FOUND };
 const NOT_FOUND = CUSTOMER_NOT_FOUND;
 const EMAIL_TAKEN = new TenantRuleError(
   409,

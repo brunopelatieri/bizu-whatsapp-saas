@@ -5,6 +5,7 @@ import { customer, member, user } from "@/db/schema";
 import { auditInTransaction } from "@/lib/audit";
 import { userPhoneConfirmedGlobally } from "@/lib/phone/confirmed";
 import { AUTO_LINK_CUSTOMER_VIAS } from "@/lib/phone/verification";
+import { CUSTOMER_NOT_FOUND } from "@/lib/tenant/customer-constants";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
 /**
@@ -56,6 +57,36 @@ export async function matchingTeamMember(tx: Tx, tenantId: string, phoneKey: str
     .limit(1);
 
   return taken ? null : only.id;
+}
+
+/**
+ * A ficha que acabou de provar o número pelo link (confirmação do cadastro, da troca ou do `claim`):
+ * liga a pessoa da equipe cujo telefone confirmado é esse, se a ficha ainda não tem ligação e a pessoa
+ * ainda não tem ficha (`matchingTeamMember`). Audita `customer.team_linked` com `via: verified`.
+ */
+export async function linkVerifiedTeamMember(
+  tx: Tx,
+  tenantId: string,
+  customerId: string,
+  phoneKey: string,
+) {
+  const teamUserId = await matchingTeamMember(tx, tenantId, phoneKey);
+  if (!teamUserId) return null;
+
+  const [linked] = await tx
+    .update(customer)
+    .set({ userId: teamUserId })
+    .where(and(eq(customer.id, customerId), isNull(customer.userId)))
+    .returning({ id: customer.id });
+  if (!linked) return null;
+
+  await auditInTransaction(tx, "customer.team_linked", {
+    actor: { id: null, type: "system" },
+    tenantId,
+    target: { type: "customer", id: customerId },
+    metadata: { userId: teamUserId, via: "verified" },
+  });
+  return teamUserId;
 }
 
 /**
@@ -134,7 +165,6 @@ export const isTeamCustomer = sql`exists (select 1 from member where member.user
 // ---------------------------------------------------------------------------------------------
 
 const PERSON_NOT_FOUND = "Pessoa da equipe não encontrada.";
-const CUSTOMER_NOT_FOUND = "Cliente não encontrado.";
 
 /** Quem liga não liga a si mesmo: excluir a própria conta apagaria a ficha de outra pessoa (D-11). */
 const SELF_LINK = () =>

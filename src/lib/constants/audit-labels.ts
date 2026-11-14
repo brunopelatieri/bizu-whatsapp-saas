@@ -33,6 +33,8 @@ const AUDIT_LABELS: Record<string, string> = {
   "customer.invited": "Cliente convidado ao portal",
   "customer.team_linked": "Ficha de cliente ligada a uma pessoa da equipe",
   "customer.team_unlinked": "Ligação da ficha de cliente com a pessoa da equipe desfeita",
+  "customer.deleted_by_phone_claim": "Ficha de cliente apagada: o dono do número confirmou outro cadastro",
+  "phone.claim_requested": "Autocadastro com número de outra ficha: link enviado ao número",
   "phone.verified": "Telefone confirmado",
   "phone.unverified": "Telefone voltou a pendente",
   "billing.checkout_started": "Pagamento iniciado",

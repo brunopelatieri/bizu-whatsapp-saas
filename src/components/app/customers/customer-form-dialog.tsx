@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -87,9 +88,17 @@ export function CustomerFormDialog({
     mode: "onChange",
   });
   const { reset, trigger } = form;
+  // O número já é de outra ficha (409 `PHONE_IN_USE`): o id dela vem sempre; o nome, só para quem lê clientes.
+  const [inUse, setInUse] = useState<{ customerId: string; name: string | null } | null>(null);
+  // Corrigido o telefone, o aviso do número repetido não vale mais.
+  const phoneValue = form.watch("phone");
+  useEffect(() => {
+    if (phoneValue !== undefined) setInUse(null);
+  }, [phoneValue]);
 
   useEffect(() => {
     if (!open) return;
+    setInUse(null);
     reset(toFormValues(customer, defs));
     // Com as definições carregadas, o `required` já conta para o botão Salvar.
     void trigger();
@@ -117,6 +126,12 @@ export function CustomerFormDialog({
         // Número de outro cliente: o erro vai para o campo, onde a pessoa corrige.
         if (error instanceof ApiError && error.code === "PHONE_IN_USE") {
           form.setError("phone", { message: error.message });
+          const id = error.details.customerId;
+          setInUse(
+            typeof id === "string"
+              ? { customerId: id, name: typeof error.details.name === "string" ? error.details.name : null }
+              : null,
+          );
         }
       });
   }
@@ -253,6 +268,24 @@ export function CustomerFormDialog({
                 </FormItem>
               )}
             />
+            {inUse && inUse.customerId !== customer?.id ? (
+              <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                <p>
+                  Um telefone não se repete entre os clientes da organização. Para usar este número aqui,
+                  troque antes o telefone da ficha que o tem (pela troca com verificação, na própria ficha)
+                  ou, se você tiver permissão, exclua aquela ficha.
+                </p>
+                {inUse.name ? (
+                  <Link
+                    to={`/app/clientes/${inUse.customerId}`}
+                    className="mt-2 inline-block font-medium text-foreground underline underline-offset-4"
+                    onClick={onClose}
+                  >
+                    Abrir a ficha de {inUse.name}
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>
                 Cancelar
