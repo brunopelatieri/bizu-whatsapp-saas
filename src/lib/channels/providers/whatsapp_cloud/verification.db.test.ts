@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createCloudProvider } from "@/lib/channels/providers/whatsapp_cloud";
+import { setProvidersForTests } from "@/lib/channels/registry";
 import { asPlatform, makePlatformUser } from "../../../../../tests/db/billing-helpers";
 import {
   cleanUpChannels,
@@ -67,6 +69,9 @@ const put = (cookie: string, path: string, body: unknown) =>
   call("PUT", path, { cookie, body });
 
 beforeAll(async () => {
+  // O módulo é ligado aqui, como nos testes vizinhos: sem isto a rota só existe quando o
+  // `.env.local` traz `CHANNEL_PROVIDERS=whatsapp_cloud`, e o CI (sem a variável) responde 404.
+  setProvidersForTests([createCloudProvider()]);
   owner = connectOwner();
   boss = await createUser(owner);
   tenantId = (await createTenant(boss)).id;
@@ -81,6 +86,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  setProvidersForTests(undefined);
   // Os modelos da plataforma não saem com organização nenhuma.
   await asPlatform(owner, (tx) => tx`delete from message_template where name like ${"verif\\_%"}`);
   await cleanUpChannels(owner, tenants);
