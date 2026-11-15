@@ -59,9 +59,16 @@ const endpoints = [
   ["DELETE", `/api/roles/${anyId}`, "role:delete"],
   ["GET", "/api/customers", "customer:read"],
   ["POST", "/api/customers", "customer:create"],
+  ["POST", "/api/customers/import", "customer:create"],
+  ["GET", "/api/customers/import/quota", "customer:create"],
+  ["POST", "/api/customers/import/google-sheets", "customer:create"],
   ["GET", `/api/customers/${anyId}`, "customer:read"],
   ["PATCH", `/api/customers/${anyId}`, "customer:update"],
   ["DELETE", `/api/customers/${anyId}`, "customer:delete"],
+  ["DELETE", `/api/customers/${anyId}/team-link`, "customer:update"],
+  ["PUT", `/api/customers/${anyId}/team-link`, "customer:update"],
+  // Exige também `customer:read`; os papéis da matriz que têm `update` têm `read`.
+  ["GET", `/api/customers/${anyId}/team-candidates`, "customer:update"],
   ["POST", `/api/customers/${anyId}/invite`, "customer:invite"],
   ["GET", "/api/billing/plans", "billing:read"],
   ["GET", "/api/billing/subscription", "billing:read"],
@@ -103,6 +110,7 @@ const endpoints = [
   ["GET", "/api/inbox/conversations", "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}`, "inbox:read"],
   ["GET", `/api/inbox/conversations/${anyId}/messages`, "inbox:read"],
+  ["GET", `/api/inbox/conversations/${anyId}/related`, "inbox:read"],
   ["POST", `/api/inbox/conversations/${anyId}/claim`, "inbox:reply"],
   // `null` na própria pede `inbox:reply`, o resto `inbox:assign`: o serviço confere.
   ["POST", `/api/inbox/conversations/${anyId}/assign`, "inbox:read"],
@@ -115,12 +123,18 @@ const endpoints = [
   ["POST", `/api/inbox/conversations/${anyId}/messages`, "inbox:reply"],
   ["GET", `/api/inbox/conversations/${anyId}/templates`, "inbox:reply"],
   ["POST", `/api/inbox/messages/${anyId}/retry`, "inbox:reply"],
+  ["PUT", `/api/inbox/messages/${anyId}/favorite`, "inbox:reply"],
   ["POST", "/api/inbox/conversations", "inbox:reply"],
+  ["GET", `/api/inbox/conversations/${anyId}/transfer-channels`, "inbox:reply"],
+  ["POST", `/api/inbox/conversations/${anyId}/transfer`, "inbox:reply"],
   ["PATCH", `/api/inbox/contacts/${anyId}`, "inbox:reply"],
   ["GET", `/api/inbox/contacts/${anyId}/candidates`, "inbox:reply"],
   ["POST", `/api/inbox/contacts/${anyId}/link`, "inbox:reply"],
   // Também `customer:create`, que todo papel estático com `inbox:reply` tem.
   ["POST", `/api/inbox/contacts/${anyId}/customer`, "inbox:reply"],
+  // Fila de verificação de telefone: liberar à mão é reservado ao owner.
+  ["GET", "/api/phone-verifications", "phone:confirm"],
+  ["POST", `/api/phone-verifications/${anyId}/confirm`, "phone:confirm"],
 ] as const;
 
 const catalog = { ...staticRoleCatalog, [CUSTOM_ROLE]: CUSTOM_PERMISSIONS };
@@ -285,6 +299,7 @@ describe("RBAC", () => {
     const reads = [
       ["GET", "/api/admin/webhooks"],
       ["GET", "/api/admin/channel-events"],
+      ["GET", "/api/admin/retention/platform"],
       ["GET", "/api/admin/channels"],
       ["GET", "/api/admin/subscriptions"],
       ["GET", "/api/admin/audit"],

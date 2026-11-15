@@ -1,6 +1,8 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { account, user } from "@/db/schema";
+import { deleteUserVerifications } from "@/lib/phone/requests";
+import { removeAvatarsOfDeleted } from "@/lib/profile/avatar";
 
 export const PENDING_SIGNUP_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -22,7 +24,7 @@ export function isPendingSignupExpired(
  * não verificada, mas sem senha (`updateUserByAdmin`), e por isso nunca é expurgada aqui.
  */
 export async function purgeExpiredPendingSignup(email: string) {
-  await getDb()
+  const removed = await getDb()
     .delete(user)
     .where(
       and(
@@ -31,5 +33,11 @@ export async function purgeExpiredPendingSignup(email: string) {
         lt(user.createdAt, new Date(Date.now() - PENDING_SIGNUP_TTL_MS)),
         sql`exists (select 1 from ${account} where ${account.userId} = "user"."id" and ${account.providerId} = 'credential')`,
       ),
-    );
+    )
+    .returning({ id: user.id });
+
+  // `phone_verification.subject_id` não tem FK: sem isto o pedido ficaria na fila para sempre.
+  await deleteUserVerifications(removed.map(({ id }) => id));
+  // Nem `file.owner_id`: a foto de perfil (bloco F) sairia sem dono, no banco e no armazenamento.
+  await removeAvatarsOfDeleted(removed.map(({ id }) => id));
 }

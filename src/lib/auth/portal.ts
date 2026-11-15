@@ -26,6 +26,8 @@ import {
   sendPortalLink,
   sendPortalVerificationLink,
 } from "@/lib/auth/portal-emails";
+import { passwordPolicyHook } from "@/lib/auth/password-hook";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
 import { recordSignupConsent, signupPhoneValues } from "@/lib/lgpd/consent";
@@ -86,7 +88,8 @@ function createPortalAuth() {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
-      minPasswordLength: 10,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
       revokeSessionsOnPasswordReset: true,
       onExistingUserSignUp: ({ user }) => sendPortalExistingUserNotice(user),
     },
@@ -170,6 +173,9 @@ function createPortalAuth() {
         },
       },
     },
+
+    // Política de senha e normalização, também para quem chama a rota direto.
+    hooks: { before: passwordPolicyHook },
 
     rateLimit: {
       enabled: true,

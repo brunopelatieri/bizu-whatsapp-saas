@@ -165,6 +165,7 @@ const messageFields = {
   quotedType: quoted.type,
   quotedText: quoted.text,
   quotedDirection: quoted.direction,
+  isFavorite: message.isFavorite,
   createdAt: message.createdAt,
   cursorAt: cursorTime(message.createdAt),
 };
@@ -202,6 +203,8 @@ export type MessageView = {
     status: MediaStatus;
   } | null;
   replyTo: { id: string; type: MessageType; preview: string; direction: MessageDirection } | null;
+  /** Estrela da conversa (retenção): a mesma para quem tem acesso a ela; a limpeza não apaga a favorita. */
+  isFavorite: boolean;
   createdAt: Date;
 };
 
@@ -239,6 +242,7 @@ export function toMessageView(row: MessageRowView, base = "/api/inbox"): Message
             direction: row.quotedDirection,
           }
         : null,
+    isFavorite: row.isFavorite,
     createdAt: row.createdAt,
   };
 }

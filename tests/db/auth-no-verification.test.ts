@@ -21,7 +21,7 @@ import {
  * provar o e-mail continua fechado. O resto da suíte roda com a verificação ligada.
  */
 
-const PASSWORD = "senha-forte-123";
+const PASSWORD = "Senha-forte-123";
 const mail = createMemoryProvider();
 let owner: postgres.Sql;
 function signUp(email: string, password = PASSWORD) {
@@ -97,7 +97,7 @@ describe("cadastro sem verificação", () => {
     const fresh = newEmail();
     expect((await signUp(taken)).status).toBe(200);
 
-    const repeated = await signUp(taken, "outra-senha-123");
+    const repeated = await signUp(taken, "Outra-senha-123");
     const brandNew = await signUp(fresh);
 
     expect(repeated.status).toBe(brandNew.status);
@@ -106,7 +106,7 @@ describe("cadastro sem verificação", () => {
     expect(await templatesSentTo(taken)).toContain("existing-user-signup");
 
     // A senha de quem tentou de novo não vale: a conta segue com a do dono.
-    expect((await signIn(taken, "outra-senha-123")).status).toBe(401);
+    expect((await signIn(taken, "Outra-senha-123")).status).toBe(401);
     expect((await signIn(taken)).status).toBe(200);
   });
 
@@ -117,10 +117,10 @@ describe("cadastro sem verificação", () => {
       update "user" set created_at = now() - interval '2 days' where email = ${email}
     `;
 
-    await signUp(email, "senha-de-outro-123");
+    await signUp(email, "Senha-de-outro-123");
 
     expect((await signIn(email)).status).toBe(200);
-    expect((await signIn(email, "senha-de-outro-123")).status).toBe(401);
+    expect((await signIn(email, "Senha-de-outro-123")).status).toBe(401);
   });
 });
 

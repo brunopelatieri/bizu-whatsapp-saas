@@ -60,7 +60,7 @@ describe("consentimento no cadastro", () => {
       body: {
         name: "Ana",
         email,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -88,7 +88,7 @@ describe("consentimento no cadastro", () => {
       body: {
         name: "Bia",
         email: refused,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -100,7 +100,7 @@ describe("consentimento no cadastro", () => {
       body: {
         name: "Caio",
         email: silent,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -121,7 +121,7 @@ describe("consentimento no cadastro", () => {
       body: {
         name: "Dani",
         email,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         phone: "11987654321",
         acceptTerms: false,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -140,7 +140,7 @@ describe("consentimento no cadastro", () => {
       body: {
         name: "Intruso",
         email: existing.email,
-        password: "outra-senha-123",
+        password: "Outra-senha-123",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: "1999-01",
@@ -166,7 +166,7 @@ describe("consentimento no cadastro", () => {
         name: "Cliente",
         email,
         phone: "11987654321",
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         org: tenant.slug,
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,

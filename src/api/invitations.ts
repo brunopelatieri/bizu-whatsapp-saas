@@ -4,14 +4,18 @@ import { jsonBodyLimit, MINUTE, sameOrigin, validId } from "@/api/guards";
 import { blockWhileImpersonating } from "@/api/impersonation";
 import type { TenantEnv } from "@/api/permissions";
 import { clientKey, rateLimit } from "@/api/rate-limit";
+import { logError } from "@/api/log";
 import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
-import { assertWithinLimit } from "@/lib/billing/limits";
+import { withinLimitNested } from "@/lib/billing/limits";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import { ensureUserVerification } from "@/lib/phone/requests";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 import { activateTenant, findMembership } from "@/lib/tenant/membership";
 import { findOpenInvitation } from "@/lib/tenant/team";
+import { linkMemberCustomer } from "@/lib/tenant/team-customer";
 
 const INVALID_INVITATION = "Convite inválido ou expirado.";
 
@@ -69,17 +73,35 @@ invitationRoutes.post(
       );
     }
 
-    // O assento do próprio convite já estava reservado; o plano pode ter encolhido.
-    await assertWithinLimit(invitation.tenantId, "members", {
-      ignoreInvitationId: invitationId,
-    });
-
-    const { member } = await getAuth().api.acceptInvitation({
-      headers: c.req.raw.headers,
-      body: { invitationId },
-    });
+    // O assento do próprio convite já estava reservado; o plano pode ter encolhido. Conferência e
+    // aceite sob a trava de `members` (`withinLimitNested`), a mesma do convite.
+    const { member } = await withinLimitNested(
+      invitation.tenantId,
+      "members",
+      { ignoreInvitationId: invitationId },
+      () =>
+        getAuth().api.acceptInvitation({
+          headers: c.req.raw.headers,
+          body: { invitationId },
+        }),
+    );
 
     await activateTenant(c.get("session").id, user.id, invitation.tenantId);
+    // Quem já era cliente da organização segue com a ficha, agora ligada à conta da equipe.
+    // Falha aqui não desfaz a entrada: a equipe liga a ficha depois.
+    await linkMemberCustomer(invitation.tenantId, user.id).catch((error: unknown) =>
+      logError("Falha ao ligar a ficha de cliente do membro", error),
+    );
+    // Telefone ainda pendente: quem responde por confirmá-lo agora é a organização.
+    // O link sai pelos canais dela, se não há outro a caminho do mesmo número (`phone.verify`).
+    await ensureUserVerification(user.id, {
+      kind: "tenant",
+      tenantId: invitation.tenantId,
+    })
+      .then((requestId) => requestPhoneVerificationSend(requestId, { type: "user", id: user.id }))
+      .catch((error: unknown) =>
+        logError("Falha ao passar o pedido de verificação à organização", error),
+      );
     await audit("member.joined", {
       actor: { id: user.id },
       tenantId: invitation.tenantId,

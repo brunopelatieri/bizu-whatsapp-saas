@@ -9,9 +9,11 @@ import {
   sameOrigin,
   validationError,
 } from "@/api/guards";
-import { resolveSession } from "@/api/auth";
+import { defaultPhoneGate, resolveSession } from "@/api/auth";
+import { PHONE_UNVERIFIED } from "@/api/phone-gate";
 import { refuseImpersonated } from "@/api/impersonation";
 import { logError } from "@/api/log";
+import { signInRateLimit, throttledSignIn } from "@/api/login-throttle";
 import { clientKey, rateLimit } from "@/api/rate-limit";
 import { withSignupConsent } from "@/lib/lgpd/consent";
 import {
@@ -97,7 +99,8 @@ const rateLimitByEmail = createRateLimitByEmail("resend-by-email");
  *
  * - Cadastro: exige o aceite de termos e devolve sempre o mesmo corpo, sem sessão. O do
  *   Better Auth traz id e datas, que diferem entre e-mail novo e existente.
- * - Login: conta não verificada responde como senha errada (`hideUnverified`).
+ * - Login: conta não verificada responde como senha errada (`hideUnverified`), e falhas
+ *   repetidas bloqueiam o e-mail por um tempo (`throttledSignIn`, variáveis `LOGIN_*`).
  * - `verify-email`: o endpoint do Better Auth é GET e consumiria o token em qualquer
  *   visita. Aqui só existe POST, atrás do `verificationGuard`.
  * - `/api/auth-ext/*`: respondem `{ ok: true }` na hora, antes de saber se o e-mail
@@ -146,7 +149,33 @@ const closedWhileImpersonating = createMiddleware(async (c, next) => {
   });
 });
 
+/**
+ * As leituras do plugin admin (`list-users`, `get-user`, `list-user-sessions`) servem dados de
+ * outras pessoas à equipe da plataforma e não passam por `requireAuth`: o portão de telefone (T3)
+ * vale aqui também. O resto de `/api/auth/*` é a própria conta (sessão, senha, e-mail, 2FA, sair) e
+ * fica aberto: é por aí que a pessoa pendente sai ou cuida da própria segurança.
+ */
+const phoneGateOnAdminReads = createMiddleware(async (c, next) => {
+  if (!c.req.raw.headers.has("Cookie")) return next();
+
+  try {
+    const resolved = await resolveSession(c.req.raw.headers);
+    if (
+      resolved &&
+      !(await defaultPhoneGate(resolved.user, resolved.activeOrganizationId ?? null))
+    ) {
+      return c.json(PHONE_UNVERIFIED, 403);
+    }
+  } catch (error) {
+    logError("Falha ao validar sessão", error);
+    return c.json({ error: "Autenticação indisponível." }, 503);
+  }
+
+  return next();
+});
+
 authRoutes.use("/api/auth/*", jsonBodyLimit, sameOrigin, closedWhileImpersonating);
+authRoutes.use("/api/auth/admin/*", phoneGateOnAdminReads);
 authRoutes.use("/api/auth-ext/*", jsonBodyLimit, sameOrigin);
 
 authRoutes.post(
@@ -215,6 +244,20 @@ authRoutes.post(
 
     return c.json({ step: verificationStep(token) });
   },
+);
+
+authRoutes.post("/api/auth/sign-in/email", signInRateLimit("sign-in"), (c) =>
+  // O corpo que chega ao Better Auth é o validado por `throttledSignIn`, sempre em JSON.
+  throttledSignIn(c, "team", async (body) => {
+    const headers = forwardedHeaders(c);
+    headers.set("Content-Type", "application/json");
+
+    return hideUnverified(
+      await getAuth().handler(
+        new Request(c.req.url, { method: "POST", headers, body }),
+      ),
+    );
+  }),
 );
 
 authRoutes.all("/api/auth/organization/*", (c) =>

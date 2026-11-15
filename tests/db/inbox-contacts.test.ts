@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { auditLog, chatContact, conversation } from "@/db/schema";
+import { auditLog, chatContact, conversation, customer } from "@/db/schema";
 import { bodyOf, cleanUpBilling, createPlanRow, ensureSubscription } from "./billing-helpers";
 import { cleanUpChannels, seedCloudChannel, seedQrChannel, tenantScope } from "./channels-helpers";
 import { randomMobile, readAll, seedConversation } from "./inbox-helpers";
+import { phoneValues } from "@/lib/phone/columns";
 import { uniquePhone } from "./phone-helpers";
 import {
   addMember,
@@ -85,6 +86,20 @@ describe("/api/inbox: contato e início de conversa", () => {
     });
     expect(response.status).toBe(201);
     return (await bodyOf(response)).customer as { id: string; name: string };
+  }
+
+  const customerRow = async (id: string) =>
+    (await readAll((tx) => tx.select().from(customer).where(eq(customer.id, id))))[0];
+
+  /** O telefone da conta, gravado direto: `createUser` usa o mesmo número, pendente, em todas. */
+  async function setUserPhone(userId: string, phone: string, verified: boolean) {
+    const values = phoneValues(phone);
+    await owner`
+      update "user" set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized},
+        phone_key = ${values.phoneKey}, phone_verified_at = ${verified ? new Date() : null},
+        phone_verified_via = ${verified ? "manual" : null}
+      where id = ${userId}
+    `;
   }
 
   const contactRow = async (id: string) =>
@@ -202,6 +217,8 @@ describe("/api/inbox: contato e início de conversa", () => {
       const created = (await bodyOf(response)).customer as { id: string; phone: string; phoneNormalized: string };
       expect(created.phoneNormalized).toBe("551197651234");
       expect((await contactRow(q.contactId))?.customerId).toBe(created.id);
+      // O número é o de quem escreveu pelo WhatsApp: nasce confirmado como `inbound`.
+      expect((await customerRow(created.id))?.phoneVerifiedVia).toBe("inbound");
 
       const audits = await readAll((tx) => tx.select().from(auditLog).where(eq(auditLog.targetId, q.contactId)));
       expect(audits.find((row) => row.action === "inbox.contact_saved_as_customer")?.metadata).toEqual({
@@ -310,6 +327,35 @@ describe("/api/inbox: contato e início de conversa", () => {
       }
     });
 
+    it("uma vaga e dois \"salvar como cliente\" simultâneos: um cria, o outro recebe 403 e o contato segue sem vínculo", async () => {
+      const plan = await createPlanRow(owner, { isFree: false, limits: { customers: 1 } });
+      await ensureSubscription(owner, tenantId, plan.id);
+      const first = await seedConversation(scope(), channelId);
+      const second = await seedConversation(scope(), channelId);
+
+      try {
+        const responses = await Promise.all(
+          [first, second].map((q) =>
+            call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
+              cookie: as("memberA"),
+              body: { name: "Simultâneo" },
+            }),
+          ),
+        );
+
+        expect(responses.map((response) => response.status).sort()).toEqual([201, 403]);
+        const linked = await Promise.all([first, second].map((q) => contactRow(q.contactId)));
+        expect(linked.filter((row) => row?.customerId)).toHaveLength(1);
+        const rows = await readAll((tx) => tx.select().from(customer).where(eq(customer.tenantId, tenantId)));
+        expect(rows).toHaveLength(1);
+      } finally {
+        await owner.begin(async (tx) => {
+          await tx`select set_config('app.bypass_tenant', 'on', true)`;
+          await tx`delete from subscription where tenant_id = ${tenantId}`;
+        });
+      }
+    });
+
     it("sem customer:create: 403", async () => {
       const q = await seedConversation(scope(), channelId);
       const response = await call("POST", `/api/inbox/contacts/${q.contactId}/customer`, {
@@ -382,7 +428,9 @@ describe("/api/inbox: contato e início de conversa", () => {
       expect(await bodyOf(invalid)).toMatchObject({ code: "INVALID_PHONE" });
     });
 
-    it("com um membro: contato vinculado a ele; membro de fora é 404", async () => {
+    it("com um membro de telefone confirmado: contato vinculado a ele; membro de fora é 404", async () => {
+      await setUserPhone(users.memberB?.id as string, uniquePhone(), true);
+
       const response = await call("POST", "/api/inbox/conversations", {
         cookie: as("admin"),
         body: { channelId: qrChannelId, userId: users.memberB?.id },
@@ -397,6 +445,61 @@ describe("/api/inbox: contato e início de conversa", () => {
         body: { channelId: qrChannelId, userId: users.stranger?.id },
       });
       expect(outsider.status).toBe(404);
+    });
+
+    it("telefone só declarado: a conversa abre, mas o contato não é ligado ao cadastro", async () => {
+      // O cliente trocou o próprio número no portal (pendente) e pediu "me chamem no WhatsApp".
+      const declared = uniquePhone();
+      const record = await createCustomer(declared);
+      await owner.begin(async (tx) => {
+        await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        await tx`update customer set phone_verified_at = null, phone_verified_via = null where id = ${record.id}`;
+      });
+
+      const byCustomer = await call("POST", "/api/inbox/conversations", {
+        cookie: as("memberA"),
+        body: { channelId: qrChannelId, customerId: record.id },
+      });
+      expect(byCustomer.status).toBe(201);
+      const started = (await bodyOf(byCustomer)).conversation as { contact: { id: string } };
+      expect(await contactRow(started.contact.id)).toMatchObject({ customerId: null, userId: null });
+
+      // O mesmo com um membro cujo telefone ainda é só o do cadastro.
+      await setUserPhone(users.memberA?.id as string, uniquePhone(), false);
+      const byMember = await call("POST", "/api/inbox/conversations", {
+        cookie: as("admin"),
+        body: { channelId: qrChannelId, userId: users.memberA?.id },
+      });
+      expect(byMember.status).toBe(201);
+      const withMember = (await bodyOf(byMember)).conversation as { contact: { id: string } };
+      expect(await contactRow(withMember.contact.id)).toMatchObject({ customerId: null, userId: null });
+    });
+
+    it("telefone só declarado não leva o histórico de quem já escreveu por aquele número", async () => {
+      // A vítima já conversa com a organização; o contato dela não tem cadastro.
+      const victim = uniquePhone();
+      const existing = await seedConversation(scope(), channelId, {
+        phone: phoneValues(victim).phoneNormalized,
+      });
+      // Outro cadastro declara o número dela (em produção, pelo portal; aqui, direto no banco).
+      const record = await createCustomer(uniquePhone());
+      const values = phoneValues(victim);
+      await owner.begin(async (tx) => {
+        await tx`select set_config('app.bypass_tenant', 'on', true)`;
+        await tx`
+          update customer set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized},
+            phone_key = ${values.phoneKey}, phone_verified_at = null, phone_verified_via = null
+          where id = ${record.id}
+        `;
+      });
+
+      const response = await call("POST", "/api/inbox/conversations", {
+        cookie: as("memberA"),
+        body: { channelId, customerId: record.id },
+      });
+
+      expect([200, 201]).toContain(response.status);
+      expect(await contactRow(existing.contactId)).toMatchObject({ customerId: null, userId: null });
     });
 
     it("número de outro tenant é 404, desativado é 409, dois destinos é 400", async () => {

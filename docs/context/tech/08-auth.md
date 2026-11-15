@@ -2,7 +2,7 @@
 
 - **Escopo:** Better Auth da equipe e da plataforma, verificação de e-mail, sessão e papéis. A instância do portal está em `tech/25-portal-clientes.md`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-auth.md`, `spec-seguranca.md`
-- **Paths do código:** `src/lib/auth/`, `src/api/auth.ts`, `src/api/auth-ext.ts`, `src/api/guards.ts`, `src/api/verification-guard.ts`, `src/db/schema/auth.ts`, `src/lib/schemas/auth.ts`, `src/lib/email/templates/auth/`, `src/providers/auth-provider.tsx`, `src/components/auth/`, `src/pages/*-page.tsx`, `src/routes/auth/`
+- **Paths do código:** `src/lib/auth/`, `src/api/auth.ts`, `src/api/auth-ext.ts`, `src/api/guards.ts`, `src/api/verification-guard.ts`, `src/db/schema/auth.ts`, `src/lib/schemas/auth.ts`, `src/lib/email/templates/auth/`, `src/providers/auth-provider.tsx`, `src/components/auth/`, `src/pages/*-page.tsx`, `src/routes/auth/`, `src/api/profile.ts` e `src/lib/schemas/profile.ts` (perfil, bloco F)
 
 ## Estado atual
 
@@ -33,6 +33,7 @@ pelo outro. 2FA, sessões e personificação estão em `tech/26-seguranca.md`. A
 | `POST /api/auth-ext/resend-verification` | `auth-ext.ts` | `{ ok: true }`; 3 por 15 min por IP, 3 por hora por e-mail |
 | `POST /api/auth-ext/forgot-password` | `auth-ext.ts` | `{ ok: true }`; 3 por 15 min por IP |
 | `/api/auth/organization/*` | `auth-ext.ts` | 404: as regras de tenant ficam nas rotas próprias; use `auth.api.*` |
+| `/api/auth/admin/*` (leituras) | Better Auth + `phoneGateOnAdminReads` | dados de outras pessoas: com `PHONE_VERIFICATION_REQUIRED`, 403 `PHONE_UNVERIFIED` como em `requireAuth` |
 | `/api/auth/two-factor/*` | Better Auth | `enable`, `disable`, `get-totp-uri`, `verify-totp`, `verify-backup-code`, `generate-backup-codes` |
 | demais `/api/auth/*` | Better Auth | `sign-in/email`, `sign-out`, `reset-password`, `change-email`, `get-session`, leituras de `admin/*` |
 
@@ -105,6 +106,48 @@ endereço antigo recebe `change-email-done`. As duas etapas usam a mesma tabela,
 `kind = "change"`, e a mesma página. O e-mail antigo vem das claims do token, porque
 quando `afterEmailVerification` roda o usuário já tem o novo.
 
+## Política de senha
+
+Uma regra só, em `src/lib/auth/password-policy.ts` (módulo puro, com teste): 10 a 128
+caracteres, com maiúscula, minúscula, número e um especial de `!@#$%^&*()_+-=[]{}:;,.?/~`, sem
+caractere de controle (U+0000 a U+001F e U+007F). Espaço no meio vale. A senha é gravada e
+conferida **normalizada** (`normalizePassword`: `trim` + NFC). O máximo é em caracteres porque
+o hasher é o scrypt padrão do Better Auth (`@better-auth/utils/password`), sem o corte de 72
+bytes do bcrypt; trocar o hasher por bcrypt obriga a rever esse limite.
+
+Onde a regra é cobrada:
+
+| Ponto | Cobre |
+|---|---|
+| `newPassword` de `src/lib/schemas/auth.ts` (Zod) | Formulários e rotas próprias: cadastro, convite, redefinição (`resetPasswordSchema`), autocadastro e `set-password` do portal |
+| `passwordPolicyHook` (`src/lib/auth/password-hook.ts`), `hooks.before` de `auth` e `portalAuth` | Toda chamada ao Better Auth, por HTTP ou `auth.api.*`: `/sign-up/email`, `/reset-password`, `/change-password` e, se um dia abertas, `/admin/set-user-password` e `/admin/create-user`. É o que barra a rota chamada direto (`/reset-password` e `/change-password` não têm Zod próprio) |
+| `setPortalPassword` (`src/lib/portal/profile.ts`) | O `set-password` do portal grava o hash direto, fora do Better Auth: normaliza e valida de novo |
+| `assertSeedAllowed` (`src/db/seed.ts`) | `SEED_PASSWORD` |
+
+Senha fora da regra responde 400 com `code: "PASSWORD_POLICY"` e só o texto da regra
+(`PASSWORD_POLICY_MESSAGE`, traduzido também em `src/lib/auth/client.ts`).
+
+**Medidor (S2):** `PasswordStrengthMeter` (`src/components/auth/password-strength-meter.tsx`) mostra
+a barra (`role="progressbar"`, regras cumpridas sobre cinco) e a checklist ao vivo logo abaixo do
+campo de senha nova, e some com o campo vazio; `maxLength` e `noControl` só entram na lista quando
+violadas. Quais linhas aparecem sai de `passwordChecklist` (`src/lib/auth/password-checklist.ts`,
+puro, com teste). Está em `SignupForm` (cadastro e convite), `/redefinir-senha`,
+`/portal/cadastro` e `PasswordCard` de `/portal/conta`; o botão de enviar fica desabilitado até a
+senha cumprir a regra (e, na redefinição, até coincidir com a confirmação). O `LoginForm` não tem
+medidor. O medidor só orienta: quem recusa senha fraca é o Zod e o servidor.
+
+O hook normaliza `password`, `newPassword` e `currentPassword` em **toda** rota do Better Auth,
+inclusive `/sign-in/email` e as confirmações de 2FA; `confirmIdentity` faz o mesmo. Sem isso,
+quem cadastrou a senha com espaço no fim deixaria de entrar. **O login não cobra complexidade**:
+senha gravada antes da regra continua entrando e só é cobrada na próxima troca. A exceção é a
+senha antiga gravada com espaço nas pontas: passa a ser conferida sem ele e só volta pelo
+reset (só existem contas de desenvolvimento anteriores à regra).
+
+Rota nova que grave senha entra em `NEW_PASSWORD_FIELD` (se for do Better Auth) ou chama
+`normalizePassword` + `isPasswordValid(evaluatePassword())` antes do hash. Isso inclui
+`auth.api.setPassword`: é só de servidor, sem `path`, e o hook normaliza mas não a reconhece
+para cobrar a política (ninguém a chama hoje).
+
 ## Recuperação de senha
 
 `/esqueci-senha` chama `/api/auth-ext/forgot-password`, que envia
@@ -126,7 +169,10 @@ senha**, que é o que um cadastro nunca confirmado tem.
 - Cookies `bizu.session_token` e `bizu.session_data`: `HttpOnly`, `SameSite=Lax`, e
   `Secure` com prefixo `__Secure-` em produção.
 - `requireAuth` responde 401 sem cookie, sem consultar nada; 401 com sessão inválida; 503
-  se o Auth falhar; 403 sem e-mail verificado, com `EMAIL_VERIFICATION_REQUIRED=true`.
+  se o Auth falhar; 403 sem e-mail verificado, com `EMAIL_VERIFICATION_REQUIRED=true`; e, por
+  último, 403 `PHONE_UNVERIFIED` com `PHONE_VERIFICATION_REQUIRED=true` e o telefone sem valer na
+  organização ativa (seção "Telefone da conta"). O e-mail vem antes, inclusive nas rotas que
+  confirmam o telefone. Falha ao conferir o telefone: 503.
 - `requireAuth` lê a sessão com `disableCookieCache`: sessão revogada cai na hora. O cache
   de 5 min do cookie vale só para `/get-session`, que alimenta a interface.
 - `apiFetch`, ao receber 401 em `/app`, encerra a sessão antes de ir ao login. Sem isso o
@@ -157,19 +203,143 @@ senha**, que é o que um cadastro nunca confirmado tem.
   `/api/auth/*` e `/api/auth-ext/*`; sem esse middleware, cadastro e login aceitariam
   envio de outro site.
 
+## Telefone da conta
+
+A conta da equipe só aceita número que recebe WhatsApp (`whatsappPhoneSchema`), e o telefone do
+cadastro nasce **pendente** (`phone_verified_at` nulo): não conta na unicidade nem atrai o vínculo
+automático das conversas até ser confirmado. O hook de cadastro abre o pedido de verificação na
+plataforma, e o aceite do convite abre o da organização (`ensureUserVerification`). A confirmação
+pelo link é `POST /api/me/phone-verification/confirm`, só na sessão da própria conta, com o token
+no corpo (nunca em GET nem em rota pública) e bloqueada em personificação. Detalhe em
+`tech/28-crm-cadastro.md`, "Telefone verificado e único" e "Pedido de verificação e liberação".
+
+**Troca do número** (`POST`/`DELETE /api/me/phone-change`, bloqueadas em personificação): a conta
+mantém o número antigo, e a confirmação dele, até o link do número novo ser confirmado na sessão dela
+ou o responsável liberar. O responsável é a plataforma para quem responde a ela ou já tem o número
+confirmado no sistema; senão, a organização em uso. A edição do telefone em `/admin/usuarios/:id` abre a
+troca e o proprietário a libera à mão na mesma transação. Detalhe em `tech/28-crm-cadastro.md`, "Troca de
+telefone pelo pedido".
+
+O link que chega ao WhatsApp abre `/verificar-telefone?token=…` (rota de auth standalone, sem
+`loader`, `referrer: no-referrer`): sem sessão leva a `/login?next=…` e volta; com sessão, um
+botão faz o `POST`. Token de ficha de cliente (`c.`) segue para `/portal/verificar-telefone`, que
+pede a sessão do `portalAuth`; o login do portal passou a aceitar `?next=` (só caminho `/portal/…`).
+Os hooks de cadastro e de aceite de convite, depois de abrir o pedido, só **enfileiram** o envio
+(`src/lib/phone/dispatch.ts`): o módulo não importa canal nenhum, para o registro de canais não
+entrar no ciclo de imports da autenticação. Envio e reenvio: "Envio do link e página de
+confirmação" em `tech/28-crm-cadastro.md`.
+
+**Bloqueio enquanto pendente (T3, `PHONE_VERIFICATION_REQUIRED`, padrão `true`):** a sessão existe
+(reenviar e confirmar exigem saber quem é), mas `requireAuth` responde 403 `PHONE_UNVERIFIED` a tudo,
+menos à lista fechada de `src/api/phone-gate.ts`: ler o próprio estado, reenviar, confirmar, corrigir o
+número pela troca (`POST`/`DELETE /api/me/phone-change`), trocar a organização ativa, aceitar convite,
+encerrar a personificação e pedir a exclusão da própria conta
+(LGPD: `DELETE /api/me`, `GET /api/me/deletion`, `POST /api/me/deletion/cancel`, com a senha de
+sempre). Sair (`/api/auth/sign-out`) é do Better Auth e não passa por `requireAuth`. O predicado (`src/lib/phone/gate.ts`) é o da T2a: a conta
+confirmada no sistema passa em tudo; o membro comum passa também na organização **ativa** que o
+liberou; owner e equipe da plataforma só com a confirmação do sistema. A sessão personificada
+responde pelo telefone da conta personificada. `ProtectedRoute` mostra só "Confirme seu WhatsApp".
+Desligada, `/api/me` traz `phonePending` e as áreas mostram um aviso. Detalhe, decisões a confirmar e
+limites: `tech/28-crm-cadastro.md`, "Bloqueio de acesso com telefone pendente".
+
+## Perfil da própria conta (bloco F, F1)
+
+`PATCH /api/me { name }` (2 a 120 caracteres; auditoria `user.profile_updated` sem o nome) e a foto
+(`POST`/`DELETE /api/me/avatar`, leitura em `GET /api/avatars/:userId`), em `src/api/profile.ts`. Toda escrita
+é bloqueada em personificação, e nada do perfil passa pelo bloqueio de telefone (com o telefone pendente,
+só a lista de `src/api/phone-gate.ts`). **`/update-user` do Better Auth está em `disabledPaths`:** nome e foto só
+mudam pelas rotas do perfil (com auditoria), e `user.image` não vira um texto qualquer escolhido pelo
+cliente. O e-mail segue pelo `change-email` (`ChangeEmailCard`), a senha pelo `change-password` e o telefone pela troca
+(`/api/me/phone-change`); as telas estão na página "Perfil" (F2: `/app/perfil` e `/admin/perfil`,
+`src/pages/profile-page.tsx`, `src/components/profile/`: foto com recorte de 256 px no navegador, nome, senha com o
+medidor do bloco S e `revokeOtherSessions`; o telefone é `TeamPhoneChange`). Na personificação a tela só mostra (a API
+recusa a escrita). `ChangeEmailCard` mora no Perfil (não mais em `/app/configuracoes`) e esconde o formulário na
+personificação. `GET /api/me` traz `user.avatarUrl`
+(`/api/avatars/<id>?v=<arquivo>` ou `null`). Foto: `tech/27-lgpd-arquivos.md`, "Módulo de arquivos".
+
+## Bloqueio de login por tentativas
+
+Além do limite por IP, o login conta as senhas erradas por e-mail e bloqueia por um tempo
+(`docs/specs/pre-producao/spec.md`, bloco B). Vale para a equipe e para o portal, com contadores
+separados (`realm` `team` e `portal`).
+
+| Variável | Padrão | O que faz |
+|---|---|---|
+| `LOGIN_LOCKOUT_SCOPE` | `email` | `email`: bloqueia o e-mail, de qualquer IP. `email_ip`: só o par e-mail e IP (o dono nunca fica trancado por outro IP). `off`: desliga |
+| `LOGIN_MAX_ATTEMPTS` | 5 | Falhas, dentro da janela, que abrem o bloqueio |
+| `LOGIN_ATTEMPT_WINDOW_MINUTES` | 15 | Janela em que as falhas se somam |
+| `LOGIN_LOCKOUT_MINUTES` | 15 | Duração do bloqueio |
+
+- **Onde:** `throttledSignIn` (`src/api/login-throttle.ts`) é a rota de `POST
+  /api/auth/sign-in/email` (`auth-ext.ts`) e do `sign-in/email` do portal (`portal.ts`, rota
+  própria, fora de `PORTAL_AUTH_PATHS`). A decisão é pura (`src/lib/auth/login-throttle.ts`); o
+  estado fica em `login_throttle`, por `login-throttle-store.ts`.
+- **Só JSON, e só o validado:** a rota exige `Content-Type: application/json` (415 fora disso),
+  valida com `signInRequestSchema` (400) e repassa ao Better Auth o JSON validado. O endpoint
+  dele também aceita `application/x-www-form-urlencoded`: com o corpo cru repassado, um
+  formulário entraria sem passar pelo bloqueio nem pelo `barredSignIn` do portal. Rota nova que
+  repasse corpo ao Better Auth segue a mesma regra.
+- **A tentativa é contada antes de conferir a senha** (`reserveLoginAttempt`, uma transação sob
+  trava por chave): tentativas simultâneas não passam todas pela leitura "ainda não bloqueado",
+  e no máximo `LOGIN_MAX_ATTEMPTS` chegam a conferir a senha por janela.
+- **O que fica contado:** a resposta 401 (senha errada, e-mail sem conta, conta não verificada;
+  no portal, também a conta em carência de exclusão: por fora são a mesma). 200 zera a chave.
+  Qualquer outra (429 do limite por IP, 400, 5xx, e o 403 `BANNED_USER` da equipe, que só sai com
+  a senha certa) devolve a tentativa.
+- **Bloqueado:** 429 com `Retry-After` e o corpo do rate limit, sem conferir a senha. E-mail sem
+  conta bloqueia igual: a resposta não diz se ele existe.
+- **Como sai:** o tempo passa, ou a pessoa redefine a senha (`onPasswordReset` zera todas as
+  chaves do e-mail, de qualquer IP; no portal, `setPortalPassword`, depois de entrar por magic
+  link).
+- **Limites conhecidos:**
+  - Com `email` (padrão, decisão do proprietário), quem sabe o e-mail de alguém consegue mantê-lo
+    bloqueado errando a senha. Redefinir a senha zera o contador, mas não abre sessão: contra
+    quem insiste, o atacante fecha de novo antes de o dono entrar. A saída de operação é
+    `LOGIN_LOCKOUT_SCOPE=email_ip`, que não segura ataque vindo de muitos IPs. Sessões já
+    abertas continuam valendo durante o bloqueio.
+  - O login certo zera o contador, então quem chega a N-1 falhas e espera consegue notar que
+    alguém entrou no intervalo (a próxima falha não bloqueia). Revela atividade de uma conta
+    que o atacante já tenta adivinhar; aceito.
+  - `email_ip` depende de `TRUSTED_PROXY_HOPS` certo: errado para mais, o cliente escolhe o IP;
+    zero atrás de proxy, todos dividem o IP do proxy e o escopo vira `email`.
+- **IP:** em `email_ip`, IPv6 conta pelo /64 e IPv4 mapeado vira IPv4 (`throttleIp`), como no
+  limite do Better Auth.
+- **Limite por IP da rota:** `signInRateLimit` (20 por minuto), na frente do bloqueio: o caminho
+  bloqueado não chega ao limite do Better Auth.
+- **Dados:** e-mail e IP só entram em HMAC com `AUDIT_SALT`. A falha que fecha o bloqueio é
+  auditada como `auth.login_locked`, sem ator e sem o hash do e-mail (a auditoria dura muito
+  mais que o contador). Linhas vencidas saem no `maintenance.prune`.
+- **Falha fechada:** sem conseguir reservar a tentativa, o login responde 503. Falha ao zerar ou
+  devolver depois da resposta deixa a tentativa contada.
+- **Testes:** `src/lib/auth/login-throttle.test.ts`, `tests/db/login-throttle.test.ts` (inclui
+  formulário, corpo inválido, concorrência e os dois escopos) e `tests/db/auth-http.test.ts`.
+  Não há teste para o 503 da falha de banco.
+
 ## Primeiro proprietário
 
 `npm run db:seed` cria `owner@bizu.local` (`platform_owner`) e `suporte@bizu.local`
-(`platform_support`), com a senha de `SEED_PASSWORD`. Sem o seed (ou em produção), cadastre-se em
-`/cadastro`, confirme e promova pelo banco:
+(`platform_support`), com a senha de `SEED_PASSWORD` e o telefone já confirmado. Sem o seed (ou em
+produção), cadastre-se em `/cadastro`, confirme e promova pelo banco, **confirmando o telefone junto**:
+com `PHONE_VERIFICATION_REQUIRED=true`, o primeiro proprietário não teria quem o liberasse nem canal
+da plataforma configurado, e ficaria na tela "Confirme seu WhatsApp".
 
 ```sql
-update "user" set role = 'platform_owner' where email = 'voce@empresa.com';
+update "user" set role = 'platform_owner', phone_verified_at = now(), phone_verified_via = 'manual'
+where email = 'voce@empresa.com';
 ```
+
+Quem roda o comando tem o banco; a confirmação é dele. O pedido aberto do cadastro é encerrado pelo
+`maintenance.prune`.
 
 ## Regras
 
 - `ProtectedRoute` faz o gate no cliente e não protege dados.
+- Telefone pendente (`PHONE_VERIFICATION_REQUIRED`): o portão é de `requireAuth` e
+  `requirePortalAuth`; rota nova fica bloqueada sem marcação. Pôr rota em
+  `TEAM_PHONE_PENDING_ALLOWED` ou `PORTAL_PHONE_PENDING_ALLOWED` (`src/api/phone-gate.ts`) só para
+  confirmar o telefone, sair ou pedir a exclusão da própria conta (LGPD), com motivo; rota pública
+  nova entra na lista `PUBLIC` de
+  `tests/db/phone-gate.test.ts`.
 - Toda rota privada usa `authRateLimit` e `requireAuth`.
 - Falha fechada: Auth indisponível não abre rota.
 - Respostas de cadastro, login sem verificação, reenvio, reset e troca de e-mail não revelam se o e-mail existe.

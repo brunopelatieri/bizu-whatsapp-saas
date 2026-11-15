@@ -41,6 +41,7 @@ const adminTitles: Record<string, string> = {
   "/admin/assinaturas": "Assinaturas",
   "/admin/webhooks": "Webhooks",
   "/admin/auditoria": "Auditoria",
+  "/admin/perfil": "Perfil",
   "/admin/configuracoes": "Configurações da plataforma",
   "/admin/configuracoes/seguranca": "Segurança",
   "/admin/configuracoes/etiquetas": "Etiquetas das organizações",

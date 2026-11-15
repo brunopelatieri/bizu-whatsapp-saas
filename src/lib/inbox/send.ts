@@ -272,7 +272,7 @@ export async function queueMessage(
 }
 
 /** Rascunho de texto: o mesmo no primeiro envio e no reenvio. */
-const textDraft = (text: string): Draft => ({
+export const textDraft = (text: string): Draft => ({
   type: "text",
   text,
   delivery: () => ({ kind: "text", text }),

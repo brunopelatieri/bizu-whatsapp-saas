@@ -21,6 +21,7 @@ import {
   useInboxScope,
 } from "@/components/inbox/inbox-scope";
 import { useInboxRealtimeMode } from "@/components/inbox/realtime-mode";
+import { useInboxPath } from "@/components/inbox/use-inbox-path";
 import { ApiError } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +43,7 @@ export function InboxPage({ mode = "tenant" }: { mode?: InboxMode }) {
 function InboxScreen() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
-  const { route } = useInboxScope();
+  const pathOf = useInboxPath();
   const [panelOpen, setPanelOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const realtime = useInboxRealtimeMode();
@@ -81,7 +82,7 @@ function InboxScreen() {
             panelOpen={panelOpen}
             onOpenPanel={() => setPanelOpen(true)}
             onClosePanel={() => setPanelOpen(false)}
-            onBack={() => navigate(route)}
+            onBack={() => navigate(pathOf())}
           />
         ) : (
           <div className="hidden min-w-0 flex-1 flex-col items-center justify-center gap-2 bg-muted/30 text-center text-muted-foreground lg:flex">
@@ -112,7 +113,8 @@ function ConversationView({
   onBack,
 }: ConversationViewProps) {
   const can = useInboxCan();
-  const { api, route } = useInboxScope();
+  const { api } = useInboxScope();
+  const pathOf = useInboxPath();
   const query = useConversation(conversationId);
   const [sending, setSending] = useState<SendingMessage[]>([]);
   // A mensagem que a próxima resposta cita; some ao trocar de conversa.
@@ -167,7 +169,7 @@ function ConversationView({
               Tentar novamente
             </button>
           )}
-          <Link to={route} className="font-medium text-primary hover:underline">
+          <Link to={pathOf()} className="font-medium text-primary hover:underline">
             Voltar ao atendimento
           </Link>
         </div>
@@ -197,6 +199,7 @@ function ConversationView({
         <MessageThread
           conversationId={conversationId}
           canReply={can("inbox", "reply")}
+          lastMessageAt={detail.conversation.lastMessageAt}
           sending={sending}
           onReply={setReplyTo}
         />

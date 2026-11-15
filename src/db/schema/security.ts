@@ -79,6 +79,35 @@ export const tenantPaymentCredential = pgTable(
   ],
 ).enableRLS();
 
+export const loginThrottleRealms = ["team", "portal"] as const;
+export type LoginThrottleRealm = (typeof loginThrottleRealms)[number];
+
+/**
+ * Falhas de login por e-mail (ou por e-mail e IP, `LOGIN_LOCKOUT_SCOPE`) e o bloqueio que
+ * elas abrem (`src/lib/auth/login-throttle.ts`). Sem `tenant_id` nem RLS, como
+ * `rate_limit_bucket`: o login acontece antes de existir tenant. O e-mail e o IP só entram
+ * em HMAC com `AUDIT_SALT`; a linha existe também para e-mail sem conta.
+ */
+export const loginThrottle = pgTable(
+  "login_throttle",
+  {
+    realm: text("realm", { enum: loginThrottleRealms }).notNull(),
+    /** O que o contador bloqueia: o e-mail, ou o par e-mail e IP. */
+    keyHash: text("key_hash").notNull(),
+    /** Só o e-mail: zera todos os contadores dele quando a senha é redefinida. */
+    subjectHash: text("subject_hash").notNull(),
+    failures: integer("failures").notNull().default(0),
+    windowStartedAt: timestamptz("window_started_at").notNull(),
+    lockedUntil: timestamptz("locked_until"),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.realm, table.keyHash] }),
+    index("login_throttle_subject_idx").on(table.realm, table.subjectHash),
+    index("login_throttle_updated_at_idx").on(table.updatedAt),
+  ],
+);
+
 /** Contadores de `RATE_LIMIT_STORE=postgres`, com a janela alinhada ao relógio. */
 export const rateLimitBucket = pgTable(
   "rate_limit_bucket",

@@ -16,8 +16,10 @@
 | CSRF | `csrfGuard`, `sameOrigin` e a checagem do Better Auth | `src/api/security.test.ts`, `tenant-http.test.ts` |
 | XSS | CSP com nonce, sem `unsafe-inline` nem `unsafe-eval` em `script-src` | `src/api/security.test.ts`; smoke no navegador |
 | Clickjacking | `frame-ancestors 'none'`; em report-only, `X-Frame-Options: DENY` | `src/api/security.test.ts` |
+| Adivinhação de senha, inclusive vinda de muitos IPs | Bloqueio de login por tentativas, por e-mail (`LOGIN_*`, `tech/08-auth.md`) | `tests/db/login-throttle.test.ts` |
 | Rate limit dividido entre réplicas | `RATE_LIMIT_STORE=postgres`, obrigatório em produção | `tests/db/rate-limit-store.test.ts` |
 | Banco ou backup vazado | Credenciais em AES-256-GCM, com a chave só no ambiente | `src/lib/crypto/secrets.test.ts`, `tests/db/credentials.test.ts` |
+| SSRF (o servidor buscar endereço vindo do usuário) | Nunca busca o endereço digitado: monta o seu com identificadores conferidos; lista exata de hosts por salto; IP público conferido e fixado (abaixo, "Busca de saída") | `src/lib/spreadsheet/google-sheets-*.test.ts`, `src/lib/net/public-ip.test.ts`, `tests/db/customer-import-google.test.ts` |
 
 ## CSP
 
@@ -43,6 +45,12 @@ só então mude para `false`.
 - `src/lib/zod-config.ts`: sem `jitless`, o Zod testa `new Function("")` e gera uma violação de
   `eval` em toda página com formulário. Precisa ser o primeiro import de `src/root.tsx`.
 
+- Seletor de emoji (X3): **nenhuma origem nova**. A biblioteca `frimousse` busca `${emojibaseUrl}/<idioma>/data.json` e `messages.json`; a tela passa
+  `emojibaseUrl="/emojibase"` (arquivos de `public/emojibase/`, copiados por `scripts/sync-emojibase.mjs`), então tudo é da mesma origem e `connect-src` segue `'self'`.
+  O padrão da biblioteca é um CDN (`cdn.jsdelivr.net`): nunca o use. Esses arquivos saem do servidor de estáticos do `react-router-hono-server`
+  com `Cache-Control: public, max-age=3600` (o cabeçalho de todo arquivo de `public/` fora de `/assets/`; não é `immutable`, porque o nome não tem hash e o conteúdo muda
+  ao atualizar o pacote). A biblioteca guarda a cópia dos dados em `localStorage` (`frimousse/data/...`, dado público, sem nada da pessoa).
+
 **Liberar uma origem:** acrescente-a à diretiva certa em `cspDirectives`, nunca em `default-src`
 nem como `https:` em `script-src`. Um SDK que carrega script próprio (Stripe.js, por exemplo) pede
 `script-src` e, em geral, `frame-src` e `connect-src`. Atualize o teste de cabeçalhos e registre aqui
@@ -62,6 +70,26 @@ confiando no preflight. A guarda soma uma regra: **toda mutação com `Origin` d
 responde 403**, inclusive `Origin: null`. Requisição sem `Origin` e com JSON passa (não é navegador).
 O `sameOrigin` de cada grupo de rotas continua, porque ele vale também para GET.
 
+## Busca de saída a partir de algo que o usuário digitou (SSRF)
+
+Regra: **o servidor nunca busca um endereço que veio do usuário.** Quando uma função precisa buscar algo de fora a partir de um link
+digitado, ela extrai do link só identificadores, confere cada um por formato estrito e **monta ela mesma** o endereço, num host fixo.
+Hoje o único caso é a importação pelo Google Planilhas (bloco I, I3: `src/lib/spreadsheet/google-sheets-link.ts` e
+`google-sheets-fetch.server.ts`). As mídias dos canais buscam endereço de **provedor**, não de usuário, com lista de origens (`tech/29-canais-whatsapp.md`).
+
+| Camada | Como |
+|---|---|
+| Endereço | Só o id da planilha (`[A-Za-z0-9_-]{20,100}`) e o `gid` (dígitos) saem do link; host, porta, caminho, consulta e credenciais do link nunca entram na requisição |
+| Redirecionamento | Seguido à mão, até 3 saltos; cada um `https`, sem porta nem credenciais, host numa **lista exata** (`docs.google.com` em `/spreadsheets/`, `doc-XX-XX-sheets.googleusercontent.com` em `/export/`); o resto encerra (o login do Google é "planilha privada") |
+| IP | Todos os IPs do host conferidos por `isPublicIp` (`src/lib/net/public-ip.ts`: privadas, loopback, link-local e metadados, CGNAT, multicast, reservadas, IPv6 ULA e link-local, IPv4 mapeado, NAT64 para faixa interna, 6to4, Teredo); a conexão usa **só esses IPs** (`lookup` fixado no `node:https`), sem segunda resolução de nome |
+| Requisição | Sem agente compartilhado, sem cookies nem cabeçalho do usuário, `Accept-Encoding: identity` (nada é descomprimido) |
+| Tempo e tamanho | 5 s para conectar, 20 s no total; 10 MB contados enquanto lê, sem confiar no `Content-Length` |
+| Resposta | Só `text/csv` ou `text/plain`, nunca zip nem byte nulo; volta ao navegador como `text/csv` com `nosniff`, `attachment` e `no-store`; erro nunca repassa o corpo de fora |
+| Log | Nada do link, do id nem do conteúdo; `warn` só com o código e o salto quando a guarda recusa |
+
+A lista de hosts e o porquê de cada um estão na SPEC (`docs/specs/pre-producao/spec.md`, "I3: o que foi feito"). Busca de saída nova a partir de
+entrada do usuário segue o mesmo desenho e reaproveita `isPublicIp`.
+
 ## Rate limit
 
 `rateLimit({ name, limit, windowMs })`: `name` é obrigatório e único, porque separa os contadores no
@@ -75,7 +103,9 @@ store compartilhado.
 A chave vai em hash com `AUDIT_SALT`, para o IP não ficar legível. Store fora do ar responde 503 (falha
 fechada). Buckets com mais de 24 h saem no `maintenance.prune`: uma janela maior que isso exige
 aumentar `RATE_LIMIT_RETENTION_MS`. `failureLimit`, dos webhooks, segue em memória: com N instâncias, o
-teto real é N vezes o limite. O rate limit do Better Auth é outro, na tabela `rate_limit`.
+teto real é N vezes o limite. O rate limit do Better Auth é outro, na tabela `rate_limit`. O
+bloqueio de login por tentativas é um terceiro mecanismo, por e-mail e sempre no banco
+(`login_throttle`, `tech/08-auth.md`).
 
 ## Criptografia de credenciais
 
@@ -147,6 +177,13 @@ grava na requisição leva `impersonator_id`, sem cada rota lembrar disso.
 
 `POST /api/admin/stop-impersonating` fica fora de `adminRoutes`: quem sai está na sessão da pessoa
 personificada, sem papel de plataforma. `signOut()` do `useAuth` chama essa rota quando há personificação.
+
+**Telefone pendente (T3):** com `PHONE_VERIFICATION_REQUIRED=true`, a sessão personificada responde pelo
+telefone da conta personificada: se ele não vale na organização do consentimento, o suporte recebe 403
+`PHONE_UNVERIFIED` como ela e vê "Confirme seu WhatsApp", sem poder confirmar nem reenviar
+(`blockWhileImpersonating`). `stop-impersonating` está na lista do que passa (`src/api/phone-gate.ts`):
+sem isso, o suporte ficaria preso na sessão. Isentar a personificação abriria dados da organização sob
+uma conta que ela ainda não liberou (decisão T3-4 da SPEC `pre-producao`, a confirmar).
 
 ## Caixa de entrada
 

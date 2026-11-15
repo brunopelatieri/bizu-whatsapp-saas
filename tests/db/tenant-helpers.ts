@@ -5,7 +5,7 @@ import { api } from "@/api/app";
 
 /** Cenários de tenant pela API, com Postgres real. Cada chamada usa um IP próprio. */
 
-const PASSWORD = "senha-forte-123";
+const PASSWORD = "Senha-forte-123";
 export const DOMAIN = "tenant-test.bizu.local";
 export const APP_ORIGIN = "http://localhost:5173";
 
@@ -205,6 +205,13 @@ export async function cleanUp(owner: postgres.Sql) {
     `;
     await tx`
       delete from consent_log where subject_id in (
+        select id from "user" where email like ${pattern}
+      )
+    `;
+    // `phone_verification.subject_id` não tem FK: os pedidos das contas de teste saem aqui (os
+    // de cliente e os que passaram a uma organização saem com ela, pelo `cascade`).
+    await tx`
+      delete from phone_verification where subject_type = 'user' and subject_id in (
         select id from "user" where email like ${pattern}
       )
     `;

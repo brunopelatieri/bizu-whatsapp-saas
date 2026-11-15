@@ -11,6 +11,8 @@ export type AuditAction =
   | "auth.email_verified"
   | "auth.email_changed"
   | "auth.password_reset"
+  // Só hashes em `metadata`: o e-mail bloqueado pode nem ter conta (`actor_id` nulo).
+  | "auth.login_locked"
   | "auth.2fa_enabled"
   | "auth.2fa_disabled"
   | "auth.session_revoked"
@@ -35,9 +37,31 @@ export type AuditAction =
   | "file.uploaded"
   | "file.deleted"
   | "customer.created"
+  // Um lote da importação de planilha (bloco I): só contagens em `metadata`, nunca dado de cliente.
+  | "customer.imported"
   | "customer.updated"
   | "customer.deleted"
   | "customer.invited"
+  // A ficha de cliente ligada à pessoa da equipe (`customer.user_id`); `metadata.userId`.
+  | "customer.team_linked"
+  // A equipe desfez a ligação (`DELETE /api/customers/:id/team-link`); `metadata.userId`.
+  | "customer.team_unlinked"
+  // Autocadastro do portal com o número de outra ficha, confirmado pelo link (D-1): a ficha antiga
+  // (alvo) saiu; `metadata { newCustomerId, phoneHint }` (só os 4 últimos dígitos).
+  | "customer.deleted_by_phone_claim"
+  // Telefone de um cadastro confirmado (link ou liberação manual). Só `via` e contagens.
+  | "phone.verified"
+  // A conta perdeu a confirmação: outra provou a posse do mesmo número (`metadata.reason`).
+  | "phone.unverified"
+  // Troca de número pedida e desistida (`metadata.responsible`). O número nunca vai para cá.
+  | "phone.change_requested"
+  | "phone.change_canceled"
+  // Autocadastro do portal com o número de outra ficha: o `claim` foi aberto (alvo: a ficha que nasceria).
+  | "phone.claim_requested"
+  // Perfil da própria conta da equipe (bloco F): o nome (`metadata.name`) e a foto.
+  | "user.profile_updated"
+  | "user.avatar_updated"
+  | "user.avatar_removed"
   | "portal.signed_up"
   | "portal.profile_updated"
   | "portal.password_set"
@@ -109,6 +133,8 @@ export type AuditAction =
   | "admin.custom_field_archived"
   | "admin.custom_field_deleted"
   | "admin.tenant_profile_updated"
+  // retenção de mensagens (bloco R): sem `tenant_id`, só o tipo de canal e os três números.
+  | "admin.retention_policy_updated"
   // caixa-de-entrada (C2): só ids e enums em `metadata`, nunca texto, nome ou telefone.
   | "inbox.conversation_claimed"
   | "inbox.conversation_assigned"
@@ -117,6 +143,11 @@ export type AuditAction =
   | "inbox.conversation_reopened"
   | "inbox.contact_linked"
   | "inbox.contact_saved_as_customer"
+  // X2: a conversa seguiu por outro número; só ids em `metadata`, nunca o texto enviado.
+  | "inbox.conversation_continued"
+  // retenção R3a: a estrela da mensagem; só ids em `metadata`, nunca o texto.
+  | "inbox.message_favorited"
+  | "inbox.message_unfavorited"
   | "platform.impersonation_requested"
   | "platform.impersonation_started"
   | "platform.impersonation_stopped"

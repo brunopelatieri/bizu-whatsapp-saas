@@ -1,8 +1,7 @@
-import type { MetaFunction } from "react-router";
+import { Link, type MetaFunction } from "react-router";
 import { OrganizationCard } from "@/components/app/organization-card";
 import { RolesCard } from "@/components/app/roles-card";
 import { SettingsNav } from "@/components/app/settings-nav";
-import { ChangeEmailCard } from "@/components/auth/change-email-card";
 import { Can } from "@/components/auth/can";
 
 export const meta: MetaFunction = () => [
@@ -21,7 +20,13 @@ export default function Settings() {
       <Can resource="role" action="create">
         <RolesCard />
       </Can>
-      <ChangeEmailCard />
+      <p className="text-sm text-muted-foreground">
+        Foto, nome, e-mail, telefone e senha da sua conta ficam em{" "}
+        <Link to="/app/perfil" className="font-medium text-primary hover:underline">
+          Perfil
+        </Link>
+        .
+      </p>
     </div>
   );
 }

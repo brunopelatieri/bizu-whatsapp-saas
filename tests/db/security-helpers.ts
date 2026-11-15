@@ -4,7 +4,7 @@ import { call, type TestUser } from "./tenant-helpers";
 
 /** 2FA e personificação pela API, com Postgres real. */
 
-export const PASSWORD = "senha-forte-123";
+export const PASSWORD = "Senha-forte-123";
 
 const BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 

@@ -1,0 +1,99 @@
+/**
+ * Como o telefone de um cadastro foi confirmado (`phone_verified_via`). Sem valor, o número é
+ * só declarado: não atrai o vínculo automático da conversa nem conta na unicidade das contas
+ * (`docs/specs/pre-producao/spec.md`, bloco T).
+ *
+ * - `whatsapp`: a pessoa confirmou, na própria sessão, o link enviado ao número. É a única
+ *   **prova de posse**.
+ * - `manual`: liberado à mão. Na conta (`user`, `portal_user`), pelo proprietário da
+ *   plataforma; na ficha de cliente, pelo owner da organização dela.
+ * - `team`: telefone de cliente informado pela equipe (cadastro ou importação).
+ * - `inbound`: cliente salvo a partir de um contato que escreveu pelo WhatsApp.
+ *
+ * **O que vale onde.** A conta é global e qualquer pessoa cria uma organização, então o que uma
+ * organização atesta não pode valer fora dela. Por isso estas colunas, **na conta**, só guardam o
+ * que vale no sistema inteiro: `whatsapp` e `manual` (plataforma). A liberação do owner de uma
+ * organização sobre a conta de um membro não fica aqui: é uma linha em `phone_tenant_vouch`, por
+ * par (conta, organização), e vale só naquela organização (`src/lib/phone/confirmed.ts`). A
+ * ficha de cliente é da organização, e todas as formas dela são locais por natureza. A conta do
+ * portal só recebe `whatsapp` ou `manual`: nunca herda `team` nem a liberação de uma
+ * organização.
+ */
+export const phoneVerifiedVia = ["whatsapp", "manual", "team", "inbound"] as const;
+export type PhoneVerifiedVia = (typeof phoneVerifiedVia)[number];
+
+/** As duas colunas, para marcar o número atual como confirmado. */
+export function verifiedPhone(via: PhoneVerifiedVia, at = new Date()) {
+  return { phoneVerifiedAt: at, phoneVerifiedVia: via };
+}
+
+/** As duas colunas, para o número que acabou de mudar e ainda não foi confirmado. */
+export const UNVERIFIED_PHONE = { phoneVerifiedAt: null, phoneVerifiedVia: null } as const;
+
+
+/** De quem é o telefone de um pedido de confirmação (`phone_verification`). */
+export const phoneVerificationSubjects = ["user", "customer"] as const;
+export type PhoneVerificationSubject = (typeof phoneVerificationSubjects)[number];
+
+/**
+ * Para que serve o pedido: `signup` confirma o número que o cadastro **tem** (cadastro, convite,
+ * autocadastro, número que caiu); `change` é a troca de número, e o número do pedido é o **novo**:
+ * o cadastro mantém o antigo, e a confirmação que ele tinha, até o pedido ser confirmado
+ * (`src/lib/phone/requests.ts`). `claim` (P3, D-1) é o autocadastro do portal com o número de um
+ * cliente que já existe: a ficha nova ainda não existe (`subject_id` é o id que ela vai ganhar), os
+ * dados dela ficam em `payload`, e o link só confirma na sessão do portal de quem se cadastrou
+ * (`src/lib/phone/claim.ts`).
+ */
+export const phoneVerificationPurposes = ["signup", "change", "claim"] as const;
+export type PhoneVerificationPurpose = (typeof phoneVerificationPurposes)[number];
+
+/**
+ * Os dados validados da ficha que nasce quando o `claim` é confirmado. Dado pessoal: vive só
+ * enquanto o pedido está aberto (`CHECK` `phone_verification_payload_open_claim`), nunca vai a log,
+ * auditoria nem payload de job.
+ */
+export type PhoneClaimPayload = { name: string; email: string };
+
+/** Quem pediu a troca: a própria conta da equipe (ou alguém da equipe), ou a pessoa do portal. */
+export const phoneRequesterTypes = ["user", "portal_user"] as const;
+export type PhoneRequesterType = (typeof phoneRequesterTypes)[number];
+
+/**
+ * Situação do pedido: `sent` tem um link válido a caminho da pessoa; `awaiting_manual` espera a
+ * liberação do responsável (sem canal para enviar, ou todos falharam); `confirmed` e `canceled`
+ * estão encerrados.
+ */
+export const phoneVerificationStatuses = [
+  "sent",
+  "awaiting_manual",
+  "confirmed",
+  "canceled",
+] as const;
+export type PhoneVerificationStatus = (typeof phoneVerificationStatuses)[number];
+
+/**
+ * As formas de confirmação da FICHA de cliente que atraem, sozinhas, a conversa de quem tiver o
+ * número e a ligação com a pessoa da equipe que o tem. `manual` fica de fora: é o número que o
+ * próprio cliente declarou e o owner liberou sem prova de posse.
+ */
+export const AUTO_LINK_CUSTOMER_VIAS = ["whatsapp", "team", "inbound"] as const satisfies readonly PhoneVerifiedVia[];
+
+export const attractsConversations = (via: PhoneVerifiedVia) =>
+  (AUTO_LINK_CUSTOMER_VIAS as readonly PhoneVerifiedVia[]).includes(via);
+
+/**
+ * Uma tentativa de envio do link (`phone_verification.attempts`). Só ids, tipo, hora, resultado e
+ * o código do erro: nunca o telefone, o texto da mensagem nem o token.
+ *
+ * - `sent`: o provedor aceitou a mensagem.
+ * - `failed`: o provedor recusou na chamada, ou o aviso de status disse `failed` depois.
+ * - `skipped`: o canal não estava apto (Cloud sem modelo de verificação, por exemplo).
+ * - `limited`: o cadastro já recebeu o máximo de links da hora.
+ */
+export type PhoneDeliveryAttempt = {
+  channelId: string | null;
+  type: string | null;
+  at: string;
+  outcome: "sent" | "failed" | "skipped" | "limited";
+  error?: string | null;
+};

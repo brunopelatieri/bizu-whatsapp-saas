@@ -3,8 +3,8 @@ import { ChannelBadge } from "@/components/channels/channel-badge";
 import { TagChip } from "@/components/crm/tag-chip";
 import { contactLabel, formatListTime, initialsOf } from "@/components/inbox/format";
 import type { ConversationItem as Item } from "@/components/inbox/inbox-api";
-import { useInboxScope } from "@/components/inbox/inbox-scope";
 import { CONVERSATION_STATUS_LABELS } from "@/components/inbox/labels";
+import { useInboxPath } from "@/components/inbox/use-inbox-path";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +21,7 @@ const MAX_TAGS = 2;
 
 /** Uma linha da lista: quem é, última mensagem, hora, não lidas, número, etiquetas. */
 export function ConversationItem({ item, selected, showChannel, showOwner }: ConversationItemProps) {
-  const { route } = useInboxScope();
+  const pathOf = useInboxPath();
   const label = contactLabel(item.contact);
   const preview = item.lastMessagePreview
     ? `${item.lastMessageDirection === "out" ? "Você: " : ""}${item.lastMessagePreview}`
@@ -30,7 +30,7 @@ export function ConversationItem({ item, selected, showChannel, showOwner }: Con
 
   return (
     <Link
-      to={`${route}/${item.id}`}
+      to={pathOf(item.id)}
       aria-current={selected ? "page" : undefined}
       className={cn(
         "flex gap-3 border-b border-border px-3 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",

@@ -239,6 +239,55 @@
       "when": 1794279121747,
       "tag": "0033_rls_caixa_de_entrada",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794495390098,
+      "tag": "0034_bloqueio_login",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794576614816,
+      "tag": "0035_telefone_verificado",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794592883185,
+      "tag": "0036_pedido_verificacao_telefone",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794594859062,
+      "tag": "0037_envio_verificacao_telefone",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794618085755,
+      "tag": "0038_troca_telefone",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794631450822,
+      "tag": "0039_retencao_mensagens",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794665944622,
+      "tag": "0040_telefone_claim",
+      "breakpoints": true
     }
   ]
 }

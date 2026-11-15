@@ -31,6 +31,9 @@ export default [
   route("redefinir-senha", "routes/auth/reset-password.tsx"),
   route("convite/:id", "routes/auth/invite.tsx"),
   route("2fa", "routes/auth/two-factor.tsx"),
+  // Link de verificação do WhatsApp (bloco T): o token `c.` (ficha de cliente) segue para a
+  // página do portal, que tem a sessão do cliente.
+  route("verificar-telefone", "routes/auth/verify-phone.tsx"),
 
   // ---------------------------------------------------------------------------
   // Área do tenant (owner e equipe) — client-only (SEM loader de servidor).
@@ -46,6 +49,8 @@ export default [
       // Caixa de entrada (C3): o id da conversa é opcional na mesma rota.
       route("atendimento/:conversationId?", "routes/app.inbox.tsx"),
       route("equipe", "routes/app.team.tsx"),
+      // Perfil da própria conta (bloco F): o mesmo componente de `/admin/perfil`.
+      route("perfil", "routes/app.profile.tsx"),
       route("assinatura", "routes/app.subscription.tsx"),
       route("assinatura/faturas", "routes/app.subscription.invoices.tsx"),
       route("assinatura/retorno", "routes/app.subscription.return.tsx"),
@@ -69,6 +74,8 @@ export default [
       route("tenants", "routes/admin/tenants.tsx"),
       route("tenants/:id", "routes/admin/tenant.tsx"),
       route("usuarios", "routes/admin/users.tsx"),
+      // Perfil da própria conta da plataforma (bloco F): o mesmo componente de `/app/perfil`.
+      route("perfil", "routes/admin/profile.tsx"),
       // admin-crud C: detalhe de usuário de equipe e de pessoa do portal.
       route("usuarios/portal/:id", "routes/admin/portal-user.tsx"),
       route("usuarios/:id", "routes/admin/user.tsx"),
@@ -97,6 +104,7 @@ export default [
     route("portal/confirmar", "routes/portal/confirm.tsx"),
     route("portal/cadastro", "routes/portal/signup.tsx"),
     route("portal/escolher", "routes/portal/choose.tsx"),
+    route("portal/verificar-telefone", "routes/portal/verify-phone.tsx"),
     route("portal", "components/portal/portal-layout.tsx", [
       index("routes/portal/home.tsx"),
       route("conta", "routes/portal/account.tsx"),

@@ -33,6 +33,10 @@ export const QUEUE = {
   inboxMediaDead: "inbox.media.dead",
   inboxSweep: "inbox.sweep",
   inboxSweepDead: "inbox.sweep.dead",
+  inboxRetention: "inbox.retention",
+  inboxRetentionDead: "inbox.retention.dead",
+  phoneVerify: "phone.verify",
+  phoneVerifyDead: "phone.verify.dead",
 } as const;
 
 /** Payload de `lgpd.export`: o pedido fica em `data_export`, a fila só leva o id. */
@@ -55,6 +59,19 @@ export type ChannelInboundJob = { channelEventId: string };
  * (`null` na plataforma) só escolhe o escopo da transação, o RLS confere o resto.
  */
 export type InboxMediaJob = { messageId: string; tenantId: string | null };
+
+/**
+ * Payload de `phone.verify`: só o id do pedido e o motivo. **O token nunca vai aqui**: cada
+ * tentativa gera o seu (`issueVerificationToken`). No motivo `failed`, `afterChannelId` e
+ * `failedMessageId` são o canal e a mensagem que falharam: a cascata segue do próximo canal só se
+ * essa mensagem ainda é a do pedido.
+ */
+export type PhoneVerifyJob = {
+  requestId: string;
+  reason: "open" | "resend" | "failed";
+  afterChannelId?: string;
+  failedMessageId?: string;
+};
 
 export const EMAIL_RETRY_LIMIT = 5;
 export const INBOX_MEDIA_RETRY_LIMIT = 4;
@@ -103,6 +120,8 @@ export const queueDefinitions: QueueDefinition[] = [
   { name: QUEUE.channelHealthDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxMediaDead, options: DEAD_LETTER_OPTIONS },
   { name: QUEUE.inboxSweepDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.inboxRetentionDead, options: DEAD_LETTER_OPTIONS },
+  { name: QUEUE.phoneVerifyDead, options: DEAD_LETTER_OPTIONS },
   {
     name: QUEUE.emailSend,
     options: {
@@ -222,9 +241,41 @@ export const queueDefinitions: QueueDefinition[] = [
       deadLetter: QUEUE.inboxSweepDead,
     },
   },
+  {
+    // Limpeza de mensagens (bloco R): cron diário. `exclusive` + `singletonKey` fixo: no máximo um
+    // job vivo (na fila ou rodando). **Sem retry** e com expiração longa: um job expirado ou repetido
+    // começaria uma segunda passada enquanto a primeira ainda apaga. O escopo que falha só vai ao log;
+    // uma falha ao listar os escopos espera o ciclo do dia seguinte.
+    name: QUEUE.inboxRetention,
+    options: {
+      policy: "exclusive",
+      retryLimit: 0,
+      expireInSeconds: 6 * 3600,
+      deleteAfterSeconds: 7 * 24 * 3600,
+      deadLetter: QUEUE.inboxRetentionDead,
+    },
+  },
+  {
+    // `singleton` por cadastro (`singletonKey` = `user:<id>` ou `customer:<id>`): um job ativo
+    // por pessoa, os demais esperam. É o que garante um link por número quando o cadastro e o
+    // aceite do convite abrem dois pedidos quase juntos. Falha de provedor é tratada no job (a
+    // cascata segue); o retry é só para erro de banco.
+    name: QUEUE.phoneVerify,
+    options: {
+      policy: "singleton",
+      retryLimit: 2,
+      retryDelay: 30,
+      expireInSeconds: 300,
+      deleteAfterSeconds: 24 * 3600,
+      deadLetter: QUEUE.phoneVerifyDead,
+    },
+  },
 ];
 
-export type ScheduleDefinition = { queue: string; cron: string };
+export type ScheduleDefinition = { queue: string; cron: string; singletonKey?: string };
+
+/** `singletonKey` do job diário de retenção: um só vivo por vez (fila `exclusive`). */
+export const INBOX_RETENTION_SINGLETON = "inbox.retention";
 
 /** Crons (UTC), como em `spec-email-jobs.md`. */
 export const scheduleDefinitions: ScheduleDefinition[] = [
@@ -236,4 +287,5 @@ export const scheduleDefinitions: ScheduleDefinition[] = [
   { queue: QUEUE.lgpdDelete, cron: "0 5 * * *" },
   { queue: QUEUE.channelHealth, cron: "*/15 * * * *" },
   { queue: QUEUE.inboxSweep, cron: "*/5 * * * *" },
+  { queue: QUEUE.inboxRetention, cron: "45 4 * * *", singletonKey: INBOX_RETENTION_SINGLETON },
 ];

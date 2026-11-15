@@ -256,4 +256,45 @@ describe("parseEnv", () => {
       ).toEqual([]);
     });
   });
+
+  describe("retenção de mensagens (bloco R)", () => {
+    it("ausente: desligada, sem limites, piso de 72 h e lote de 5000", () => {
+      const env = parseEnv(base);
+
+      expect(env.MESSAGE_RETENTION_ENABLED).toBe(false);
+      expect(env.MESSAGE_RETENTION_WHATSAPP_QR_MAX_MESSAGES).toBeUndefined();
+      expect(env.MESSAGE_RETENTION_WHATSAPP_CLOUD_DAYS).toBeUndefined();
+      expect(env.MESSAGE_RETENTION_MIN_AGE_HOURS).toBe(72);
+      expect(env.MESSAGE_RETENTION_BATCH_LIMIT).toBe(5000);
+    });
+
+    it("lê os valores do exemplo de produção, e vazio é ausente", () => {
+      const env = parseEnv({
+        ...base,
+        MESSAGE_RETENTION_ENABLED: "true",
+        MESSAGE_RETENTION_WHATSAPP_QR_MAX_MESSAGES: "5000",
+        MESSAGE_RETENTION_WHATSAPP_QR_DAYS: "90",
+        MESSAGE_RETENTION_WHATSAPP_QR_MAX_FAVORITES: "0",
+        MESSAGE_RETENTION_WHATSAPP_CLOUD_DAYS: "",
+      });
+
+      expect(env.MESSAGE_RETENTION_ENABLED).toBe(true);
+      expect(env.MESSAGE_RETENTION_WHATSAPP_QR_MAX_MESSAGES).toBe(5000);
+      expect(env.MESSAGE_RETENTION_WHATSAPP_QR_DAYS).toBe(90);
+      expect(env.MESSAGE_RETENTION_WHATSAPP_QR_MAX_FAVORITES).toBe(0);
+      expect(env.MESSAGE_RETENTION_WHATSAPP_CLOUD_DAYS).toBeUndefined();
+    });
+
+    it.each([
+      ["MESSAGE_RETENTION_WHATSAPP_QR_DAYS", "-1"],
+      ["MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_MESSAGES", "abc"],
+      ["MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_FAVORITES", "1.5"],
+      ["MESSAGE_RETENTION_MIN_AGE_HOURS", "1"],
+      ["MESSAGE_RETENTION_BATCH_LIMIT", "0"],
+    ])("%s=%s derruba a subida", (key, value) => {
+      const problems = problemsOf({ ...base, [key]: value });
+
+      expect(problems.some((problem) => problem.startsWith(`${key}:`))).toBe(true);
+    });
+  });
 });

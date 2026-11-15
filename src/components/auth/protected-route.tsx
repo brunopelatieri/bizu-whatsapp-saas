@@ -1,8 +1,9 @@
 import { Navigate, Outlet, useLocation } from "react-router";
+import { TeamPhoneGate } from "@/components/phone/phone-verification-panel";
 import { useAuth } from "@/providers/auth-provider";
 
 export function ProtectedRoute() {
-  const { user, loading } = useAuth();
+  const { user, loading, phoneBlocked } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -24,6 +25,10 @@ export function ProtectedRoute() {
       />
     );
   }
+
+  // A API já recusa tudo (403 `PHONE_UNVERIFIED`); a tela só acompanha, em `/app`, `/admin` e
+  // no onboarding.
+  if (phoneBlocked) return <TeamPhoneGate />;
 
   return <Outlet />;
 }

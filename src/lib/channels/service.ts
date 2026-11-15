@@ -57,6 +57,8 @@ export type ChannelView = {
   qualityRating?: string | null;
   accessTokenHint?: string | null;
   webhookVerifiedAt?: Date | null;
+  /** O modelo que leva o link de verificação de telefone (T4); `null` sem modelo escolhido. */
+  verificationTemplate?: { name: string; language: string } | null;
   // QR Code
   connectedPhone?: string | null;
   advancedSettings?: Record<string, unknown> | null;
@@ -141,6 +143,13 @@ async function toViews(tx: Tx, rows: ChannelRow[]): Promise<ChannelView[]> {
           qualityRating: cloud.qualityRating,
           accessTokenHint: safeHint(cloud.accessTokenEnc, row.id),
           webhookVerifiedAt: cloud.webhookVerifiedAt,
+          verificationTemplate:
+            cloud.verificationTemplateName && cloud.verificationTemplateLanguage
+              ? {
+                  name: cloud.verificationTemplateName,
+                  language: cloud.verificationTemplateLanguage,
+                }
+              : null,
         });
       }
       if (evolution) {

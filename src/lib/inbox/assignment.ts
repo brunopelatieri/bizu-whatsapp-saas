@@ -29,7 +29,7 @@ export async function auditInbox(
   tx: Tx,
   actor: InboxActor,
   action: AuditAction,
-  target: { type: "conversation" | "chat_contact"; id: string },
+  target: { type: "conversation" | "chat_contact" | "message"; id: string },
   metadata?: Record<string, string | number | boolean | null>,
 ) {
   await auditInTransaction(tx, action, {

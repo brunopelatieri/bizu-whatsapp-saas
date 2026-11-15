@@ -14,3 +14,4 @@ export * from "./schema/lgpd";
 export * from "./schema/channels";
 export * from "./schema/crm";
 export * from "./schema/inbox";
+export * from "./schema/phone";

@@ -24,7 +24,7 @@ import { comparableHeaders } from "./tenant-helpers";
  * dividir contadores de rate limit com os demais.
  */
 
-const PASSWORD = "senha-forte-123";
+const PASSWORD = "Senha-forte-123";
 const DOMAIN = "auth-test.bizu.local";
 
 const mail = createMemoryProvider();
@@ -197,6 +197,7 @@ describe("autenticação", () => {
     });
 
     it("cadastro exige o aceite dos termos e senha de 10 caracteres", async () => {
+      // As demais regras da senha: "política de senha", abaixo.
       const email = newEmail();
       const base = { name: "Ana", email, termsVersion: "2026-11" };
 
@@ -350,7 +351,7 @@ describe("autenticação", () => {
     });
 
     it("cadastro + login não revelam se o e-mail já existia", async () => {
-      const password = "senha-de-quem-sonda";
+      const password = "Senha-de-quem-sonda-1";
 
       const probe = async (email: string) => {
         await post("/api/auth/sign-up/email", {
@@ -398,7 +399,7 @@ describe("autenticação", () => {
   });
 
   describe("cadastro pendente vencido", () => {
-    const ATTACKER_PASSWORD = "senha-do-atacante";
+    const ATTACKER_PASSWORD = "Senha-do-atacante-1";
 
     /** Conta não verificada criada há 25 h, com a senha de quem cadastrou. */
     async function stalePendingSignup(email: string) {
@@ -487,13 +488,13 @@ describe("autenticação", () => {
       await post("/api/auth/sign-up/email", {
         name: "Invasor",
         email,
-        password: "outra-senha-123",
+        password: "Outra-senha-123",
         phone: "11987654321",
         acceptTerms: true,
         termsVersion: "2026-11",
       });
 
-      expect((await signIn(email, "outra-senha-123")).status).toBe(401);
+      expect((await signIn(email, "Outra-senha-123")).status).toBe(401);
       expect((await signIn(email)).status).toBe(200);
     });
 
@@ -558,14 +559,14 @@ describe("autenticação", () => {
         "http://localhost:5173/redefinir-senha?token=",
       );
 
-      const newPassword = "nova-senha-456";
+      const newPassword = "Nova-senha-456";
       const first = await post("/api/auth/reset-password", {
         token,
         newPassword,
       });
       const second = await post("/api/auth/reset-password", {
         token,
-        newPassword: "terceira-senha-789",
+        newPassword: "Terceira-senha-789",
       });
 
       expect(first.status).toBe(200);
@@ -584,7 +585,7 @@ describe("autenticação", () => {
 
       const response = await post("/api/auth/reset-password", {
         token,
-        newPassword: "nova-senha-456",
+        newPassword: "Nova-senha-456",
       });
       expect(response.status).toBe(200);
     });
@@ -608,11 +609,160 @@ describe("autenticação", () => {
       await post("/api/auth-ext/forgot-password", { email });
       await post("/api/auth/reset-password", {
         token: await lastToken(email, "reset-password"),
-        newPassword: "nova-senha-456",
+        newPassword: "Nova-senha-456",
       });
 
       // Vale mesmo com o cookie de cache da sessão ainda dentro dos 5 minutos.
       expect((await get("/api/me", { cookie })).status).toBe(401);
+    });
+  });
+
+  describe("política de senha", () => {
+    /** Dez ou mais caracteres, cada uma sem uma das regras. */
+    const WEAK = [
+      "senha-forte-123",
+      "SENHA-FORTE-123",
+      "Senha-forte-abc",
+      "SenhaForte123",
+      "Senha-for\u0007te-123",
+      `Aa1!${"x".repeat(125)}`,
+    ];
+
+    const signUpWith = (email: string, password: string) =>
+      post("/api/auth/sign-up/email", {
+        name: "Ana Teste",
+        email,
+        password,
+        phone: "11987654321",
+        acceptTerms: true,
+        termsVersion: "2026-11",
+      });
+
+    it("cadastro recusa senha fraca e não cria a conta", async () => {
+      const email = newEmail();
+
+      for (const password of WEAK) {
+        expect((await signUpWith(email, password)).status).toBe(400);
+      }
+
+      expect(await isVerified(email)).toBeUndefined();
+    });
+
+    it("cadastro direto na instância, sem o Zod da rota, também recusa", async () => {
+      const email = newEmail();
+
+      for (const password of WEAK) {
+        const response = await getAuth().handler(
+          new Request("http://localhost:5173/api/auth/sign-up/email", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Origin: "http://localhost:5173",
+              "x-bizu-client-ip": nextIp(),
+            },
+            body: JSON.stringify({ name: "Ana Teste", email, password }),
+          }),
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ code: "PASSWORD_POLICY" });
+      }
+
+      await expect(
+        getAuth().api.signUpEmail({
+          body: { name: "Ana Teste", email, password: "senha-forte-123" },
+        }),
+      ).rejects.toMatchObject({ body: { code: "PASSWORD_POLICY" } });
+
+      expect(await isVerified(email)).toBeUndefined();
+    });
+
+    it("redefinição recusa senha fraca sem gastar o link", async () => {
+      const { email } = await verifiedUser();
+      await post("/api/auth-ext/forgot-password", { email });
+      const token = await lastToken(email, "reset-password");
+
+      for (const newPassword of WEAK) {
+        const refused = await post("/api/auth/reset-password", { token, newPassword });
+
+        expect(refused.status).toBe(400);
+        expect(await refused.json()).toMatchObject({ code: "PASSWORD_POLICY" });
+      }
+      expect((await signIn(email)).status).toBe(200);
+
+      const accepted = await post("/api/auth/reset-password", {
+        token,
+        newPassword: "Nova-senha-456",
+      });
+      expect(accepted.status).toBe(200);
+    });
+
+    it("troca de senha recusa a fraca e mantém a atual", async () => {
+      const { email, cookie } = await verifiedUser();
+
+      for (const newPassword of WEAK) {
+        const refused = await post(
+          "/api/auth/change-password",
+          { currentPassword: PASSWORD, newPassword },
+          { cookie },
+        );
+
+        expect(refused.status).toBe(400);
+        expect(await refused.json()).toMatchObject({ code: "PASSWORD_POLICY" });
+      }
+      expect((await signIn(email)).status).toBe(200);
+
+      const changed = await post(
+        "/api/auth/change-password",
+        { currentPassword: PASSWORD, newPassword: "Senha-trocada-123" },
+        { cookie },
+      );
+      expect(changed.status).toBe(200);
+      expect((await signIn(email, "Senha-trocada-123")).status).toBe(200);
+    });
+
+    it("grava a senha normalizada e o login normaliza igual", async () => {
+      const email = newEmail();
+      // Pontas com espaço e `ñ` decomposto: o que vale é "Señha forte 1!".
+      await signUpWith(email, "  Señha forte 1!  ");
+      await verify(await lastToken(email, "verify-email"));
+
+      expect((await signIn(email, "Señha forte 1!")).status).toBe(200);
+      expect((await signIn(email, " Señha forte 1!\t")).status).toBe(200);
+      expect((await signIn(email, "Señha  forte 1!")).status).toBe(401);
+
+      // Redefinição e troca, que não passam pelo Zod, normalizam do mesmo jeito.
+      await post("/api/auth-ext/forgot-password", { email });
+      const reset = await post("/api/auth/reset-password", {
+        token: await lastToken(email, "reset-password"),
+        newPassword: " Nova-senha-456 ",
+      });
+      expect(reset.status).toBe(200);
+
+      const signedIn = await signIn(email, "Nova-senha-456");
+      expect(signedIn.status).toBe(200);
+
+      const changed = await post(
+        "/api/auth/change-password",
+        { currentPassword: "Nova-senha-456 ", newPassword: "\tSenha-trocada-123 " },
+        { cookie: sessionCookies(signedIn) },
+      );
+      expect(changed.status).toBe(200);
+      expect((await signIn(email, "Senha-trocada-123")).status).toBe(200);
+    });
+
+    it("login não cobra complexidade de senha antiga", async () => {
+      const { email } = await verifiedUser();
+      const { password } = await getAuth().$context;
+      const old = "senhaantiga";
+
+      await owner`
+        update account set password = ${await password.hash(old)}
+        where provider_id = 'credential'
+          and user_id = (select id from "user" where email = ${email})
+      `;
+
+      expect((await signIn(email, old)).status).toBe(200);
     });
   });
 
@@ -869,10 +1019,10 @@ describe("autenticação", () => {
           {
             userId: targetId,
             role: "platform_owner",
-            newPassword: "senha-trocada-123",
+            newPassword: "Senha-trocada-123",
             data: { name: "Alterado" },
             email: newEmail(),
-            password: "senha-trocada-123",
+            password: "Senha-trocada-123",
             name: "Criado",
             sessionToken: "x",
           },

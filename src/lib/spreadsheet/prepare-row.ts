@@ -1,0 +1,69 @@
+import { CUSTOMER_TAG_LIMIT } from "@/lib/crm/constants";
+import { phoneErrorMessage } from "@/lib/phone/br";
+import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { tagNameSchema } from "@/lib/schemas/crm";
+import { type CustomerInput, customerSchema } from "@/lib/schemas/customer";
+import type { ImportRowInput } from "@/lib/schemas/customer-import";
+import { customerFieldsFromRow } from "@/lib/spreadsheet/customer-row";
+
+/**
+ * A validação de uma linha da planilha pelas regras do cadastro, **uma só para a tela e para o
+ * servidor**: `customerSchema` (nome, e-mail, documento, observação, telefone), `phoneValues`
+ * (a chave de comparação do telefone) e as etiquetas (nome de até 40 caracteres, até 20 por
+ * cliente). A tela a usa para contar e listar as linhas inválidas antes de enviar; o servidor a
+ * roda de novo, porque nada que vem do navegador vale por si.
+ */
+
+export type PreparedRow = {
+  sourceRow: number;
+  input: CustomerInput;
+  phone: ReturnType<typeof phoneValues>;
+  /** Nomes normalizados, sem repetição (sem diferenciar a caixa), no máximo `CUSTOMER_TAG_LIMIT`. */
+  tagNames: string[];
+};
+
+export type PrepareResult = { ok: true; row: PreparedRow } | { ok: false; reason: string };
+
+/** O Postgres não guarda \u0000 em texto: um valor com ele derrubaria o `INSERT` do lote inteiro. */
+const hasNul = (row: ImportRowInput) =>
+  [row.phone, row.name, row.email, row.document, row.notes, ...row.tags].some((value) =>
+    value?.includes("\u0000"),
+  );
+
+export function prepareRow(row: ImportRowInput): PrepareResult {
+  if (hasNul(row)) return { ok: false, reason: "O texto tem um caractere inválido." };
+
+  const parsed = customerSchema.safeParse(customerFieldsFromRow(row));
+  if (!parsed.success) {
+    return { ok: false, reason: parsed.error.issues[0]?.message ?? "Linha inválida." };
+  }
+
+  let phone: ReturnType<typeof phoneValues>;
+  try {
+    phone = phoneValues(parsed.data.phone);
+  } catch (error) {
+    if (error instanceof InvalidPhoneError) {
+      return { ok: false, reason: phoneErrorMessage(error.reason) };
+    }
+    throw error;
+  }
+
+  const seen = new Set<string>();
+  const tagNames: string[] = [];
+  for (const raw of row.tags) {
+    if (raw.trim() === "") continue;
+    const name = tagNameSchema.safeParse(raw);
+    if (!name.success) {
+      return { ok: false, reason: `Etiqueta inválida: ${name.error.issues[0]?.message ?? "nome"}` };
+    }
+    const key = name.data.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tagNames.push(name.data);
+  }
+  if (tagNames.length > CUSTOMER_TAG_LIMIT) {
+    return { ok: false, reason: `Um cliente pode ter até ${CUSTOMER_TAG_LIMIT} etiquetas.` };
+  }
+
+  return { ok: true, row: { sourceRow: row.sourceRow, input: parsed.data, phone, tagNames } };
+}

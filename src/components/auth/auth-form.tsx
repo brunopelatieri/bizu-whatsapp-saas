@@ -10,6 +10,7 @@ import {
   authLinkClassName,
   authSubmitClassName,
 } from "@/components/auth/auth-shell";
+import { PasswordStrengthMeter } from "@/components/auth/password-strength-meter";
 import { ResendVerification } from "@/components/auth/resend-verification";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,11 +24,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { PhoneField } from "@/components/ui/phone-field";
 import { safeNextPath } from "@/lib/auth/next-path";
+import { passwordChecklist } from "@/lib/auth/password-checklist";
 import { TERMS_VERSION } from "@/lib/legal/versions";
 import {
   type LoginInput,
   loginSchema,
-  MIN_PASSWORD_LENGTH,
   type SignupInput,
   signupSchema,
 } from "@/lib/schemas/auth";
@@ -344,10 +345,11 @@ export function SignupForm({
                     {...field}
                     type="password"
                     autoComplete="new-password"
-                    placeholder={`Mínimo de ${MIN_PASSWORD_LENGTH} caracteres`}
+                    placeholder="Crie uma senha forte"
                     className={authInputClassName}
                   />
                 </FormControl>
+                <PasswordStrengthMeter password={field.value} />
                 <FormMessage />
               </FormItem>
             )}
@@ -420,7 +422,11 @@ export function SignupForm({
             type="submit"
             size="lg"
             className={authSubmitClassName}
-            disabled={form.formState.isSubmitting || !form.formState.isValid}
+            disabled={
+              form.formState.isSubmitting ||
+              !form.formState.isValid ||
+              !passwordChecklist(form.watch("password")).valid
+            }
           >
             {form.formState.isSubmitting ? (
               <>

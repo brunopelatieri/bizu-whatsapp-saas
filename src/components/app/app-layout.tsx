@@ -10,6 +10,7 @@ import { AppTopbar } from "@/components/app/app-topbar";
 import { BillingBanner } from "@/components/app/billing-banner";
 import { ConsentGate } from "@/components/app/consent-gate";
 import { ImpersonationBanner } from "@/components/app/impersonation-banner";
+import { TeamPhonePendingBanner } from "@/components/phone/phone-verification-panel";
 import { TenantSwitcher } from "@/components/app/tenant-switcher";
 import { InboxEvents } from "@/components/inbox/use-inbox-events";
 import {
@@ -104,6 +105,7 @@ export function AppLayout() {
           title={title}
         />
         <BillingBanner />
+        <TeamPhonePendingBanner />
         {/* O atendimento ocupa a altura toda e rola por dentro; as demais telas rolam aqui. */}
         <main
           className={cn(

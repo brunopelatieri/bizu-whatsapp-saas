@@ -15,6 +15,7 @@ export const RESOURCE_LABELS: Record<Resource, string> = {
   tag: "Etiquetas",
   custom_field: "Campos adicionais",
   inbox: "Atendimento",
+  phone: "Telefone",
 };
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -50,4 +51,5 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "inbox:reply": "Responder, assumir e mudar a situação das conversas",
   "inbox:assign": "Transferir conversas e devolver as de outros à fila",
   "inbox:supervise": "Ver as conversas de todos os atendentes",
+  "phone:confirm": "Liberar à mão o telefone de membros e clientes",
 };

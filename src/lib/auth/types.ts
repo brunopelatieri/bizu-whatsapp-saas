@@ -31,6 +31,11 @@ export type MeResponse = {
   security: { tenantRequires2fa: boolean; platformRequires2fa: boolean };
   /** Documentos legais com versão nova a aceitar. Vazio: nada pendente (ou sessão de suporte). */
   consentRequired: Array<"terms" | "privacy">;
+  /**
+   * O telefone não vale na organização ativa (T3). Só chega `true` com
+   * `PHONE_VERIFICATION_REQUIRED=false`: ligada, a API responde 403 `PHONE_UNVERIFIED` antes.
+   */
+  phonePending: boolean;
 };
 
 /** Usuário independente de provedor, usado pela interface e pela API. */
@@ -48,6 +53,8 @@ export type AuthUser = {
     permissions: string[];
   } | null;
   impersonatedBy: string | null;
+  /** A foto de perfil (`/api/avatars/:id?v=`), só em `GET /api/me`; `null` sem foto (bloco F). */
+  avatarUrl?: string | null;
 };
 
 type SessionData = {

@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import type { TenantAccessMode, TenantStatus } from "@/db/schema/tenant";
 import { phoneValues } from "@/lib/phone/columns";
+import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 
 /**
@@ -191,11 +192,18 @@ export function leavePortalTenant(
  * Identidade do e-mail, criada sem senha e sem verificação se ainda não existir. O telefone é
  * o do cliente convidado e só entra na criação: quem já tem conta (mesmo e-mail em outro
  * tenant) mantém o dele. Este `INSERT` direto não passa pelo hook do Better Auth.
+ *
+ * A conta é global e nasce sempre com o telefone **pendente**, qualquer que seja o estado da
+ * ficha. O que uma organização atesta (`team`, a liberação do owner) vale só nela: copiado para
+ * a conta, valeria em todas, e uma organização de fachada criaria uma identidade com o número de
+ * outra pessoa já "confirmado". Nem a prova de posse da ficha é copiada: foi dada por outra
+ * identidade (a ficha pode ter trocado de e-mail). Quem confirma a conta é a prova feita na
+ * sessão dela (`confirmCustomer`).
  */
 export async function ensurePortalUser(email: string, name: string, phone: string) {
   await getDb()
     .insert(portalUser)
-    .values({ email, name, ...phoneValues(phone) })
+    .values({ email, name, ...phoneValues(phone), ...UNVERIFIED_PHONE })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [row] = await getDb()
@@ -207,7 +215,11 @@ export async function ensurePortalUser(email: string, name: string, phone: strin
   return row.id;
 }
 
-/** Sem cliente em nenhum tenant, a identidade é só dado pessoal parado. */
+/**
+ * Sem cliente em nenhum tenant, a identidade é só dado pessoal parado. A conta que espera a
+ * confirmação de um `claim` (autocadastro com o número de outra ficha, D-1) ainda não tem ficha, mas
+ * não é órfã: é ela que vai confirmar o link.
+ */
 export function dropOrphanPortalUser(portalUserId: string) {
   return withPlatformScope("portal: remove identidade sem cliente", (tx) =>
     tx
@@ -216,6 +228,7 @@ export function dropOrphanPortalUser(portalUserId: string) {
         and(
           eq(portalUser.id, portalUserId),
           sql`not exists (select 1 from ${customer} where ${customer.portalUserId} = ${portalUser.id})`,
+          sql`not exists (select 1 from phone_verification pv where pv.purpose = 'claim' and pv.status in ('sent', 'awaiting_manual') and pv.requested_by_type = 'portal_user' and pv.requested_by_id = ${portalUser.id})`,
         ),
       ),
   );

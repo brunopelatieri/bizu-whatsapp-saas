@@ -1,0 +1,187 @@
+import { describe, expect, it } from "vitest";
+import type { ImportBatchResponse, ImportRowInput } from "@/lib/schemas/customer-import";
+import { planImport, runImport, toBatchRow } from "@/lib/spreadsheet/import-plan";
+import { prepareRow } from "@/lib/spreadsheet/prepare-row";
+import type { RawImportRow } from "@/lib/spreadsheet/types";
+
+const row = (sourceRow: number, extra: Partial<RawImportRow> = {}): RawImportRow => ({
+  sourceRow,
+  phone: "11987654321",
+  tags: [],
+  ...extra,
+});
+
+describe("prepareRow", () => {
+  const input = (extra: Partial<ImportRowInput> = {}): ImportRowInput => ({
+    sourceRow: 2,
+    phone: "11987654321",
+    tags: [],
+    ...extra,
+  });
+
+  it("linha válida: nome de reserva, chave do telefone e etiquetas sem repetição", () => {
+    const result = prepareRow(input({ tags: ["VIP", " vip ", "Lead", ""] }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.row.input.name).toBe("+55 (11) 98765-4321");
+    // A chave é a mesma com e sem o 9º dígito: 55 + DDD + os 8 dígitos finais.
+    expect(result.row.phone.phoneKey).toBe("551187654321");
+    expect(result.row.tagNames).toEqual(["VIP", "Lead"]);
+  });
+
+  it("recusa pelo motivo do cadastro: telefone, e-mail, nome, observação, etiqueta", () => {
+    const reason = (extra: Partial<ImportRowInput>) => {
+      const result = prepareRow(input(extra));
+      return result.ok ? null : result.reason;
+    };
+    expect(reason({ phone: "" })).toBeTruthy();
+    expect(reason({ phone: "5510987654321" })).toBe("DDD inexistente.");
+    expect(reason({ phone: "abc" })).toContain("números");
+    expect(reason({ email: "não é e-mail" })).toBe("Informe um e-mail válido.");
+    expect(reason({ name: "A" })).toBe("Informe o nome.");
+    expect(reason({ notes: "x".repeat(2_001) })).toBe("Observação muito longa.");
+    expect(reason({ tags: ["x".repeat(41)] })).toContain("Etiqueta inválida");
+    expect(reason({ tags: Array.from({ length: 21 }, (_, i) => `t${i}`) })).toContain("20 etiquetas");
+  });
+
+  it("caractere NUL em qualquer campo recusa a linha (o Postgres derrubaria o lote)", () => {
+    for (const extra of [{ name: "Ma\u0000ria" }, { notes: "\u0000" }, { email: "a\u0000@x.com" }, { tags: ["v\u0000ip"] }]) {
+      const result = prepareRow(input(extra));
+      expect(result).toEqual({ ok: false, reason: "O texto tem um caractere inválido." });
+    }
+  });
+
+  it("o motivo nunca repete o conteúdo da linha", () => {
+    const result = prepareRow(input({ email: "SEGREDO-no-email", phone: "11987654321" }));
+    expect(result.ok ? "" : result.reason).not.toContain("SEGREDO");
+  });
+});
+
+describe("planImport", () => {
+  it("separa o que vale enviar do que já se sabe recusado, e conta", () => {
+    const plan = planImport([
+      row(2),
+      row(3, { phone: "11987654321" }), // o mesmo número da linha 2
+      row(4, { phone: "(11) 98765-4321" }), // o mesmo número, escrito de outro jeito
+      row(5, { phone: "1187654321" }), // o mesmo número sem o 9º dígito
+      row(6, { phone: "" }),
+      row(7, { phone: "21988887777", problem: "Uma célula tem mais de 2.000 caracteres." }),
+      row(8, { phone: "21988887777", name: "Maria" }),
+    ]);
+
+    expect(plan.counts).toEqual({ read: 7, valid: 2, duplicate: 3, invalid: 2 });
+    expect(plan.send.map((r) => r.sourceRow)).toEqual([2, 8]);
+    expect(plan.rejected.map((r) => [r.sourceRow, r.status])).toEqual([
+      [3, "duplicate"],
+      [4, "duplicate"],
+      [5, "duplicate"],
+      [6, "invalid"],
+      [7, "invalid"],
+    ]);
+  });
+
+  it("linha com problema de leitura nunca é enviada (o valor foi cortado)", () => {
+    const plan = planImport([row(2, { problem: "x" })]);
+    expect(plan.send).toEqual([]);
+  });
+
+  it("toBatchRow só leva os campos do contrato", () => {
+    expect(toBatchRow(row(2, { problem: "x", name: "Maria" }))).toEqual({
+      sourceRow: 2,
+      phone: "11987654321",
+      name: "Maria",
+      tags: [],
+    });
+  });
+});
+
+describe("runImport", () => {
+  const rows = (count: number): ImportRowInput[] =>
+    Array.from({ length: count }, (_, i) => ({ sourceRow: i + 2, phone: "11987654321", tags: [] }));
+
+  const answer = (batch: ImportRowInput[]): ImportBatchResponse => ({
+    results: batch.map((r) => ({ sourceRow: r.sourceRow, status: "created" as const })),
+    counts: { created: batch.length, duplicate: 0, invalid: 0, limit: 0 },
+    teamLinked: 0,
+    tags: { created: 1, ignored: 0, ignoredReason: null },
+  });
+
+  it("envia em lotes na ordem, um depois do outro", async () => {
+    const sizes: number[] = [];
+    let inFlight = 0;
+    let overlapped = false;
+
+    const run = await runImport(
+      rows(1_201),
+      async (batch) => {
+        inFlight += 1;
+        overlapped ||= inFlight > 1;
+        sizes.push(batch.length);
+        await Promise.resolve();
+        inFlight -= 1;
+        return answer(batch);
+      },
+      { batchSize: 500 },
+    );
+
+    expect(sizes).toEqual([500, 500, 201]);
+    expect(overlapped).toBe(false);
+    expect(run.results.map((r) => r.sourceRow)).toEqual(Array.from({ length: 1_201 }, (_, i) => i + 2));
+    expect(run).toMatchObject({ batchesDone: 3, batchesTotal: 3, stopped: null });
+    expect(run.tags.created).toBe(3);
+  });
+
+  it("o lote nunca passa de 500, mesmo que peçam mais", async () => {
+    const sizes: number[] = [];
+    await runImport(
+      rows(600),
+      async (batch) => {
+        sizes.push(batch.length);
+        return answer(batch);
+      },
+      { batchSize: 9_999 },
+    );
+    expect(sizes).toEqual([500, 100]);
+  });
+
+  it("um lote que falha para os seguintes e guarda o que já entrou", async () => {
+    let calls = 0;
+    const run = await runImport(
+      rows(1_200),
+      async (batch) => {
+        calls += 1;
+        if (calls === 2) throw new Error("falhou");
+        return answer(batch);
+      },
+      { batchSize: 500 },
+    );
+
+    expect(calls).toBe(2);
+    expect(run.stopped).toBe("error");
+    expect(run.results).toHaveLength(500);
+    expect(run.batchesDone).toBe(1);
+  });
+
+  it("cancelar para antes do próximo lote", async () => {
+    let stop = false;
+    const run = await runImport(
+      rows(1_200),
+      async (batch) => {
+        stop = true;
+        return answer(batch);
+      },
+      { batchSize: 500, shouldStop: () => stop },
+    );
+    expect(run.stopped).toBe("canceled");
+    expect(run.results).toHaveLength(500);
+  });
+
+  it("avisa o progresso a cada lote", async () => {
+    const seen: number[] = [];
+    await runImport(rows(1_000), async (batch) => answer(batch), {
+      batchSize: 500,
+      onProgress: (progress) => seen.push(progress.results.length),
+    });
+    expect(seen).toEqual([500, 1_000]);
+  });
+});

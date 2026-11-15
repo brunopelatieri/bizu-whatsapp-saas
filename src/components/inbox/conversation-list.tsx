@@ -1,8 +1,13 @@
 import { Inbox, Loader2, MessageSquarePlus, Search, Tags } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { QueryState } from "@/components/admin/query-state";
 import { useChannels } from "@/components/channels/channels-api";
+import {
+  CHANNEL_PARAM,
+  parseChannelParam,
+  resolveChannelFilter,
+} from "@/components/inbox/channel-filter";
 import { TagChip } from "@/components/crm/tag-chip";
 import { useTags } from "@/components/crm/tags-api";
 import { ConversationItem } from "@/components/inbox/conversation-item";
@@ -82,13 +87,42 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
   const [tab, setTab] = useState<ConversationTab>(tenantMode ? "queue" : "all");
   const [status, setStatus] = useState<ConversationStatus | undefined>();
   const [unread, setUnread] = useState(false);
-  const [channelId, setChannelId] = useState<string | undefined>();
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [assignedTo, setAssignedTo] = useState<string | undefined>();
   const [search, setSearch] = useState("");
   const q = useDebounced(search.trim(), SEARCH_DEBOUNCE_MS);
 
+  // O filtro de número mora na URL (`?canal=<id>`, `channel-filter.ts`): sobrevive a recarregar e a
+  // voltar. Só vale o id de um número deste escopo; qualquer outro cai em "todos" e sai da URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawChannelParam = searchParams.get(CHANNEL_PARAM);
+  const channelParam = parseChannelParam(rawChannelParam);
+
   const channels = useChannels(inbox.channelsPath);
+  const channelList = channels.data?.channels ?? [];
+  const channelId = resolveChannelFilter(
+    channelParam,
+    channels.isSuccess ? channelList.map((channel) => channel.id) : undefined,
+  );
+  const channelSettled = channels.isSuccess || channels.isError;
+  // Com o parâmetro na URL e os números ainda sendo lidos, a lista espera: sem isso, ela pediria
+  // "todos" e depois trocaria para o número.
+  const channelPending = Boolean(channelParam) && !channelSettled;
+
+  function setChannelFilter(next: string | undefined) {
+    // Só o canal vai para a URL; qualquer outro parâmetro é descartado. Empilha no histórico: voltar
+    // desfaz a troca de número.
+    setSearchParams(next ? { [CHANNEL_PARAM]: next } : {});
+  }
+
+  // Parâmetro inválido (formato ou número que não é daqui): limpa da URL sem empilhar histórico.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: só o resultado da resolução importa
+  useEffect(() => {
+    if (rawChannelParam === null || channelId) return;
+    if (channelParam && !channelSettled) return;
+    setSearchParams({}, { replace: true });
+  }, [rawChannelParam, channelParam, channelId, channelSettled]);
+
   const tags = useTags(canFilterTags);
   const assignees = useAssignees(canSupervise && can("inbox", "assign"));
   const unreadCounts = useInboxUnread();
@@ -107,7 +141,7 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
     [tab, status, unread, channelId, tagIds, assignedTo, q, canFilterTags, canSupervise],
   );
 
-  const query = useConversations(filters);
+  const query = useConversations(filters, !channelPending);
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = query;
 
@@ -130,7 +164,6 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const channelList = channels.data?.channels ?? [];
   const usableChannels = channelList.filter((channel) => channel.status === "connected");
   const filtering = Boolean(status || unread || channelId || tagIds.length > 0 || assignedTo || q);
   const channelItems = [
@@ -145,7 +178,7 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
   function clearFilters() {
     setStatus(undefined);
     setUnread(false);
-    setChannelId(undefined);
+    setChannelFilter(undefined);
     setTagIds([]);
     setAssignedTo(undefined);
     setSearch("");
@@ -253,7 +286,7 @@ export function ConversationList({ selectedId, onNewConversation, className }: C
             <Select
               items={channelItems}
               value={channelId ?? ALL}
-              onValueChange={(next) => setChannelId(next && next !== ALL ? next : undefined)}
+              onValueChange={(next) => setChannelFilter(next && next !== ALL ? next : undefined)}
             >
               <SelectTrigger size="sm" aria-label="Filtrar por número" className="w-auto max-w-40">
                 <SelectValue />

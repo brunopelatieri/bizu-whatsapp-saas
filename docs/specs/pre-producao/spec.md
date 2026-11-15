@@ -1,0 +1,2343 @@
+# SPEC: correções e complementos antes da produção
+
+- **Status:** aprovada em 2026-11-11 (decisões de produto e leituras C-1 a C-3 confirmadas pelo proprietário); em implementação: blocos S e B, as fases T1 a T4 do bloco T (T4 parcial), a troca de telefone pelo pedido, a ligação manual da ficha com a equipe, o `claim` do portal, as fases F1 e F2 do bloco F, os blocos L e E, as fases R1, R2 e R3a do bloco R (decisões R1-1 a R1-10, R2-1 a R2-10 e R3a-1 a R3a-5 a confirmar; R3b pendente) e a fase Q1 do bloco Q (trava dos limites de `customers` e `members`; decisões Q1-1 a Q1-5 a confirmar) (decisões E-1 a E-6, T3-1 a T3-9, T4-1 a T4-4, TC-1 a TC-10, TL-2 a TL-6, CL-2, CL-4 a CL-6 e CL-8 a CL-14, F1-1 a F1-5 e F2-1 a F2-8 a confirmar; a TC-5 e parte da T3-7 já foram decididas)
+- **Data:** 2026-11-11
+- **PRD:** não há. As decisões de produto vieram do proprietário em 2026-11-11 e estão
+  registradas em "Decisões do proprietário". Os blocos I, X e Q portam recursos do
+  `zap-crm-br-client` (SPECs 049, 052, 054, 056, 059, 060 e 066 da origem).
+- **Contexto carregado:** `tech/08-auth.md`, `tech/23-billing-planos.md`, `tech/25-portal-clientes.md`,
+  `tech/26-seguranca.md`, `tech/27-lgpd-arquivos.md`, `tech/28-crm-cadastro.md`,
+  `tech/29-canais-whatsapp.md`, `tech/30-caixa-de-entrada.md`, `docs/specs/whatsapp-crm/plano.md`.
+
+> Esta SPEC tem dez blocos. Cada bloco tem estado atual (conferido no código),
+> desenho e fases próprias. A seção "Ordem e portão de produção" diz o que segura o deploy.
+
+## Decisões do proprietário (2026-11-11)
+
+| # | Tema | Decisão |
+|---|---|---|
+| P1 | Vínculo conversa × cliente | Continua pelo **id do cliente**. O controle é sobre o **telefone**: trocar o número exige clicar num link de verificação enviado por WhatsApp ao número novo |
+| P2 | Unicidade | Telefone não se repete na mesma organização **dentro de cada grupo** (clientes entre si; equipe entre si). A leitura inicial, "entre clientes e equipe", foi substituída por D-9 |
+| P3 | Telefone já existente | Quem cadastra um telefone que já existe na organização dispara um link; verificado, o cadastro é liberado |
+| P4 | Retenção | Segue a SPEC 060 da origem |
+| P5 | Texto legal | Acrescentar o WhatsApp. Não há cliente real; o projeto está em desenvolvimento |
+| P6 | Canais na exclusão da organização | Fica como está: o owner apaga os números antes |
+| P7 | Exclusão de cliente | Apaga as conversas dele, com aviso à equipe. **Remover membro da equipe nunca apaga cliente**, com uma exceção (D-11): a ficha de cliente da própria pessoa |
+| P8 | Senha | Regra de senha forte da SPEC 054 da origem em todo formulário que define senha |
+| P9 | Login | Bloqueio por tentativas, com quantidade e tempo em variáveis de ambiente |
+| P10 | Importação | Importar clientes (nome, e-mail, telefone...) como na SPEC 052 da origem |
+| P11 | Atendimento | Verificar os recursos das SPECs 049, 056 e 066 da origem |
+| P12 | Planos | Verificar os recursos da SPEC 059 da origem |
+| P13 | Telefone do owner | Não se repete entre owners no SaaS inteiro |
+| P14 | Telefone da equipe | Membros e admins não repetem telefone na mesma organização |
+| P15 | Telefone do cliente | Não se repete na mesma organização |
+| P16 | Verificação do owner | O cadastro do owner sempre tem link de verificação. Sem canal Cloud ou QR Code da plataforma, só o proprietário da plataforma libera |
+| P17 | Verificação de membros, admins e clientes | O mesmo procedimento, com o owner no papel de quem libera |
+| P18 | Telefone de owner e equipe | Só número de WhatsApp, verificado |
+| D-2 | Acesso com telefone pendente | Configurável: `PHONE_VERIFICATION_REQUIRED` bloqueia até a confirmação |
+| D-3 | Por onde o link sai | Configurável: Cloud, depois QR Code, depois liberação manual. Cloud sem modelo ou sem crédito cai no QR Code |
+| D-4 | Bloqueio de login | Configurável: o e-mail pode não ser bloqueado (`LOGIN_LOCKOUT_SCOPE`) |
+| D-8 | Perfil | Owner e equipe editam foto, nome, e-mail (com verificação) e telefone (WhatsApp, com verificação) |
+| D-1 | Telefone já existente | Quem verifica fica com o número; a ficha de cliente que ficou sem número é apagada |
+| D-5 | Continuar por outro canal | Liberado sem opt-out nem teto de envio frio, e **sem aviso de "número não oficial"**: é só mais um número da organização |
+| D-6 | Arquivo na retenção | A limpeza apaga o arquivo da mensagem |
+| D-7 | Padrões de retenção | Valores baixos, para proteger o servidor |
+| D-10 | Bloqueio de login | Padrão `LOGIN_LOCKOUT_SCOPE=email` |
+| D-11 | Conversa de quem é equipe e cliente | Fica na ficha de cliente. Apagada a pessoa da equipe (ou o owner), a ficha ligada e o conteúdo dela são apagados, e só nesse caso |
+| D-12 | Quem recebe o link da plataforma | Só owners, a equipe da plataforma e quem não é de organização nenhuma. O membro comum recebe o link da organização e **pede** o da plataforma quando quiser a confirmação que vale em todo lugar |
+| D-13 | Quem administra o canal da organização confirma o próprio número pelo link dela | Aceito: o efeito fica dentro da organização (`phone_tenant_vouch`) |
+| D-9 | Equipe que também é cliente | Owner, admins e membros **podem ser clientes da própria organização**: dois cadastros separados (`user` e `customer`) que compartilham telefone e e-mail; o cliente aparece marcado com o papel da pessoa na equipe |
+
+## Onde entra
+
+- [x] Pública com SSR: página `/verificar-telefone` e textos de `/legal/*`
+- [x] API Hono: `/api/phone-verification/*`, `/api/customers/import`, `/api/inbox/*`, `/api/admin/retention/*`, proxy de login
+- [x] Áreas client-only: `/app/clientes`, `/app/atendimento`, `/app/assinatura`, `/portal/conta`, `/admin`
+
+---
+
+## Bloco T: telefone verificado e único (P1 a P3, P13 a P18)
+
+O WhatsApp é a base do produto: o telefone identifica a pessoa, então ele é único no seu
+grupo e só vale depois de confirmado.
+
+### Estado atual
+
+- `customer`, `user` e `portal_user` têm `phone`, `phone_normalized` e `phone_key`
+  (`src/lib/phone/columns.ts:25-37`).
+- Único por organização **só em `customer`**: `customer_tenant_phone_key_idx`
+  (`src/db/schema/customer.ts:68-70`). Em `user` e `portal_user` o índice não é único
+  (`src/db/schema/auth.ts:59-60`, `portal-auth.ts:47`).
+- O vínculo `chat_contact.customer_id` nasce do telefone, sem verificação
+  (`autoLinkContact`, `src/lib/inbox/contacts.ts:173-186`), e não registra origem.
+- Trocar o telefone grava na hora: equipe em `PATCH /api/customers/:id`
+  (`src/lib/tenant/customers.ts:234-324`), cliente em `PATCH /api/portal/me`
+  (`src/lib/portal/profile.ts:38-78`), admin em `src/lib/admin/people.ts:185,378`. Não há tela
+  para o membro trocar o próprio telefone.
+- Risco aberto (`tech/30:495-504` e `:579`): a pessoa do portal troca o telefone para o de um
+  terceiro; a primeira mensagem dele vira contato vinculado ao cadastro do atacante, que a
+  recebe na exportação e a apaga na exclusão da conta.
+- Não existe envio transacional por WhatsApp. `sendChannelText` e `sendChannelTemplate` só
+  servem o atendimento humano.
+
+### Regras de unicidade
+
+| Quem | Onde o telefone não se repete | Garantia |
+|---|---|---|
+| Owner | No SaaS inteiro, entre owners (P13) | `assertOwnerPhoneFree`, em `src/lib/phone/uniqueness.ts`, sob `pg_advisory_xact_lock(hash(phoneKey))`. `user` é global e o papel fica em `member`, então não cabe índice |
+| Membros e admins, com o owner | Na organização (P14) | `assertPhoneFreeInTenant(tx, tenantId, group, phoneKey, except)`, com `group` `team` ou `customer`, sob trava por `(tenantId, group, phoneKey)` |
+| Clientes | Na organização (P15) | Índice único que já existe, como rede de segurança, e a mesma função |
+| Cliente × equipe | **Pode repetir** (D-9) | Cada grupo é conferido sozinho; ver "Equipe que também é cliente" |
+| Equipe da plataforma | Entre si | A mesma função, com escopo de plataforma |
+
+Pontos em que a regra do owner é conferida: cadastro sem convite, criação de outra
+organização, transferência de posse e troca de telefone. O comentário de `auth.ts:59` ("dois
+membros podem dividir o número da empresa") deixa de valer.
+
+**Conta (`user` e `portal_user`): a unicidade vale entre telefones confirmados.** Um número só
+declarado não reserva nada, e ninguém bloqueia o número de outra pessoa cadastrando-se com
+ele. Na confirmação por link, quem provou a posse fica com o número; se outra conta do mesmo
+grupo o tinha confirmado, ela volta a "telefone pendente" e é avisada por e-mail (número de
+celular troca de dono). Na liberação manual não há prova de posse: havendo outro detentor
+confirmado, a liberação é recusada com 409 `PHONE_IN_USE`. A conta nunca é apagada por isso;
+só a ficha de **cliente** que perde o número é apagada (D-1, em "Telefone que já existe").
+
+**Só WhatsApp para owner e equipe (P18).** `userPhoneSchema` aceita apenas número que recebe
+WhatsApp (`canWhatsApp`: celular do Brasil ou internacional válido); fixo e celular antigo de 8
+dígitos são recusados em `user`. Em `customer` a regra de hoje continua (fixo aceito com aviso).
+
+### Equipe que também é cliente (D-9)
+
+O owner, um admin ou um membro pode ser cliente da própria organização. São **dois cadastros
+separados**, `user` (a conta da equipe) e `customer` (a ficha de cliente), que compartilham
+telefone e e-mail. Nenhum deles substitui o outro.
+
+- **Ligação por id:** coluna nova `customer.user_id` (FK para `user`, `set null`), com índice
+  único parcial em `(tenant_id, user_id)`: uma ficha de cliente por pessoa da equipe, por
+  organização. Só é aceita se a pessoa tem `member` ativo naquela organização.
+- **Como nasce:** ao criar ou importar um cliente cujo telefone (`phone_key`) é o telefone
+  **confirmado** de um membro da organização, a ficha é criada e ligada a ele, e a tela avisa
+  ("este número é de Fulano, admin; a ficha ficará marcada"). Na direção inversa, quando alguém
+  entra na equipe (aceite de convite) e já existe um cliente com o mesmo telefone, confirmado dos
+  dois lados, a ficha é ligada. **O e-mail nunca liga sozinho** (ajuste da revisão de segurança
+  da T1): o e-mail da ficha é texto de quem cadastra, e um colaborador salvaria o contato de um
+  cliente com o próprio e-mail para virar "dono" da ficha dele. Ligar por e-mail, ou em qualquer
+  outro caso, é ação explícita da equipe com `customer:update`, que também desfaz a ligação
+  (T4). Toda ligação é auditada (`customer.team_linked`). **Implementada em 2026-11-14** ("Ligação
+  manual da ficha com a equipe: o que foi feito").
+- **O "status" é derivado, não gravado:** a ficha mostra o selo com o papel atual da pessoa
+  (`Owner`, `Admin`, `Membro` ou o papel personalizado), lido de `member` no momento da
+  consulta. Aparece na lista e no detalhe de `/app/clientes` e no painel do contato no
+  atendimento; `GET /api/customers` ganha o filtro `team=true`.
+- **Os cadastros seguem independentes:** trocar o telefone ou o e-mail de um não altera o
+  outro; cada um passa pela sua verificação. A ligação é por id e sobrevive à troca.
+- **Pessoa da equipe apagada (D-11):** a ficha de cliente **ligada a ela** e o conteúdo da
+  ficha (contatos, conversas, mensagens, arquivos) são apagados junto, por `deleteCustomer`.
+  Vale para o owner e para qualquer membro, em dois caminhos: `removeMember` apaga a ficha
+  ligada **naquela organização**; a exclusão da conta (`anonymizeUser`) apaga as fichas
+  ligadas em **todas** as organizações. É a única situação em que apagar alguém da equipe apaga
+  cliente: fichas de outros clientes nunca são tocadas (P7). Quem quer manter a ficha desfaz a
+  ligação antes. Trocar o papel da pessoa não apaga nada.
+  **Restrições para implementar a D-11** (revisão de segurança da T1): (a) a rota de desfazer a
+  ligação entra antes; (b) quem tem `customer:update` consegue vincular à mão o contato de
+  outra pessoa à própria ficha (`linkContact`), então a exclusão por D-11 só apaga os contatos
+  cuja `phone_key` é a do telefone confirmado da pessoa, e os demais apenas perdem o vínculo;
+  (c) até lá, a T1 só desfaz a ligação quando a conta é excluída.
+- **Atendimento:** `chat_contact` continua com um vínculo só (`chat_contact_single_link`). No
+  escopo da organização, o vínculo automático passa a tentar **o cliente primeiro** e o membro
+  depois (hoje é o contrário, `contacts.ts:176-181`): a conversa de quem é os dois fica na
+  ficha de cliente, e o painel mostra o selo da equipe. No escopo da plataforma nada muda.
+- **LGPD:** exportação e exclusão seguem `chat_contact.customer_id`, nunca o vínculo com
+  `user` (regra de `.claude/rules/inbox.md`, mantida). A exclusão por D-11 também respeita a
+  regra: o que decide é a ligação `customer.user_id`, criada pela equipe ou por telefone
+  confirmado, e o que se apaga é o que está ligado à **ficha**, nunca o `chat_contact.user_id`.
+- **Portal:** a ficha com e-mail pode ter conta no portal, como qualquer cliente. É outra
+  instância de autenticação (`portalAuth`), com senha e sessão próprias.
+
+### Estado de verificação
+
+Duas colunas em `customer`, `user` e `portal_user`:
+
+| Coluna | Tipo | Significado |
+|---|---|---|
+| `phone_verified_at` | `timestamptz` nulo | Quando o número atual foi confirmado. Nulo = pendente |
+| `phone_verified_via` | `text` nulo, `CHECK` | `whatsapp`: clique no link. `manual`: liberado pelo responsável. `team`: telefone de cliente digitado ou importado pela equipe. `inbound`: cadastro salvo a partir de um contato que escreveu |
+
+- **O vínculo automático só usa telefone confirmado.** `linkCandidates` passa a exigir
+  `phone_verified_at IS NOT NULL` do `customer` ou do `user`. É o que fecha o risco aberto.
+  Exportação e exclusão continuam por `chat_contact.customer_id` (P1).
+- **Nas contas (`user` e `portal_user`) só valem `whatsapp` e `manual`** (`CHECK`
+  `user_phone_via_global` e `portal_user_phone_via_global`, T2a): a conta é global, e a coluna
+  só guarda o que vale no sistema inteiro. `team` e `inbound` são formas da ficha de cliente.
+- Na ficha de cliente, `manual` (liberada pelo owner, número declarado pelo cliente) não atrai
+  conversa nem é ligada à pessoa da equipe com o número; `team`, `whatsapp` e `inbound`, sim. Por
+  isso a migration da T2a converte em `team` as fichas que a da T1 marcou `manual`.
+- Migration: os cadastros que já existem (só de desenvolvimento) nascem `manual`, e o seed
+  marca os seus usuários como `manual`. Sem isso, ligar a exigência trancaria todo mundo,
+  inclusive o primeiro proprietário da plataforma.
+
+### Quem verifica, por onde e quem libera (P16, P17)
+
+| Cadastro | Canal que envia o link | Sem canal ou sem entrega: quem libera |
+|---|---|---|
+| Owner (cadastro sem convite) e equipe da plataforma | Canais da **plataforma** | Proprietário da plataforma, em `/admin/usuarios` |
+| Membro e admin (aceite de convite) | Canais da **organização** que convidou | Owner, em `/app/equipe` |
+| Cliente com conta no portal (autocadastro ou convite) | Canais da **organização** | Owner, em `/app/clientes` |
+| Troca de telefone de qualquer um deles | O mesmo canal da linha correspondente | O mesmo responsável |
+| Cliente cadastrado ou importado pela equipe | **Não envia link** | Nasce `team` |
+
+- A liberação manual usa a permissão nova `phone:confirm`, que nasce só no papel owner; o
+  proprietário da plataforma usa `requirePlatform`. Toda confirmação é auditada
+  (`phone.verified`, com a forma e quem liberou; `phone.unverified` quando ela cai).
+- **A tabela acima diz quem responde, não até onde a resposta vale.** O alcance está na seção
+  seguinte, e muda a leitura das linhas de membro, admin e cliente: o que uma organização
+  confirma, pelo link ou à mão, vale só dentro dela.
+- O responsável é avisado por e-mail quando um cadastro cai em liberação manual, e a tela dele
+  mostra a fila de pendentes.
+- Cliente criado pela equipe não recebe link: uma importação de 10.000 linhas viraria 10.000
+  mensagens a quem nunca escreveu, e o número seria bloqueado pelo WhatsApp. O telefone que a
+  equipe informa é aceito como `team`. A **troca** do telefone de um cliente, por ele ou pela
+  equipe, sempre passa pelo pedido (P1): vale pelo link ou pela liberação do owner. A troca que a
+  equipe pediu e o owner liberou fica `team`, como no cadastro (TC-5).
+
+### Alcance da confirmação (T2a, revisões de segurança)
+
+**A confirmação vale até onde vale o responsável do pedido, nunca mais.** Qualquer pessoa cria
+uma organização. Se o que o owner atesta valesse fora dela, uma organização de fachada
+"confirmaria" o número de uma vítima numa conta do atacante, e essa conta passaria a atrair as
+conversas e a ficha da vítima em outras organizações. O mesmo vale para o **link**: ele sai pelo
+canal do responsável, e o canal por QR Code de uma organização é o WhatsApp do próprio owner,
+que lê o que enviou e portanto conhece o link de qualquer número que mandar verificar.
+
+| Pedido de | Fechado por | Efeito | Onde vale |
+|---|---|---|---|
+| Plataforma (`tenant_id` nulo) | Link, na sessão da própria conta | `user.phone_verified_via = whatsapp`. Quem provou fica com o número: a outra conta do grupo volta a pendente, com pedido novo e auditoria | Sistema inteiro |
+| Plataforma | Proprietário da plataforma, à mão | `user.phone_verified_via = manual`. Recusada (409 `PHONE_IN_USE`) se outra conta do grupo já tem o número | Sistema inteiro |
+| Organização, conta de membro | Link (sessão da conta) ou owner, à mão | Linha em `phone_tenant_vouch` (conta, organização). A conta **não muda**. Recusada se um colega já tem o número (não tira o número de ninguém) | Só naquela organização |
+| Organização, ficha de cliente | Link, na sessão do portal | `customer.phone_verified_via = whatsapp`; liga o contato que já escreveu e a pessoa da equipe com o mesmo número | A ficha, que já é da organização |
+| Organização, ficha de cliente | Owner, à mão | `customer.phone_verified_via = manual`. Não liga contato nem pessoa da equipe, e **não atrai** as próximas conversas do número | Idem |
+
+- **Um pedido por (cadastro, responsável).** A conta tem sempre o pedido da plataforma, que é o
+  caminho dela para a confirmação que vale em todo lugar, e mais um por organização em que é
+  membro comum. Confirmada para o sistema inteiro, os demais pedidos são encerrados.
+- **Owner e equipe da plataforma só respondem à plataforma** (P16): não entram na fila de
+  organização nenhuma. Quem vira owner sai das filas em que estava; a tentativa de liberá-lo
+  por uma organização responde 409 `PLATFORM_ONLY` e encaminha o pedido.
+- **A fila do proprietário da plataforma** mostra owners, a equipe da plataforma e quem não é
+  de organização nenhuma. O membro comum tem o pedido da plataforma aberto, mas quem o libera à
+  mão é a organização.
+- **O link só confirma na sessão do próprio cadastro.** Não há rota pública de confirmação: o
+  token vai no corpo de um `POST` autenticado, e o cadastro vem da sessão. Sem isso, bastava se
+  cadastrar com o número da vítima e esperar ela clicar. Token inválido, usado, vencido, de
+  outro cadastro ou de um número que o cadastro já trocou respondem o mesmo 400.
+- **A conta do portal (`portal_user`) nunca é confirmada por um pedido de organização**, nem
+  nasce confirmada a partir de uma ficha: é global e é outra identidade. Enquanto não existir
+  pedido da plataforma para ela, o portal avalia a **ficha** (T3).
+- **A ligação da ficha de cliente com a pessoa da equipe (D-9) exige confirmação que vale no
+  sistema inteiro** (`userPhoneConfirmedGlobally`); a liberação de organização não a cria.
+- **A liberação de organização cai** quando a pessoa sai da equipe, a organização é excluída, a
+  conta troca de número ou outra conta prova a posse do número. A manutenção apaga as que
+  sobrarem sem membro ou com número antigo.
+- **Para o vínculo automático da conversa**, o membro vale se a conta está confirmada no sistema
+  ou liberada **naquela** organização; a ficha vale com `team`, `whatsapp` ou `inbound`.
+
+### Bloqueio de acesso enquanto pendente (D-2)
+
+```bash
+PHONE_VERIFICATION_REQUIRED=true   # false: entra sem confirmar; o vínculo automático espera
+```
+
+- Com `true`, a conta com telefone pendente **não usa o sistema**: `requireAuth` e
+  `requirePortalAuth` respondem 403 `PHONE_UNVERIFIED` a tudo, menos ler o próprio estado,
+  reenviar o link, corrigir o número, confirmar e sair. A tela mostra só "Confirme seu
+  WhatsApp", com o estado (link enviado, ou aguardando liberação de quem é o responsável).
+- A sessão é criada porque reenviar e corrigir o número exigem saber quem é a pessoa; o
+  bloqueio é do servidor, não da tela.
+- O link sai sempre, também com `false`. Nesse modo a pessoa entra, vê um aviso, e o vínculo
+  automático com a conversa espera a confirmação.
+- Vale junto com `EMAIL_VERIFICATION_REQUIRED`, sem substituí-la.
+- **Predicado do portão (decorre da T2a):** a equipe de uma organização passa com a conta
+  confirmada no sistema **ou** liberada naquela organização; owner e equipe da plataforma, só
+  com a confirmação do sistema; o portal avalia a ficha de cliente da organização em uso.
+
+### Envio do link: Cloud, QR Code ou manual (D-3)
+
+```bash
+PHONE_VERIFICATION_CHANNELS=whatsapp_cloud,whatsapp_qr   # ordem de tentativa; vazio = sempre manual
+PHONE_VERIFICATION_TTL_MINUTES=30
+```
+
+Job `phone.verify`, para o escopo responsável da tabela acima:
+
+1. Lista os canais `connected` do escopo, na ordem de `PHONE_VERIFICATION_CHANNELS`.
+2. **Cloud:** exige o modelo de verificação escolhido no canal. Sem modelo, pula. Com modelo,
+   envia. Erro na chamada, ou status `failed` que chega depois pelo webhook (sem crédito,
+   erro `131042`; modelo pausado ou recusado), passa ao próximo canal.
+3. **QR Code:** texto livre com o link. Erro passa ao próximo.
+4. Sem canal apto, ou todos falharam: o pedido vira `awaiting_manual`, o responsável é avisado
+   e a pessoa vê "aguardando liberação".
+
+- **Modelo de verificação da Cloud:** colunas `verification_template_name` e
+  `verification_template_language` em `channel_whatsapp_cloud`, escolhidas entre os modelos
+  aprovados já sincronizados, na tela do canal. O modelo precisa de um botão de URL dinâmica
+  cujo sufixo é o token (`/verificar-telefone?token={{1}}`). Conferir no smoke com conta real
+  da Meta antes de fechar a T2.
+- **Cada tentativa gera um token novo** e substitui o hash: o token nunca fica no payload do
+  job nem no banco.
+- "Reenviar", pedido pela pessoa, tenta o próximo canal da ordem (e volta ao primeiro no fim).
+- O envio de verificação **não entra na caixa de entrada**: não cria `chat_contact`,
+  `conversation` nem `message`. O id da mensagem no provedor fica no pedido, e
+  `applyChannelEvent` consulta o pedido quando chega um status de mensagem que não é da caixa.
+- **Restrições que a T2a deixou para a T2b:** (a) a conta com pedidos em vários responsáveis
+  não recebe um link por pedido no mesmo número: o da plataforma sai primeiro, e o da
+  organização só se a plataforma não tem canal; (b) a URL do botão do modelo Cloud é conferida
+  contra `APP_URL` antes de aceitar o modelo; (c) a página `/verificar-telefone` exige a sessão
+  do cadastro e leva ao login quando não há; (d) o lead do portal sem ficha não passa por
+  `requirePortalTenant` e precisa de um caminho próprio para confirmar;
+  (e) **o job escolhe o canal estritamente pelo `tenant_id` do pedido**: pedido da plataforma
+  enviado pelo canal de uma organização reabriria a falha que o alcance por responsável fechou
+  (`issueVerificationToken` não confere escopo, quem chama confere); (f) quem controla o canal
+  da organização (`channel:manage`, não só o owner) lê o link que ela envia, então consegue
+  liberar o próprio número **naquela organização** pelo link, e `SELF_CONFIRMATION` não cobre
+  esse caminho: **aceito pelo proprietário (D-13)**, porque o efeito fica dentro dela e o owner já
+  confia o canal a essa pessoa; (g) `GET /api/me/phone-verification` precisa dizer a
+  situação por responsável (hoje devolve "pendente" enquanto houver qualquer pedido aberto), para
+  a tela e para o portão da T3.
+- **Para quem a plataforma envia o link (D-12, decidido em 2026-11-13):** só a quem responde a
+  ela, isto é, owners, a equipe da plataforma e quem não é de organização nenhuma. Todo membro
+  comum tem o pedido da plataforma aberto, mas ele **não dispara envio sozinho**: o membro recebe
+  o link da organização em que entrou e **pede** o da plataforma quando quiser a confirmação que
+  vale em todo lugar ("Reenviar" escolhendo a plataforma). Enviar a todos seria o número da
+  plataforma escrevendo a toda a equipe de toda organização (custo de modelo na Cloud, risco de
+  bloqueio no QR Code).
+
+### T2b: o que foi feito (2026-11-13)
+
+Implementado como descrito acima, com o detalhe em `docs/context/tech/28-crm-cadastro.md`
+("Envio do link e página de confirmação"). Onde o código ficou diferente do texto desta SPEC, vale
+o código, e o motivo está aqui:
+
+- **Sem o estado `pending`.** A T2a não o criou: o pedido nasce `awaiting_manual` e vira `sent`
+  quando um canal aceita o link. Entre a abertura e o job, o pedido aparece na fila de liberação
+  (como já aparecia na T2a).
+- **O reenvio tem corpo opcional:** `{ responsible?: "platform" | <tenantId> }` na equipe (o
+  membro comum escolhe a plataforma, D-12) e `{ tenantId? }` no portal (padrão: a organização
+  ativa). Sem corpo continua valendo.
+- **`GET …/phone-verification` cresceu sem quebrar:** mantém `pending` e acrescenta a situação por
+  responsável (`responsibles`, `confirmedGlobally`, `answersTo`), restrição (g).
+- **Token com prefixo** `u.` (conta) ou `c.` (ficha): diz à página qual sessão pedir. O portal tem a
+  própria página, `/portal/verificar-telefone`, porque a sessão do `portalAuth` só existe sob
+  `/portal/**`; o link que sai é sempre `/verificar-telefone`, que encaminha.
+- **Limite também no job:** além de 3 reenvios por hora por cadastro na rota, o job não manda mais
+  de 3 links por hora ao mesmo cadastro, venha o pedido de onde vier (contenção do envio frio,
+  inclusive da troca de telefone repetida no portal).
+- **Restrição (a), na prática:** o pedido de organização espera enquanto outro pedido da mesma
+  conta tem link válido a caminho do mesmo número; se o da plataforma cai na liberação à mão, o da
+  organização é disparado. Reenvio pedido pela pessoa não espera (ela escolheu).
+- **Restrição (e) em quatro lugares:** lista de candidatos, a função que envia
+  (`sendVerificationMessage`), o envio do canal pelo escopo, e um gatilho no banco
+  (`phone_verification_channel_same_scope`).
+- **A conta que perde a confirmação (`demote`) não recebe link:** o número agora é de outra
+  pessoa; ela recebe o e-mail `phone-number-claimed` e o pedido da plataforma fica na fila.
+- **E-mail ao responsável uma vez por pedido** (`manual_notified_at`), e só se o pedido é da fila
+  dele (o pedido da plataforma de um membro comum não avisa o proprietário).
+
+**Ficou de fora da T2b (pendente):** a troca de telefone com o cadastro mantendo o número antigo
+até a confirmação (`POST …/phone-change` e `DELETE`, os três contratos acima; hoje o portal grava
+o número novo como pendente e o link vai para ele) e o `claim` do portal com exclusão da ficha
+antiga (D-1). Seguem também a T3 (bloqueio) e a T4 (telas, inclusive a do modelo de verificação e a
+do reenvio). O formato do modelo na Meta (botão de URL dinâmica e `index`) só foi testado com
+provedor falso: conferir no smoke com conta real antes de fechar a T2.
+
+### T3: o que foi feito (2026-11-13)
+
+Implementado como em "Bloqueio de acesso enquanto pendente (D-2)", com o detalhe em
+`docs/context/tech/28-crm-cadastro.md` ("Bloqueio de acesso com telefone pendente").
+
+- **`PHONE_VERIFICATION_REQUIRED`**, padrão `true` (o da SPEC), em `src/lib/env.ts`, `.env.example`,
+  `docker/.env.prod.example` e `docker/compose.prod.yml`. Lida a cada requisição.
+- **Portão no servidor:** `requireAuth` e `requirePortalAuth` respondem 403
+  `{ error, code: "PHONE_UNVERIFIED" }` depois da sessão e do e-mail. **Ordem das recusas:** 401 sem
+  cookie, 503 com o Auth fora, 401 sessão inválida, 403 `EMAIL_NOT_VERIFIED`, 403 `PHONE_UNVERIFIED`.
+  O e-mail vem antes também nas rotas que confirmam o telefone. Falha do banco ao conferir: 503.
+- **O que passa (lista fechada, `src/api/phone-gate.ts`, casada pelo método e pelo caminho da
+  requisição):** na equipe, `GET /api/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
+  `POST /api/tenant/active`, `POST /api/invitations/:id/accept` e `POST /api/admin/stop-impersonating`;
+  no portal, `GET /api/portal/me/phone-verification`, `POST …/resend`, `POST …/confirm`,
+  `PATCH /api/portal/me` e `POST /api/portal/active-tenant`. Sair é `POST /api/auth/sign-out` e
+  `/api/portal/auth/sign-out`, do Better Auth, que não passa pelos middlewares.
+- **Exclusão da própria conta (LGPD, T3-7, decidido em 2026-11-13):** também passa. Na equipe,
+  `DELETE /api/me`, `GET /api/me/deletion` e `POST /api/me/deletion/cancel`; no portal,
+  `DELETE /api/portal/me`, `POST /api/portal/me/deletion/confirm`, `GET /api/portal/me/deletion` e
+  `POST /api/portal/me/deletion/cancel`. As rotas seguem pedindo a senha (e o código do 2FA) ou o
+  link por e-mail, e o suporte, na sessão personificada, continua sem poder pedir. A tela "Confirme
+  seu WhatsApp" traz "Excluir minha conta"; `GET /api/portal/me/deletion` passou a devolver
+  `needsPassword`, porque a tela não lê `/api/portal/me`. A exportação e a exclusão da organização
+  continuam bloqueadas.
+- **Fora dos dois middlewares:** as leituras do plugin admin do Better Auth (`/api/auth/admin/*`,
+  dados de outras pessoas) ganharam o mesmo portão; o resto de `/api/auth/*` (sessão, senha, e-mail,
+  2FA, sair) é da própria conta e fica aberto. SSE, arquivos, mídia e `/api/admin/*` já passam por
+  `requireAuth`. Rotas públicas (webhooks assinados, `media-out` por token, login e cadastro) não têm
+  sessão.
+- **Predicado** (`src/lib/phone/gate.ts`, sobre `confirmed.ts`): equipe passa com
+  `userPhoneConfirmedGlobally`, ou com `userPhoneConfirmedIn(organização ativa)` se é membro dela e
+  não é owner de organização nenhuma nem da equipe da plataforma. Portal: a ficha da organização em
+  uso (`customerPhoneConfirmed`, predicado novo em `confirmed.ts`), entre as fichas `lead` ou
+  `active` de organização ativa.
+- **Com `false`:** `/api/me` e `/api/portal/me` devolvem `phonePending` (o mesmo predicado), e as três
+  áreas mostram um aviso que abre o painel de confirmação. O vínculo automático continua exigindo o
+  telefone confirmado no escopo (já era assim; agora com teste). O link sai nos dois modos.
+- **Tela "Confirme seu WhatsApp"** (`src/components/phone/phone-verification-panel.tsx`): quando
+  `/api/me` (ou `/api/portal/me`) responde `PHONE_UNVERIFIED`, `ProtectedRoute` (`/app`, `/admin` e
+  o onboarding) e `PortalLayout` mostram só ela, com a situação por responsável de
+  `GET …/phone-verification`, "Reenviar o link" por responsável, "Usar esta organização" onde o número
+  já vale, a correção do número (portal), "Já confirmei" e "Sair". Qualquer chamada recusada com
+  `PHONE_UNVERIFIED` no meio da sessão faz os providers relerem a conta (`apiFetch` emite o evento).
+  Sem `loader`.
+- **Primeiro proprietário:** o seed já cria todos confirmados (`manual`); o comando de promoção pelo
+  banco (`tech/08-auth.md`, README, `tech/14-deploy.md`) passa a confirmar o telefone junto com o papel,
+  e o `maintenance.prune` encerra pedido aberto de conta já confirmada no sistema. Contas anteriores ao
+  bloco T foram marcadas `manual` pela `0035`.
+- **Testes:** `tests/db/phone-gate.test.ts` percorre `api.routes` (rota nova entra na conferência
+  sozinha; rota pública precisa ser classificada no teste) com uma conta da equipe e uma do portal
+  pendentes, confere que cada entrada da lista existe, o predicado, a personificação, o modo `false`
+  com o vínculo, a combinação com `EMAIL_VERIFICATION_REQUIRED` e o primeiro proprietário; o seed, em
+  `tests/db/billing.test.ts`. O resto do `test:db` roda com `PHONE_VERIFICATION_REQUIRED=false`
+  (`vitest.db.config.ts`): os outros arquivos criam contas pendentes para conferir outras regras.
+
+**Decisões da T3 a confirmar pelo proprietário** (escolhidas para não trancar ninguém sem saída e não
+abrir dado):
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| T3-1 | Aceitar convite com telefone pendente | **Passa:** é o aceite que torna a organização responsável pelo telefone (pedido dela, link pelos canais dela, liberação pelo owner). A resposta não traz dado da organização | Bloquear: o convidado só teria a fila da plataforma, que pela D-12 não libera membro comum |
+| T3-2 | Rota sem organização ativa (onboarding, criar organização) | Só vale a confirmação do sistema. Criar organização fica bloqueado: quem cria vira owner, e owner só passa com a confirmação do sistema (P16) | Deixar criar e trancar logo depois |
+| T3-3 | Membro de várias organizações, liberado em uma e pendente em outra | O portão é pela **organização ativa**; trocar de organização passa, e a tela oferece "Usar esta organização" onde o número já vale | Exigir todas, ou passar com qualquer uma |
+| T3-4 | Sessão personificada sobre conta pendente | O portão avalia a **conta personificada**: o suporte vê a mesma tela, não confirma nem reenvia (`blockWhileImpersonating`) e sai por `stop-impersonating`, que passa | Isentar a personificação (abriria dados da organização sob uma conta que ela ainda não liberou) |
+| T3-5 | Lead do portal sem ficha ativa | Sem organização em uso (ou sem ficha nela): passa se **alguma** ficha `lead`/`active` da pessoa está confirmada; sem ficha que possa confirmar, passa (nada a confirmar; `requirePortalTenant` segura os dados) | Trancar: o lead que já confirmou continuaria preso até virar cliente ativo |
+| T3-6 | Corrigir o número | Portal: `PATCH /api/portal/me`, a rota que já existe (exige ficha ativa: o lead não corrige sozinho). **Equipe: não há rota para a própria conta**; a tela manda falar com a plataforma, e o proprietário corrige em `/admin/usuarios/:id`. A troca pela própria pessoa é a de `…/phone-change` (fase própria) | Criar agora uma rota de troca da conta (é o contrato `phone-change`, fora do escopo) |
+| T3-7 | O que fica bloqueado com telefone pendente | Além dos dados: `GET /api/me`, sessões (`/api/me/sessions`), consentimento, **exportação** dos dados da conta, `GET /api/me/invitations` e o `set-password` do portal. Fica aberto o Better Auth da própria conta (senha, 2FA, e-mail, sessão, sair). **Confirmada em parte pelo proprietário em 2026-11-13: o pedido de exclusão da própria conta passa** (pedir, ver e desistir), porque o direito de apagar os dados não depende de confirmar o WhatsApp | Abrir também a exportação da conta sem o telefone |
+| T3-8 | Leituras do plugin admin do Better Auth | Ganham o portão (servem dados de outras pessoas e não passam por `requireAuth`) | Deixar como estão |
+| T3-9 | Contas sem telefone (anteriores ao A1, só em desenvolvimento) | Ficam na tela de confirmação até o proprietário cadastrar o número em `/admin` | Isentar quem não tem número |
+
+**Limites conhecidos da T3:** o fluxo SSE já aberto não é derrubado quando a confirmação cai no meio
+da sessão (o número muda de dono): segue até a vida máxima de 15 min, como na troca de papel; a
+reconexão passa pelo portão. O login do portal com o telefone pendente não escolhe a organização do
+`?org=` (o mapeamento slug → organização vem de `/api/portal/me`, bloqueado): a tela de confirmação
+troca de organização. A sessão que ficou numa organização de que a pessoa saiu não é levada à
+preferida (quem faz isso é `/api/me`, que está atrás do portão): a tela oferece "Usar esta
+organização". O owner com telefone pendente que é o único proprietário de uma organização não
+consegue excluir a conta (409 `LAST_OWNER`, a regra de sempre), e excluir ou transferir a
+organização está atrás do portão: ele precisa confirmar o número ou falar com a plataforma. A tela
+não foi conferida num navegador nesta fase.
+
+### T4: o que foi feito (2026-11-13)
+
+**Parcial.** Entraram as três filas de liberação, o modelo de verificação na tela do canal Cloud e os acertos
+de texto da tela da T3. Ficaram de fora as telas de troca de telefone, o `claim` e a ligação da ficha à equipe,
+por falta de rota no servidor (lista abaixo). Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Telas da liberação à
+mão").
+
+- **Fila da plataforma:** aba "Telefones" em `/admin/usuarios?scope=telefones`, **só para o
+  proprietário** (`GET /api/admin/phone-verifications` é `ownerOnly`: o suporte recebe 403, então a aba nem
+  existe para ele). O número de pendentes aparece na aba. `useAdminQuery` e `useAdminMutation`.
+- **Fila da organização:** um cartão em `/app/equipe` (pedidos de pessoas da equipe) e outro em
+  `/app/clientes` (pedidos de fichas de cliente), sobre `GET /api/phone-verifications`, dentro de
+  `<Can resource="phone" action="confirm">` (a rota que lista também exige a permissão, então sem ela nada
+  é pedido). A rota devolve equipe e clientes juntos, sem filtro por tipo: cada tela filtra a página no
+  cliente, e a paginação vale para a fila toda (a tela avisa quando há mais de uma página).
+- **Em todas:** confirmação antes de liberar, com "a liberação à mão não prova que o número é da pessoa" e o
+  alcance conforme o responsável (plataforma: sistema inteiro; equipe: só a organização; ficha: só a
+  organização, sem atrair conversas nem ligar à equipe); mensagem própria para `SELF_CONFIRMATION`,
+  `PHONE_IN_USE`, `PLATFORM_ONLY`, `VERIFICATION_STALE` e 404; estado vazio; a lista relê depois de cada
+  tentativa, com sucesso ou erro. O número aparece como a rota o devolve (`phone`, o número normalizado, sem
+  máscara), junto de "Link enviado" ou "Aguardando liberação" e da data do pedido.
+- **Modelo de verificação na tela do canal Cloud** (autorizado pelo proprietário em 2026-11-13: expor o modelo
+  escolhido na leitura do canal): `verificationTemplate: { name, language } | null` passou a sair em
+  `GET /api/channels` e `GET /api/admin/channels` (`src/lib/channels/service.ts`, ao lado dos outros campos da
+  Cloud; só leitura, sem coluna `_enc`, rota, permissão ou migration; teste em
+  `whatsapp_cloud/verification.db.test.ts`). A tela é `VerificationTemplateCard`, dentro de "Gerenciar" do número
+  Cloud, um componente para `/app` e `/admin` (`basePath` por props): mostra o modelo em uso, lista os modelos
+  **aprovados** já sincronizados (`GET …/templates?status=APPROVED`), aplica (`PUT …/verification-template`),
+  tira, sincroniza (`POST …/templates/sync`) e mostra o motivo do 422 como a API o devolve. Conferida no
+  navegador (desktop e DOM em celular) em `/app/configuracoes/canais` com um número Cloud de teste local: 422 de
+  URL fora do endereço, aplicar, "Em uso" e tirar; **a variante de `/admin` não foi aberta** (mesmo componente).
+- **Tela da T3, só texto:** "aguardando a liberação de o proprietário" virou "do proprietário da
+  plataforma"; "abra o link que enviamos" só aparece quando algum link saiu (sem envio, "Falta confirmar o
+  WhatsApp terminado em …").
+- **Conferido num navegador** (Postgres local, servidor de desenvolvimento, contas do seed, sem canal
+  conectado e com `PHONE_VERIFICATION_CHANNELS` vazio, nenhuma mensagem enviada): as três filas em desktop,
+  a liberação com sucesso na equipe, 404 e `VERIFICATION_STALE` na fila de clientes, e a tela "Confirme seu
+  WhatsApp" da equipe (conta pendente da plataforma) e do portal (cliente com duas fichas pendentes) em
+  desktop. Em largura de celular os screenshots do painel saem fatiados; a conferência foi pelo DOM
+  (nenhum elemento fora de 375 px, sem rolagem horizontal) na aba do admin e nas duas telas da T3.
+  **Não exercitados na tela:** `SELF_CONFIRMATION`, `PHONE_IN_USE` e `PLATFORM_ONLY` (têm teste de servidor
+  na T2a), a fila da organização em largura de celular (é o mesmo componente da do admin) e a paginação
+  com mais de 50 pedidos.
+
+**Pendentes, com o que falta para destravar**
+
+| Pendente | Por que ficou | O que destrava |
+|---|---|---|
+| ~~Troca de telefone pelo pedido em `/app/clientes` e `/portal/conta` (e o perfil da equipe, F2)~~ **feito em 2026-11-14** ("F2 e telas da troca: o que foi feito") | As rotas passaram a existir em 2026-11-13 ("Troca de telefone pelo pedido") | Só a tela |
+| ~~`claim` do portal (D-1)~~ **feito em 2026-11-14** ("Telefone que já existe (`claim`): o que foi feito") | — | — |
+| ~~`claim` pedido pela equipe ("Enviar link de verificação")~~ **não será feito nesta forma** (decisão do proprietário de 2026-11-14, CL-1) | Exigiria rota pública de confirmação | — |
+| ~~Ligar e desligar a ficha de cliente à pessoa da equipe (D-9)~~ **feito**: desligar no bloco E, ligar em 2026-11-14 ("Ligação manual da ficha com a equipe: o que foi feito") | Não havia rota | — |
+| Filtro por tipo na fila da organização | A rota lista equipe e clientes juntos | `?subject=user\|customer` em `GET /api/phone-verifications` |
+| Fila lida pelo suporte da plataforma | A rota é só do proprietário | Trocar `ownerOnly` por `requirePlatform` na leitura (decisão de regra) |
+
+**Roteiro manual com número real** (a verificação da T4; quem executa é o proprietário). Pré-requisitos:
+servidor com `APP_URL` público em `https`, `JOBS_MODE=inline` (ou o worker rodando),
+`PHONE_VERIFICATION_CHANNELS=whatsapp_cloud,whatsapp_qr`, SMTP ou Mailpit para os e-mails, um número real
+que receba WhatsApp e **não** seja o do canal que envia, e uma organização com um owner.
+O modelo se escolhe em `/app/configuracoes/canais` → "Gerenciar" no número Cloud → "Modelo de verificação de
+telefone" (ou na tela equivalente de `/admin`, para os números da plataforma). Em cada cenário, confira a auditoria (`phone.verified`, com a forma e quem liberou) e que o número não aparece em log, job nem
+auditoria.
+
+1. **Cloud com modelo.**
+   1. Em `/app/configuracoes/canais`, conecte o número oficial e confira o diagnóstico verde.
+   2. Na Meta, crie um modelo de utilidade sem variável no corpo, com **um botão de URL dinâmica** apontando
+      para `https://<APP_URL>/verificar-telefone?token={{1}}`; espere a aprovação e sincronize os modelos
+      ("Sincronizar modelos", na mesma seção).
+   3. Escolha o modelo na tela e clique "Usar este modelo". Um modelo com a URL errada deve mostrar o motivo do
+      422 (`INVALID_VERIFICATION_TEMPLATE`); "Em uso" mostra o modelo gravado, e "Tirar o modelo" o desfaz.
+   4. Convide, por e-mail, uma pessoa com o número real e aceite o convite. **Esperado:** o modelo chega no
+      WhatsApp; o botão abre `/verificar-telefone`; sem sessão vai ao login e volta; o clique em "Confirmar"
+      libera. `/app/equipe` não mostra pedido, e o pedido está `confirmed` no banco.
+   5. Abra o mesmo link com outra conta logada: **esperado** 400 "Link inválido ou expirado".
+   6. Confira que o formato do botão (`sub_type: url`, `index`) foi aceito pela Meta: a SPEC só testou isso com
+      provedor falso, e este é o ponto que o roteiro precisa fechar antes de dar a T2 por encerrada.
+2. **Cloud sem crédito caindo no QR Code.**
+   1. Conecte também um número por QR Code (`whatsapp_qr`) na mesma organização, conectado.
+   2. Deixe a Cloud sem crédito de conversa (ou com o modelo pausado), de modo que a Meta devolva o status
+      `failed` (erro `131042`).
+   3. Repita o convite com um número real. **Esperado:** a Cloud aceita o envio, o status `failed` chega pelo
+      webhook, o job passa ao QR Code e o link chega como texto livre. Em `phone_verification.attempts` há uma
+      entrada para a Cloud (com o erro) e outra para o QR Code; o token não aparece ali.
+   4. Peça "Reenviar o link" na tela de confirmação: a ordem recomeça e o limite é de 3 links por hora por
+      cadastro (a 4ª tentativa responde o aviso de limite).
+3. **Sem canal caindo na liberação.**
+   1. Desconecte ou remova os canais da organização (ou deixe `PHONE_VERIFICATION_CHANNELS` vazio).
+   2. Convide e aceite com um número real. **Esperado:** a pessoa vê "Confirme seu WhatsApp" com "Sem envio
+      automático agora: aguardando a liberação de quem administra <organização>"; o owner recebe o e-mail
+      "phone-verification-manual" uma vez; o pedido aparece em `/app/equipe` como "Aguardando liberação".
+   3. Como owner (outra pessoa, não a que espera), abra "Liberar": o diálogo mostra o aviso de que a liberação
+      não prova a posse e o alcance só na organização. Confirme. **Esperado:** "Telefone liberado", o pedido
+      sai da fila, a pessoa clica "Já confirmei" e entra; a auditoria registra `phone.verified` com `manual`.
+   4. Tente liberar o próprio número (precisa de um pedido do liberador na fila de uma organização, por
+      exemplo um colega com `phone:confirm`): **esperado** a mensagem de `SELF_CONFIRMATION`.
+   5. Repita com um cliente do portal (autocadastro): o pedido aparece em `/app/clientes`; a liberação à mão não
+      liga a ficha à equipe nem atrai conversas futuras do número.
+   6. Plataforma: cadastre um owner sem convite, sem canal da plataforma. **Esperado:** o pedido aparece na aba
+      "Telefones" de `/admin/usuarios` do proprietário; liberar vale no sistema inteiro; o suporte da
+      plataforma não vê a aba.
+
+**Decisões da T4 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| T4-1 | Onde fica a fila da plataforma | Aba "Telefones" em `/admin/usuarios`, com contagem, só para o proprietário | Cartão fixo no topo da lista, ou página própria |
+| T4-2 | Fila da organização sem filtro por tipo na rota | Duas telas filtram a página no cliente; o aviso diz que a paginação é da fila toda | Pedir `?subject=` ao servidor (pendente acima) |
+| T4-3 | Modelo de verificação na tela do canal | Tela dentro de "Gerenciar" do número Cloud; a leitura do canal passou a trazer `verificationTemplate` (autorizado em 2026-11-13) | Seção própria fora do diálogo, ou rota dedicada de leitura |
+| T4-4 | Suporte da plataforma | Não vê a fila (a rota é do proprietário) | Liberar a leitura ao suporte |
+
+### Troca de telefone pelo pedido: o que foi feito (2026-11-13)
+
+Implementada no servidor, sem tela nova (as telas entraram em 2026-11-14, "F2 e telas da troca: o que foi feito"). Detalhe em
+`docs/context/tech/28-crm-cadastro.md` ("Troca de telefone pelo pedido").
+
+- **Migration `0038_troca_telefone`:** `phone_verification` ganhou `purpose` (`signup` ou `change`; `claim` não
+  existe ainda), `phone` (o número digitado, para gravar no cadastro), `requested_by_type` (`user` ou
+  `portal_user`) e `requested_by_id`, com `CHECK`s (a troca sempre leva número e quem pediu). Os índices de
+  pedido aberto passaram a incluir `purpose` (a troca convive com o pedido do número atual), e um índice novo
+  garante **uma troca aberta por cadastro**, qualquer que seja o responsável.
+- **O cadastro mantém o número antigo, e a confirmação dele, até a troca se confirmar.** O número novo vive só
+  no pedido. Confirmada (pelo link do número novo, na sessão do próprio cadastro, ou pelo responsável à mão), a
+  troca grava o número com o estado do responsável, fecha os pedidos que sobravam (eram do número antigo) e
+  apaga as liberações de organização (eram do número antigo). Cancelada (`DELETE`), nada a desfazer.
+- **Rotas (as de "Contratos"):** `POST`/`DELETE /api/me/phone-change` (`userPhoneChangeSchema`, só WhatsApp,
+  bloqueadas em personificação), `POST`/`DELETE /api/portal/me/phone-change` (`requirePortalAuth` +
+  `requirePortalTenant`, ficha da organização ativa) e `POST`/`DELETE /api/customers/:id/phone-change`
+  (`customer:update`). `POST` responde 202 `{ ok: true }`, `DELETE` 204 (também sem troca aberta). Pedir de novo o
+  mesmo número reenvia o link; outro número substitui a troca. Limite de 5 pedidos por hora por cadastro, além
+  dos 3 links por hora do job. O mesmo número que o cadastro já tem é 400 `PHONE_UNCHANGED`.
+- **`PATCH /api/customers/:id` e `PATCH /api/portal/me`** deixaram de gravar outro número: abrem a troca (o
+  `PATCH` do portal devolve `phoneChangePending`). O mesmo número escrito de outro jeito (mesma `phone_key`,
+  com ou sem o 9º dígito) continua gravado direto. **A edição de conta em `/admin/usuarios/:id`** abre a troca
+  e o proprietário a libera à mão na mesma transação (`manual`). Criar cliente pela equipe segue `team`.
+- **Leitura do estado sem quebrar a T3 e a T4:** `GET /api/me/phone-verification` ganhou `change`
+  (`{ status, phoneHint, responsible, tenantId, tenantName, requestedAt } | null`; `phoneHint` é o final do
+  número **novo**); `pending` e `responsibles` seguem sendo do número atual. No portal, cada item de
+  `responsibles` ganhou `change`. `GET /api/customers/:id` (e a resposta do `PATCH`) ganhou `phoneChange`. As
+  filas (`GET /api/phone-verifications` e a do admin) ganharam `purpose`. Reenviar o link da troca:
+  `POST …/phone-verification/resend` com `{ purpose: "change" }` (na equipe e no portal).
+- **Envio:** o link vai sempre ao número **novo**, pelo canal do responsável da troca. A troca não espera a
+  D-12 (foi pedida). A troca da ficha sem conta no portal não manda link (ninguém o confirmaria): vai direto à
+  liberação do owner, que é avisado por e-mail. **Liberada pelo owner, a troca que a equipe pediu deixa a ficha
+  `team`** (atrai as conversas do número, como um cliente recém-cadastrado); a que a própria pessoa pediu no
+  portal deixa `manual` (TC-5).
+- **Bloqueio (T3):** `POST` e `DELETE /api/me/phone-change` entraram na lista do que passa com o telefone
+  pendente (é o "corrigir o número" da equipe, que não existia; a decisão T3-6 deixa de valer na parte da
+  equipe). No portal, `POST` e `DELETE /api/portal/me/phone-change` entraram e **`PATCH /api/portal/me` saiu**:
+  com o telefone pendente, o portal só corrige o número, não edita o perfil. A tela da T3 do portal passou a
+  usar a rota da troca.
+- **Testes:** `tests/db/phone-change.test.ts` (15 casos: conta, membro comum, cancelamento, uma troca por
+  cadastro, número em uso, personificação, bloqueio ligado, portal, equipe, `/admin`) e três casos em
+  `tests/db/phone-delivery.test.ts` (link ao número novo; ficha sem portal sem link; troca da conta sem
+  esperar a D-12). Os testes que trocavam o número no portal para criar uma ficha pendente passaram a usar
+  `makeCustomerPhonePending` (`tests/db/phone-helpers.ts`).
+
+**Decisões da troca a confirmar pelo proprietário**
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| TC-1 | Cadastro cujo número atual nunca foi confirmado "corrige" o número | **O mesmo fluxo:** abre a troca; o número antigo (pendente) fica no cadastro até a confirmação, e o pedido dele segue aberto. Uniforme, sem gravar número sem prova e sem oráculo; a fila mostra os dois pedidos, marcados por `purpose` | Gravar o número novo direto, como pendente (não há confirmação a preservar), fechando o pedido do antigo |
+| TC-2 | Conferência de unicidade no pedido e na confirmação | **No pedido, só onde quem pede pode saber:** a equipe recebe 409 `PHONE_IN_USE` ao pedir a troca da ficha (como no cadastro). A própria conta e a pessoa do portal recebem sempre 202. **Na confirmação, sempre**, sob a trava do número (conta, `lockPhoneKey`) ou da ficha (com o índice único como rede): conta pelo link da plataforma fica com o número (quem provou fica com ele, como no cadastro); pelo link da organização ou à mão, 409; ficha, 409 (D-1, o `claim`, ainda não existe) | Recusar já no pedido (oráculo de quem tem conta ou é cliente) |
+| TC-3 | Quem responde pela troca da conta | **A plataforma** para quem responde a ela e para quem já tem o número confirmado no sistema inteiro (a troca não rebaixa a conta); **a organização em uso** (ou a primeira em que entrou) para o membro comum sem essa confirmação. Confirmada pela organização, a conta fica com o número novo pendente no sistema e liberada só nela; ganha os pedidos da plataforma (sem envio, D-12) e das outras organizações | Sempre a plataforma (contraria a D-12), ou sempre a organização (rebaixa quem tinha a confirmação do sistema) |
+| TC-4 | O que acontece na confirmação com o resto | Pedidos abertos do número antigo: fechados. Liberações de organização: apagadas (eram do número antigo). Ligação da ficha à pessoa da equipe (`customer.user_id`): fica (é por id, D-9); a ficha que troca pelo link liga a pessoa da equipe do número novo se não tinha ligação. Contato e conversas do número antigo: continuam na ficha (P1) | Desfazer a ligação da ficha na troca da conta |
+| TC-5 (**decidida pelo proprietário em 2026-11-13**) | Troca pedida pela equipe para um cliente | **Pelo link ou pela liberação do owner.** O link vai ao número novo e só confirma na sessão do portal da ficha (`whatsapp`). Ficha sem conta no portal: sem link, direto à liberação do owner. **Liberada por quem tem `phone:confirm`, a troca que a equipe pediu vale `team`, como no cadastro de um cliente:** a ficha volta a atrair as conversas do número. Não é ligada a pessoa da equipe (a ficha tem histórico, e a D-11 a apagaria com o membro). Um colaborador sozinho continua sem passar a ficha para outro número: pedir não é liberar. A troca que a própria pessoa pediu no portal e o owner liberou segue `manual` | Descartadas: manter `manual` (a ficha deixava de atrair as conversas, e a maioria dos clientes não tem portal) e a equipe trocar direto, sem fila |
+| TC-6 | Edição em `/admin` | Conta: troca aberta e liberada à mão pelo proprietário na mesma transação (`manual`, 409 se outra conta do grupo tem o número; editar a própria conta já era recusado). **Pessoa do portal: continua gravando direto como `manual`** (a conta do portal não tem pedido, e nada da ficha muda) | Criar pedido para `portal_user` |
+| TC-7 | `PATCH` que traz telefone | Continuam aceitando `phone`: outro número abre a troca, o mesmo é gravado. `PATCH /api/portal/me` saiu da lista do bloqueio | Recusar `phone` no `PATCH` e exigir a rota da troca |
+| TC-8 | Troca e responsáveis que mudam | A troca não espera a D-12. Membro que sai da organização responsável perde a troca (cancelada, como os pedidos dela); quem vira owner tem a troca movida para a plataforma, na fila, sem link até pedir o reenvio. A troca da plataforma aparece na fila do proprietário também para o membro comum | Manter a troca na organização até expirar |
+| TC-9 | Conta do portal na troca da ficha | Só a troca pedida pela própria pessoa leva o número à conta (`portal_user`), só declarado, como o `PATCH` fazia | Nunca mexer na conta |
+| TC-10 | Repetição | O mesmo número do cadastro: 400 `PHONE_UNCHANGED` (é dado do próprio cadastro). Pedir de novo o número da troca aberta é reenviar | Tratar como nova troca |
+
+### Ligação manual da ficha com a equipe: o que foi feito (2026-11-14)
+
+Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Ficha de quem é da equipe").
+
+- **Rota:** `PUT /api/customers/:id/team-link` com `teamLinkSchema { userId }` (`requireAuth` + `requireTenant` +
+  `customer:update` + `blockWhileImpersonating`), `linkTeamCustomer` em `src/lib/tenant/team-customer.ts` (o único
+  lugar que grava `customer.user_id`). 200 `{ team: { userId, role } }`. Ficha ou pessoa de outra organização (ou
+  que não existe): 404. Pessoa sem o telefone confirmado no sistema: 409 `TEAM_MEMBER_NOT_LINKABLE` (TL-1, ajuste de
+  2026-11-14). Ficha ligada a outra pessoa: 409 `CUSTOMER_ALREADY_LINKED`; pessoa que já tem ficha: 409
+  `TEAM_MEMBER_HAS_CUSTOMER` (o índice único parcial é a rede da corrida). A mesma ligação de novo: 200, sem
+  auditoria. Auditoria `customer.team_linked` com `metadata { userId, via: "manual" }`.
+- **Leitura para a tela:** `GET /api/customers/:id/team-candidates` (`customer:read` + `customer:update`): `userId`,
+  `name`, `role` e `hasCustomer` de cada membro desta organização **que pode ser ligado** (telefone confirmado no
+  sistema, TL-1), sem e-mail nem telefone.
+- **D-11 igual à da ligação automática:** quem decide é `customer.user_id`, venha de onde vier. Removida a pessoa ou
+  excluída a conta, a ficha sai com `deleteCustomerIn` e, dela, só os contatos cujo `phone_key` é o do telefone
+  **confirmado no sistema** da pessoa; os demais perdem o vínculo. Na prática, a ficha de **outro número** ligada à
+  mão sai sozinha (o contato do número dela fica, sem ficha). Sem mudança em `team-customer-removal.ts`.
+- **Tela:** cartão "Pessoa da equipe" na ficha sem ligação (`<Can resource="customer" action="update">`), ao lado de
+  onde fica o cartão "Também é da equipe" com a ação de desfazer. O diálogo (`customer-team-link.tsx`) diz antes de
+  confirmar que a remoção da pessoa ou a exclusão da conta apaga a ficha com as conversas do telefone confirmado
+  dela, mostra o papel de cada pessoa como selo e desabilita "você" e "já tem ficha".
+- **Testes:** `tests/db/team-customer-link.test.ts` (13 casos), mais as rotas novas em `rbac.test.ts`,
+  `impersonation.test.ts` e, sozinhas, em `phone-gate.test.ts` (nascem bloqueadas com telefone pendente).
+
+**Decisões da ligação manual a confirmar pelo proprietário**
+
+| # | Ponto que a SPEC não fechava | Escolha | Alternativa |
+|---|---|---|---|
+| TL-1 (**decidida pelo proprietário em 2026-11-14**) | Quem pode ser ligado | **Só membro desta organização com o telefone confirmado no sistema** (`userPhoneConfirmedGlobally`, o critério da ligação automática); o owner pode, se tiver o telefone confirmado. A lista de candidatos só traz essas pessoas, e o `PUT` recusa as demais com 409 `TEAM_MEMBER_NOT_LINKABLE` (sem dizer mais do que a lista já diz) | Descartada: qualquer membro, inclusive quem não confirmou o telefone |
+| TL-2 | Quem liga pode ligar a si mesmo? | **Não** (403 `SELF_LINK`). Com `customer:update` (o papel `member` tem), um colaborador ligaria a ficha de qualquer cliente à própria conta e, excluindo a conta, a apagaria sem ter `customer:delete`. Outra pessoa da equipe liga | Permitir; ou exigir `customer:delete` para ligar |
+| TL-3 | Como a tela escolhe a pessoa | Rota própria com id, nome, papel e "já tem ficha" (`customer:read` + `customer:update`), sem e-mail nem telefone. `GET /api/team` já mostra nome e e-mail a qualquer membro, mas não diz quem tem ficha | Reaproveitar `GET /api/team` (sem "já tem ficha") |
+| TL-4 | Ligação automática depois da manual | A manual prevalece: a automática só liga ficha sem `user_id` a pessoa sem ficha, então nunca a desfaz nem cria outra. Desfeita a manual, a automática volta a valer (cadastro, aceite de convite, confirmação pelo link) | Marcar a ficha desligada à mão para nunca mais ligar sozinha |
+| TL-5 | Permissão | `customer:update`, como a SPEC e o desfazer. Risco que sobra: dois colaboradores combinados (um liga a ficha de um cliente ao outro, que exclui a conta) apagam a ficha, mas não as conversas do número do cliente | `customer:delete` para ligar (só owner e admin, no catálogo atual) |
+| TL-6 | Corrida com a exclusão da conta | A ligação feita no mesmo instante em que a conta é anonimizada pode sobrar numa conta anonimizada: a ficha **não** é apagada (o lado que apaga menos). A corrida com `removeMember` está fechada pela ordem das travas | Travar a conta também (ciclo com `anonymizeUser`, que trava as fichas antes da conta) |
+
+### Pedido de verificação: `phone_verification`
+
+`scopedPolicy()`, com `tenant_id` nulo para os pedidos do escopo da plataforma. **A T2a criou**
+`id`, `tenant_id`, `subject_type` (`user` ou `customer`), `subject_id` (sem FK: quem apaga o
+cadastro apaga os pedidos, e a manutenção tira os órfãos), `phone_normalized`, `phone_key`,
+`status` (`sent`, `awaiting_manual`, `confirmed`, `canceled`), `token_hash`, `expires_at`,
+`confirmed_at`, `confirmed_by` e as datas. As demais colunas da tabela abaixo entram na T2b,
+com o envio. A T2a criou também `phone_tenant_vouch` (`user_id`, `tenant_id`, `phone_key`,
+`vouched_by`; chave `(user_id, tenant_id)`; `tenantPolicy()`), a liberação de organização.
+
+| Coluna | Observação |
+|---|---|
+| `id`, `tenant_id` | Escopo responsável pelo envio |
+| `subject_type`, `subject_id` | `customer` ou `user` |
+| `purpose` | `signup` (número do cadastro), `change` (troca) ou `claim` (número que já existe, P3). `signup` e `change` na migration `0038`, `claim` na `0040` |
+| `payload` | `jsonb` nulo: dados validados da ficha que nasce na confirmação (`claim`: nome e e-mail); só com o pedido aberto (`0040`) |
+| `phone`, `phone_normalized`, `phone_key` | O número a confirmar, de `phoneValues`. Na troca, o cadastro mantém o antigo até a confirmação |
+| `token_hash` | SHA-256, único. O token (`randomBytes(32)`) só existe no link |
+| `status` | `pending`, `sent`, `awaiting_manual`, `confirmed`, `canceled` |
+| `channel_id`, `provider_message_id`, `attempts` | Canal e mensagem da tentativa atual; histórico em `jsonb` (canal, hora, erro) |
+| `requested_by_type`, `requested_by_id` | Quem pediu (`user` ou `portal_user`); preenchidos na troca (`0038`) |
+| `expires_at`, `created_at`, `confirmed_at`, `confirmed_by` | Validade por `PHONE_VERIFICATION_TTL_MINUTES`; `confirmed_by` só na liberação manual |
+
+Dois índices únicos parciais para pedidos abertos: `(subject_type, subject_id, tenant_id)` nos
+de organização e `(subject_type, subject_id)` nos da plataforma. É um pedido por (cadastro,
+responsável); o do número novo substitui o do antigo. Encerrados há mais de 30 dias e órfãos
+saem no `maintenance.prune`, que também devolve a `awaiting_manual` o pedido de link vencido.
+
+### Confirmação
+
+```
+1. Pessoa abre /verificar-telefone?token=… → sem sessão, vai ao login e volta; com sessão, a
+   página renderiza e mostra um botão (T2b)
+2. POST /api/me/phone-verification/confirm (equipe) ou /api/portal/me/phone-verification/confirm
+   (portal), com { token } no corpo. O cadastro vem da sessão. Na mesma transação:
+   - trava o cadastro e o pedido, e confere que o token ainda é o do pedido (uso único);
+   - aplica o efeito conforme o responsável do pedido ("Alcance da confirmação");
+   - audita `phone.verified` (ids e enums; o número nunca vai para a auditoria).
+```
+
+Na troca, o `chat_contact` do número antigo **continua ligado ao cliente**: o histórico é do
+cadastro, não do número (P1).
+
+### Telefone que já existe (P3, D-1, `purpose = claim`)
+
+**Quem verifica fica com o número.** O link prova a posse; confirmado, o cadastro novo recebe
+o número, e o cadastro de **cliente** que o tinha, agora sem telefone, é **apagado**.
+
+| Quem cadastra | O número já é de | Resultado |
+|---|---|---|
+| Pessoa no autocadastro do portal | `customer` da organização, com ou sem conta | Resposta neutra ("enviamos um link para confirmar seu WhatsApp"). Confirmado: a ficha nova nasce com o número e a antiga é apagada. **Implementado em 2026-11-14** |
+| Equipe em `/app/clientes` | `customer` da organização | 409 `PHONE_IN_USE` com o id do cadastro existente. **Sem `claim` (decisão do proprietário de 2026-11-14, CL-1):** a equipe troca o número da ficha existente pelo pedido de troca, ou a exclui. A ação "Enviar link de verificação" não será feita nesta forma |
+| Importação | `customer` da organização | Linha `duplicate`, sem link (importação não dispara mensagens) |
+| Owner ou membro no cadastro | Outra conta do mesmo grupo | Cadastro aceito como pendente; confirmado, fica com o número e a conta anterior volta a "telefone pendente" (conta não é apagada) |
+
+- **A ficha nova só nasce na confirmação.** `customer` exige telefone (`CHECK`), então os dados
+  validados do cadastro ficam em `phone_verification.payload` (`jsonb`) até o clique; vencido o
+  pedido, somem com ele.
+- **Apagar a ficha antiga é `deleteCustomer`:** saem os contatos vinculados, as conversas, as
+  mensagens e os arquivos, como em qualquer exclusão de cliente (P7). É a opção segura quando o
+  número mudou de dono: o novo detentor não herda a conversa de outra pessoa. O custo é o caso
+  em que é a mesma pessoa: o histórico da ficha antiga se perde.
+- A troca e a exclusão ocorrem na mesma transação, sob a trava de unicidade. Audita
+  `customer.deleted_by_phone_claim` (ficha antiga, ficha nova, 4 últimos dígitos) e avisa o
+  owner por e-mail.
+- A ficha antiga ligada a um membro da equipe (D-9) segue a mesma regra. **Revisto pelo proprietário em 2026-11-14
+  (CL-7, CL-13):** a ficha com conta no portal, ligada à equipe ou bloqueada nunca é apagada por `claim`.
+| Equipe em `/app/clientes` ou na importação | Membro da organização | **Permitido** (D-9): a ficha de cliente é criada e ligada ao membro |
+
+### Telefone que já existe (`claim`): o que foi feito (2026-11-14)
+
+Detalhe em `docs/context/tech/28-crm-cadastro.md` ("Telefone que já existe: `claim` do portal").
+
+- **Decisão do proprietário (2026-11-14): a equipe não pede `claim`.** A ficha nova ainda não existe e o dono do
+  número não tem sessão, então o `claim` pedido em `/app/clientes` só fecharia com uma rota pública de confirmação.
+  Escolhida a opção "sem claim na equipe". **Descartadas:** (A) rota pública só para o token do `claim` da equipe,
+  mesmo restrita a quem tem `customer:delete` (abriria a única exceção à regra de confirmar na sessão do próprio
+  cadastro, e quem lê o canal QR da organização confirmaria); (B) confirmar na sessão de quem pediu na equipe (o dono
+  do número teria de repassar o link ao atendente, e quem lê o canal QR também confirmaria). **O `claim` pela equipe
+  não será feito nesta forma** (não é pendência). A equipe continua recebendo 409 `PHONE_IN_USE` com o id da ficha que
+  tem o número, e a tela diz o que ela já pode fazer: trocar o telefone daquela ficha pelo pedido de troca, ou
+  excluí-la (quem tem `customer:delete`).
+- **Migration `0040_telefone_claim`:** `purpose` aceita `claim`; coluna `payload jsonb` (nome e e-mail da ficha que
+  nasce); `CHECK` `phone_verification_claim_complete` (ficha de organização, número digitado, pedido por
+  `portal_user`, `payload` enquanto aberto) e `phone_verification_payload_open_claim` (`payload` só no `claim`
+  aberto: encerrado, some); índice único parcial `phone_verification_open_claim_idx` (um `claim` aberto por pessoa do
+  portal e organização).
+- **Autocadastro (`confirmPortalSignup`):** quando nenhuma ficha da organização tem o e-mail e uma ficha tem o número,
+  abre o `claim` (`openPortalClaim`) em vez de criar a ficha. `subject_id` é o id que a ficha nova vai ganhar. A
+  resposta é a de sempre. O painel "Confirme seu WhatsApp", o portão do portal e `GET /api/portal/me` (a organização
+  como a de um lead) tratam o `claim` aberto como a ficha pendente que ele vai virar; o reenvio funciona igual. A conta
+  do portal com `claim` aberto não é apagada como órfã (`dropOrphanPortalUser`) quando perde a ficha de outra organização.
+- **Confirmação só na sessão do portal de quem se cadastrou** (`requested_by_id`): `POST
+  /api/portal/me/phone-verification/confirm` acha o `claim` pelo token entre os pedidos da própria pessoa. Sem rota
+  pública. Na mesma transação, com a ficha que tem o número travada: a antiga sai por `deleteCustomerIn` (contatos,
+  conversas, mensagens, arquivos, pedidos e o vínculo do portal; objetos e conta órfã do portal depois do commit), a
+  nova nasce `lead`, `whatsapp`, ligada à conta do portal, e liga a pessoa da equipe com o número confirmado
+  (`matchingTeamMember`), como a confirmação do cadastro. Auditoria `customer.deleted_by_phone_claim` (alvo: a ficha
+  antiga; `metadata { newCustomerId, phoneHint }`, só os 4 últimos dígitos), `customer.deleted` e `portal.signed_up`
+  (`via: phone_claim`); e-mail `customer-deleted-by-phone-claim` aos owners.
+- **A liberação à mão nunca fecha `claim`** (409 `CLAIM_LINK_ONLY`): sem prova de posse, ninguém perde a ficha. A
+  fila de clientes mostra o `claim` como "Número de outra ficha", sem o botão "Liberar", e o owner não recebe o e-mail
+  de liberação.
+- **O link do `claim` segue a regra de envio de todos os pedidos (CL-3, revista pelo proprietário em 2026-11-14):** a
+  cascata de `PHONE_VERIFICATION_CHANNELS`, Cloud primeiro e, sem Cloud apta, o QR Code, também depois de uma falha da
+  Cloud e no reenvio. Continuam: canal sempre do escopo do pedido, 3 links por hora, e a liberação à mão nunca fecha um
+  `claim`. **Risco aceito como na D-13:** quem lê o WhatsApp do canal por QR Code (o owner, um papel com
+  `channel:manage`, quem pega o celular) consegue se autocadastrar no portal com o número de um cliente, ler o link e
+  confirmar na própria sessão; é atenuado pela ficha protegida (abaixo: a ficha com conta no portal, ligada à equipe ou
+  bloqueada nunca é apagada por `claim`). A decisão anterior do mesmo dia, "só pela Cloud", foi desfeita.
+- **Ficha antiga protegida (CL-7 e CL-13, decididas pelo proprietário em 2026-11-14):** o `claim` nunca apaga a ficha que
+  tem conta no portal (`portal_user_id`), que está ligada a uma pessoa da equipe (`user_id`) ou que está bloqueada
+  (`isProtectedFromClaim`). Nesses casos o `claim` nem abre no autocadastro (a resposta é a de sempre, como quando
+  nenhuma ficha é criada), e a confirmação confere de novo com a ficha travada: se ela passou a ter uma dessas
+  condições com o link a caminho, nada é apagado e o pedido responde o 400 de sempre.
+- **Vida do pedido:** sem link válido há mais de `PHONE_VERIFICATION_TTL_MINUTES`, o `maintenance.prune` encerra o
+  `claim` e o `payload` some; também o de quem saiu do portal. A exclusão da conta do portal apaga os `claim` dela
+  (`deletePortalClaimsOf`).
+- **Importação:** o bloco I ainda não existe; a linha com número de outra ficha será `duplicate`, sem link (registrado
+  no bloco I).
+- **Testes:** `tests/db/phone-claim.test.ts` (18 casos: resposta neutra, painel e `/api/portal/me` iguais aos do autocadastro comum, ficha nova
+  só na confirmação, a antiga sai com conversas e arquivos e só ela, token de outro cadastro e reusado, pedido vencido
+  sem `payload`, liberação à mão recusada, QR Code levando o link sem Cloud (sem e-mail ao owner), `failed` da Cloud
+  passando ao QR Code, isolamento entre organizações, conta com `claim` aberto que não cai como órfã, ficha com
+  portal, ligada à equipe ou bloqueada protegida na abertura e na confirmação (6 casos), conta do portal que some,
+  bloqueio ligado; e a equipe com número repetido: 409, sem pedido e sem exclusão).
+
+**Conferido no navegador (2026-11-14, servidor de desenvolvimento, dados do seed, banco desfeito depois):** o cartão "Pessoa
+da equipe" e o diálogo de ligação (aviso da D-11, selos de papel, "você" e "já tem ficha" desabilitados) em desktop e em
+375 px; a ligação feita e o cartão "Também é da equipe" com o papel; o 409 do cadastro com número repetido, com a
+orientação e o link da ficha que tem o número, sumindo ao corrigir o telefone; e o item do `claim` na fila de clientes, com
+o selo, a explicação e sem "Liberar". **Não conferidos no navegador:** o autocadastro do portal com `claim` até a
+confirmação (precisa de envio por um canal conectado; coberto por `tests/db/phone-claim.test.ts`), o e-mail aos owners
+e as telas dos ajustes de 2026-11-14 (a lista de candidatos só com telefone confirmado e o texto novo da fila).
+
+**Risco residual (revisão de segurança de 2026-11-14, revisto com os ajustes do mesmo dia):** com o QR Code cobrindo o
+envio, o caso "aguardando liberação" em organização sem Cloud deixou de existir (o `claim` e o autocadastro comum
+seguem o mesmo envio). Sobram dois sinais, que não dá para igualar sem inventar regra: a organização some do painel
+quando o `claim` vence (o lead comum fica, e manter o `claim` contrariaria "vencido, o `payload` some"); e, quando a
+ficha que tem o número é protegida, o `claim` nem abre, então a organização nunca aparece (como era antes do `claim`).
+Registrado em `tech/16-bugs-riscos.md` (RISK-014).
+
+**Decisões do `claim` a confirmar pelo proprietário** (CL-1, CL-3, CL-7 e CL-13 já decididas)
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| CL-1 (**decidida pelo proprietário em 2026-11-14**) | `claim` pela equipe | Não existe nesta forma: a equipe recebe 409 `PHONE_IN_USE` e troca o número da ficha existente ou a exclui | Descartadas: rota pública só para o `claim` da equipe; confirmação na sessão do atendente |
+| CL-2 | Em que sessão o link fecha | Na do `portal_user` que se autocadastrou (`requested_by_id`), pela rota de confirmação do portal | Rota pública (descartada pela regra do projeto) |
+| CL-3 (**revista pelo proprietário em 2026-11-14**) | Por que canal o link sai | A regra de todos os pedidos: Cloud primeiro e, sem Cloud apta, o QR Code (também depois de falha e no reenvio). Risco aceito como na D-13, atenuado pela ficha protegida (CL-7, CL-13) | Desfeita: só pela Cloud (decisão anterior do mesmo dia) |
+| CL-4 | Liberação à mão | Nunca fecha `claim` (409 `CLAIM_LINK_ONLY`); a fila mostra o pedido sem o botão; sem e-mail ao owner | Liberar criaria a ficha sem apagar a antiga (impossível: o número é único) |
+| CL-5 | Quando o autocadastro abre `claim` | Só quando nenhuma ficha tem o e-mail e outra ficha tem o número. Ficha com o e-mail segue a regra de sempre (a `lead` sem portal é ligada; as outras, nada). O `claim` nunca apaga ficha da própria pessoa | Abrir também com o e-mail repetido |
+| CL-6 | Vida do pedido | Um aberto por pessoa e organização; encerrado (com o `payload`) depois do TTL sem link válido; reenvio pelo painel enquanto aberto | Prazo próprio, maior |
+| CL-7 (**decidida pelo proprietário em 2026-11-14**) | Ficha antiga com conta no portal ou ligada à equipe | **Protegida:** o `claim` nem abre, e a confirmação confere de novo com a ficha travada (400, nada apagado). Nas demais, todos os contatos da ficha saem (é `deleteCustomer`, não a regra da D-11) | Descartada: apagar como qualquer outra |
+| CL-8 | Resposta neutra | O painel e o portão do portal mostram o `claim` como ficha pendente comum | Mostrar "nenhuma organização" (diria que o número já tinha cadastro) |
+| CL-9 | E-mail ao owner | Só a organização, os 4 últimos dígitos e o link da ficha nova; sem o nome da ficha apagada | Incluir o nome |
+| CL-10 | Auditoria | 4 últimos dígitos em `customer.deleted_by_phone_claim`, como a SPEC pede (a única exceção a "nada do número na auditoria") | Só ids |
+| CL-11 | `payload` na exportação | Não entra: é cópia do nome e do e-mail da conta do portal (já exportados) e vive no máximo o TTL | Exportar os `claim` abertos |
+| CL-13 (**decidida pelo proprietário em 2026-11-14**) | Ficha que tem o número está bloqueada (`blocked`) | **Protegida**, como na CL-7 | Descartada: apagar como as outras |
+| CL-14 | `claim` que a ficha antiga passou a ter o e-mail de quem se cadastrou | O link responde o 400 de sempre e o pedido vence sem efeito (nunca apaga uma ficha com o e-mail da própria pessoa) | Ligar a conta à ficha antiga |
+| CL-12 | Limite de clientes do plano | Conferido ao abrir o `claim` (como no autocadastro), não na confirmação (a antiga sai na mesma transação) | Conferir de novo |
+
+### Contratos
+
+| Método e rota | Entrada (Zod) | Saída | Autorização |
+|---|---|---|---|
+| `GET /api/me/phone-verification` e `GET /api/portal/me/phone-verification` (**T2a**) | sem corpo | `{ pending: { status, phoneHint } \| null }` | sessão; liberada mesmo com telefone pendente |
+| `POST /api/me/phone-verification/confirm` e a do portal (**T2a**) | `{ token }` | 200, 400 `INVALID_OR_EXPIRED`, 409 `PHONE_IN_USE` ou `PLATFORM_ONLY` | sessão do próprio cadastro; bloqueada em personificação; rate limit |
+| `POST /api/me/phone-verification/resend` (e a do portal) (**T2b**) | opcional: `{ responsible?: "platform" \| <tenantId> }` (portal: `{ tenantId? }`) | 202 | idem; rate limit por cadastro (3 por hora) |
+| `POST /api/me/phone-change` | `userPhoneChangeSchema { phone }` | 202 | `requireAuth`; bloqueada em personificação; liberada com telefone pendente (corrigir o número) |
+| `POST /api/portal/me/phone-change` | `phoneChangeSchema` | 202 | `requirePortalAuth` + `requirePortalTenant` |
+| `POST /api/customers/:id/phone-change` | `phoneChangeSchema` | 202 | `requireAuth` + `requireTenant` + `customer:update` |
+| `DELETE …/phone-change` (as três) | sem corpo | 204 | a mesma de quem pediu |
+| `GET /api/phone-verifications` (**T2a**) | `?page=` | fila da organização, mais antigos primeiro, paginada | `requireTenant` + `phone:confirm` |
+| `POST /api/phone-verifications/:id/confirm` (**T2a**) | sem corpo | 200; 403 `SELF_CONFIRMATION`; 404; 409 `PHONE_IN_USE`, `PLATFORM_ONLY` ou `VERIFICATION_STALE` | `requireTenant` + `phone:confirm` |
+| `GET` e `POST /api/admin/phone-verifications…` (**T2a**) | as mesmas | as mesmas, escopo da plataforma | `requirePlatform`, só o proprietário |
+
+Não existe rota pública de confirmação nem `GET` com o token no caminho (o token iria para o
+log de acesso): a revisão de segurança da T2a trocou as duas rotas públicas previstas pelas
+rotas autenticadas acima.
+| `PUT /api/channels/:id/verification-template` (e a de `/api/admin/channels`) (**T2b**) | `{ template: { name, language } \| null }` | 200; 404; 422 `INVALID_VERIFICATION_TEMPLATE` | `channel:manage` |
+
+`PATCH /api/customers/:id`, `PATCH /api/portal/me` e a edição de pessoa em `/admin` deixam de
+gravar `phone` direto: passam pelo pedido. Criar cliente pela equipe grava com `team`.
+
+### Segurança
+
+- Token só em hash, validade curta, uso único, consumido só por POST autenticado, com o token
+  no corpo e o cadastro tirado da sessão.
+- O link de uma organização não é prova fora dela ("Alcance da confirmação").
+- Ninguém libera o próprio telefone (403 `SELF_CONFIRMATION`).
+- As respostas de cadastro seguem neutras: não dizem se um número já tem conta.
+- Rate limit: 3 envios por hora por cadastro, além do limite por IP.
+- O link vai a um número que pode nunca ter escrito ao remetente: em canal QR é envio frio. O
+  limite por cadastro é a contenção; não existe teto de envio frio neste projeto.
+- A liberação manual é o ponto fraco do desenho (não prova posse): por isso é restrita ao
+  owner e ao proprietário da plataforma, auditada e recusada quando o número já está
+  confirmado em outra conta do grupo.
+
+### Fases
+
+| Fase | Entrega | Verificação | LLM |
+|---|---|---|---|
+| T1 (**implementada**; a tabela de pedidos e o modelo de verificação do canal Cloud passaram para a T2, que é quem os usa) | Migration (colunas), `customer.user_id`, funções de unicidade, `userPhoneSchema`, vínculo automático só com telefone confirmado e com o cliente antes do membro, permissão `phone:confirm` | `tests/db`: owners com o mesmo número são recusados; membros da mesma organização também; cliente com o telefone de um membro é **aceito** e ligado; uma ficha por pessoa da equipe; contato de quem é os dois liga ao cliente; contato novo não liga a telefone pendente; `rbac.test.ts` com a permissão nova | Opus 5.5 |
+| T2a (**implementada**) | Pedido (`phone_verification`), liberação de organização (`phone_tenant_vouch`), confirmação pelo link na sessão do cadastro, liberação manual nas duas filas, alcance pelo responsável, ganchos (cadastro, convite, virar owner, sair da equipe, exclusões) e limpeza | `tests/db/phone-requests.test.ts`: token de uso único, vencido, de outra conta; "quem provou fica com o número"; liberação manual recusada com número em uso; fachada (à mão e pelo link) não confirma fora dela; fila paginada; `CHECK` das contas | Fable 5.2 + três passadas de revisão de segurança |
+| T2b (**implementada**, sem a troca pelo pedido e sem o `claim`, que ficaram pendentes; ver "T2b: o que foi feito") | Job `phone.verify` com a cascata, status de falha pelo webhook, página `/verificar-telefone`, reenvio, e-mail ao responsável e à conta que perdeu a confirmação, e as restrições (a) a (g) de "Envio do link". **Pendentes, para fase própria:** troca de telefone pelo pedido (`…/phone-change`) e `claim` do portal (D-1) | `tests/db/phone-delivery.test.ts`: Cloud sem modelo cai no QR; `failed` assíncrono cai no próximo; sem canal vira `awaiting_manual`; o canal é sempre do responsável; um link só por número; D-12; reenvio com limite; token fora de job, log e auditoria; eco fora da caixa; lead do portal confirma. No módulo Cloud: modelo com URL fora de `APP_URL` é recusado | Opus 5.5 + `/code-review` e `/security-review` |
+| T3 (**implementada**, com as decisões T3-1 a T3-9 a confirmar; ver "T3: o que foi feito") | Bloqueio por `PHONE_VERIFICATION_REQUIRED` em `requireAuth` e `requirePortalAuth`, tela "Confirme seu WhatsApp" | `tests/db`: com `true`, toda rota privada responde 403 e as liberadas passam; com `false`, entra e o vínculo espera; seed e proprietário da plataforma não ficam trancados | Opus 5.5 + `/security-review` |
+| F1 (**implementada**; ver "F1: o que foi feito", no bloco F) | API do perfil: nome, foto (envio, troca, remoção, leitura autorizada) e LGPD | `tests/db/profile.test.ts` | Opus 5.5 + `/code-review` e `/security-review` |
+| F2 (**implementada**; ver "F2 e telas da troca: o que foi feito", no bloco F) | Página "Perfil" em `/app` e `/admin` (foto com recorte, nome, e-mail, telefone, senha), foto em membros e em quem atende, troca de telefone na ficha, em `/portal/conta` e em "Confirme seu WhatsApp", filas com `purpose = change` | `avatar-crop.test.ts`, `phone-change-api.test.ts` e conferência no navegador | Sonnet 5.5 |
+| T4 (**parcial**: filas, modelo de verificação na tela do canal, acertos de texto da T3, telas de troca de telefone, ligação manual à equipe e `claim` do portal (2026-11-14) implementados; `claim` pela equipe descartado (CL-1); ver "T4: o que foi feito") | Telas: fila de liberação em `/admin/usuarios`, `/app/equipe` e `/app/clientes`; troca em `/app/clientes` e `/portal/conta`; modelo de verificação na tela do canal | Roteiro manual com número real: Cloud com modelo, Cloud sem crédito caindo no QR, sem canal caindo na liberação | Sonnet 5.5 |
+
+---
+
+## Bloco R: retenção e limpeza de mensagens (P4)
+
+### Estado atual
+
+Não há prazo para `message` nem `conversation` (`tech/30:505-508`). Só `channel_event` tem
+retenção (`CHANNEL_EVENT_RETENTION_DAYS`, `src/jobs/maintenance.ts:72-83`). Não existe favorito
+em mensagem. `message.reply_to_message_id` e `message.file_id` já são `set null`
+(`src/db/schema/inbox.ts:209-216`).
+
+### Desenho (SPEC 060 da origem, na stack daqui)
+
+Mantido da origem, sem alteração de regra: desligado quando a variável está ausente (o
+exemplo de produção já vem ligado, D-7); piso de idade; prévia sem apagar;
+três fases na ordem **idade, contagem, favoritas acima do teto** (a favorita rebaixada só é
+apagada no ciclo seguinte); `0` é "sem limite" e `NULL` herda; a conversa esvaziada permanece.
+
+| Origem (060) | Aqui | Motivo |
+|---|---|---|
+| Função SQL `purge_channel_messages` chamada por RPC | Serviço `src/lib/inbox/retention.ts` com as mesmas três sentenças em Drizzle (`sql`), dentro de `withScope` | Drizzle é a única camada de dados; sem `SECURITY DEFINER` nem `REVOKE` para manter |
+| Disparo por rota de cron | Job pg-boss `inbox.retention` em `src/jobs/queues.ts`, cron diário, com `singletonKey` | O projeto já tem agendador; a tabela de claim `message_retention_state` vira só `last_run_at` e `last_result` |
+| Política do dono da conta, depois movida ao proprietário da plataforma | **Proprietário da plataforma**, em `/admin` | É o estado final decidido na origem (cabeçalho da 060) |
+| Escopo conta × tipo de canal | Tenant × tipo de canal; o escopo da plataforma usa só os padrões do `.env` | `Scope` já separa os dois |
+| Arquivo no bucket fica órfão | **Apaga `file` e o objeto**, como `purgeContacts` faz | Aqui a mídia conta em `storage_mb` do plano; órfão cobraria do tenant o que ele não vê |
+| Estrela por `UPDATE` direto do cliente | `PUT /api/inbox/messages/:id/favorite`, com `inbox:reply` e `visibility.ts` | Autorização no servidor |
+
+**Dados.**
+
+- `message.is_favorite` (`boolean`, padrão `false`), `favorited_at`, `favorited_by` (`set null`);
+  índice parcial `(conversation_id, created_at) WHERE is_favorite`.
+- `retention_policy`: `tenant_id`, `channel_type`, `max_messages`, `retention_days`,
+  `max_favorites` (inteiros nulos, `>= 0`), `updated_by`, único em `(tenant_id, channel_type)`.
+  Política `platformOnlyPolicy()`: o tenant não lê.
+- Índice `message (conversation_id, created_at)` se ainda não existir.
+
+**Precedência** (módulo puro `src/lib/inbox/retention-policy.ts`, com teste da matriz inteira):
+linha da política, depois padrão do `.env`, depois sem limite. Toda ausência resulta em não
+apagar.
+
+**Piso.** Protege a idempotência da reentrega (a ingestão procura a mensagem para não duplicar)
+e a citação de mensagem recente. Prevalece sobre qualquer política.
+
+**Variáveis** (em `src/lib/env.ts` e `.env.example`):
+
+```bash
+MESSAGE_RETENTION_ENABLED=false                      # .env.example (dev); true em docker/.env.prod.example
+MESSAGE_RETENTION_WHATSAPP_QR_MAX_MESSAGES=5000
+MESSAGE_RETENTION_WHATSAPP_QR_DAYS=90
+MESSAGE_RETENTION_WHATSAPP_QR_MAX_FAVORITES=200
+MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_MESSAGES=5000
+MESSAGE_RETENTION_WHATSAPP_CLOUD_DAYS=90
+MESSAGE_RETENTION_WHATSAPP_CLOUD_MAX_FAVORITES=200
+MESSAGE_RETENTION_MIN_AGE_HOURS=72
+MESSAGE_RETENTION_BATCH_LIMIT=5000
+```
+
+**Interface.** Estrela na mensagem e selo na bolha; aviso neutro na conversa esvaziada
+("Mensagens antigas removidas pela política de retenção", sem números); em `/admin`, tela de
+retenção por organização com prévia e última execução. O texto de privacidade (bloco L) cita
+a retenção.
+
+**Observação.** A 060 poda por idade e contagem de mensagens, não por conversa encerrada. Uma
+conversa encerrada antiga perde as mensagens e permanece na lista.
+
+### Fases
+
+| Fase | Entrega | Verificação | LLM |
+|---|---|---|---|
+| R1 (**implementada**; ver "R1: o que foi feito", com o contrato da R2 e da R3) | Migration `0039` com **todo** o schema do bloco, variáveis, módulo de precedência e testes | `npm test`: `0` nunca apaga; ausência nunca apaga; desligado nunca apaga; o piso vence. `tests/db/retention-schema.test.ts`: RLS, `CHECK`s, padrões | Sonnet 5.5 |
+| R2 (**implementada**; ver "R2: o que foi feito", com o contrato das rotas para a R3b) | Serviço de limpeza, prévia, job; exclusão do arquivo; rotas `/api/admin/retention/*` | `tests/db`: desligado não apaga; piso; favorita sobrevive; rebaixada só some no ciclo seguinte; prévia bate com a execução; isolamento entre tenants | Opus 5.5 |
+| R3a (**implementada**; ver "R3a: o que foi feito") | Estrela na mensagem (`PUT .../favorite`, selo na bolha) e aviso da conversa esvaziada, no atendimento do tenant e no da plataforma | `tests/db/inbox-favorite.test.ts`; roteiro no navegador (estrela, tempo real, aviso, desktop e celular) | Sonnet 5.5 |
+| R3b (**implementada**; ver "R3b: o que foi feito", com o roteiro manual) | Tela de retenção do `/admin` (política por organização e tipo de canal, prévia e última execução); **depende da R2** (serviço, prévia e `/api/admin/retention/*`) | `retention-format.test.ts`, `retention-scope.test.ts`; roteiro manual com o interruptor ligado em banco de teste; conferência no navegador | Sonnet 5.5 |
+
+**Nenhuma fase depois da R1 gera migration** (o Postgres local é compartilhado e a numeração colidiria). Faltou coluna? Pare e fale com a sessão
+da R1: a `0040` é de quem a pedir, uma só, depois de combinar.
+
+### R1: o que foi feito (2026-11-14)
+
+Só schema, variáveis, precedência e testes: **nenhum código apaga mensagem**. Migration `0039_retencao_mensagens`, já aplicada no
+Postgres local (`drizzle/meta` e o snapshot vão no mesmo commit).
+
+**Schema, coluna por coluna** (`src/db/schema/inbox.ts`; detalhe em `tech/07-banco-drizzle.md`):
+
+| Tabela | Coluna ou índice | Forma |
+|---|---|---|
+| `message` | `is_favorite` | `boolean not null default false` (`isFavorite`) |
+| `message` | `favorited_at` | `timestamptz` nulo (`favoritedAt`) |
+| `message` | `favorited_by` | `uuid` nulo, FK `user`, `ON DELETE SET NULL` (`favoritedBy`) |
+| `message` | `CHECK message_favorite_stamp` | `is_favorite or (favorited_at is null and favorited_by is null)`: **desfavoritar zera os três juntos** |
+| `message` | `message_favorite_idx` | parcial `(conversation_id, created_at) WHERE is_favorite` |
+| `message` | `message_tenant_created_idx` | `(tenant_id, created_at)`: a varredura por idade e por contagem de um escopo |
+| `message` | `message_favorited_by_idx` | parcial `(favorited_by) WHERE favorited_by IS NOT NULL`: o `set null` |
+| `message` | `(conversation_id, created_at)` | **já existia** (`message_conversation_created_idx`, com `created_at DESC, id DESC`): não foi duplicado |
+| `retention_policy` (`retentionPolicy`) | PK `(tenant_id, channel_type)` | `tenant_id uuid` FK `organization` `cascade`; `channel_type text` (`whatsapp_cloud` ou `whatsapp_qr`, sem `CHECK` no banco) |
+| `retention_policy` | `max_messages`, `retention_days`, `max_favorites` | `integer` nulos, `CHECK (… is null or … >= 0)`; `NULL` herda, `0` é sem limite |
+| `retention_policy` | `updated_by`, `created_at`, `updated_at` | `updated_by` FK `user` `set null`; `updated_at` com `$onUpdate` |
+| `message_retention_state` (`messageRetentionState`) | `id` | `uuid` PK |
+| `message_retention_state` | `tenant_id`, `channel_type` | `tenant_id` **nulo = escopo da plataforma**; único `(tenant_id, channel_type)` quando `tenant_id` não é nulo e único `(channel_type)` quando é nulo |
+| `message_retention_state` | `last_run_at`, `last_result`, `updated_at` | `timestamptz` nulo; `jsonb not null default '{}'` com `CHECK` de objeto; `updated_at` com `$onUpdate` |
+
+As duas tabelas novas usam **`platformOnlyPolicy()`** com `FORCE ROW LEVEL SECURITY` e `GRANT` ao `bizu_app`: o tenant (e o owner) não as
+lê nem grava. Leia e escreva com `withPlatformData` (que também alcança `message` com `tenant_id` nulo) ou, no job que atravessa
+organizações, `withPlatformScope("…")`. `message` segue com `scopedPolicy()`: para apagar mensagem de uma organização, ou `withTenant` (que **não**
+enxerga as tabelas de retenção na mesma transação: resolva a política antes, em `withPlatformData`) ou `withPlatformScope` com `tenant_id`
+explícito em toda sentença.
+
+**Variáveis** (`src/lib/env.ts`, `.env.example` com `ENABLED=false`, `docker/.env.prod.example` com `ENABLED=true`, `docker/compose.prod.yml`):
+`MESSAGE_RETENTION_ENABLED` (padrão `false`), `MESSAGE_RETENTION_WHATSAPP_QR_*` e `MESSAGE_RETENTION_WHATSAPP_CLOUD_*` (`MAX_MESSAGES`, `DAYS`,
+`MAX_FAVORITES`; ausente ou `0` = sem limite; exemplos 5000, 90 e 200), `MESSAGE_RETENTION_MIN_AGE_HOURS` (24 a 8760, padrão 72),
+`MESSAGE_RETENTION_BATCH_LIMIT` (1 a 100000, padrão 5000). **Não existe variável de intervalo**: o job é diário. No compose os limites
+saem sem padrão (sem a variável, sem limite). O núcleo não importa pasta de módulo de canal: o nome vem do tipo
+(`MESSAGE_RETENTION_<TIPO>_…`, mapa exaustivo sobre `ChannelType` em `retention-policy.ts`; um tipo novo não compila até ganhar o dele, e
+sem variável não apaga nada).
+
+**Módulo puro `src/lib/inbox/retention-policy.ts`** (sem banco, sem `getEnv`; só importa `channels/types`):
+
+```ts
+retentionConfigFromEnv(env: Readonly<Record<string, unknown>>): RetentionConfig   // passe getEnv()
+//   RetentionConfig = { enabled; minAgeHours (>= 24); batchLimit; defaults: Record<ChannelType, RetentionLimits> }
+planRetention(config, channelType, row: RetentionPolicyRow | null | undefined): RetentionPlan
+//   RetentionPlan = { channelType; enabled; floorHours; batchLimit;
+//                     effective: RetentionLimits;  sources: Record<dimensão, "policy" | "default" | "unlimited">;
+//                     run: RetentionLimits;        canPurge: boolean }
+retentionCutoffs(floorHours: number, retentionDays: number | null, now: Date): { floorAt: Date; ageCutoff: Date | null }
+resolveRetention(row, defaults): { limits; sources }          // a mesma resolução, sem olhar `enabled`
+effectiveMinAgeHours(value: unknown): number                   // nunca abaixo de MIN_AGE_HOURS_FLOOR (24)
+retentionEnvKeys(channelType), RETENTION_LIMIT_MAX             // nomes das variáveis; tetos 10.000.000 / 3650 / 1.000.000 (Zod da rota do /admin)
+type RetentionLimits = { maxMessages; retentionDays; maxFavorites }   // number | null, null = sem limite (o 0 já virou null)
+type RetentionPolicyRow = { maxMessages?; retentionDays?; maxFavorites? }  // number | null | undefined: a linha do Drizzle serve
+type RetentionRunResult, emptyRunResult, readRunResult(value: unknown)    // formato de last_result e da prévia
+```
+
+- `plan.effective` é o que a política manda, ligada a retenção ou não: use na **tela** e na **prévia**. `plan.run` é o que uma limpeza de verdade
+  pode aplicar: **todo nulo com `MESSAGE_RETENTION_ENABLED` desligado**. Quem apaga lê só `plan.run`; se `!plan.canPurge`, não há o que fazer.
+- Valor torto na linha (negativo, fracionário) vale **sem limite**, sem herdar o padrão. Tipo de canal sem variável: sem limite.
+- `RetentionRunResult` = `{ byAge, byCount, favoritesDemoted, filesDeleted, messagesTotal, favoritesTotal, truncated }`: só contagens (nunca texto de
+  mensagem). É o formato do `last_result` e da prévia (na prévia, o que **seria** apagado; os totais são o estado atual).
+
+**O que a R2 pode assumir e deve cumprir** (serviço `src/lib/inbox/retention.ts`, job `inbox.retention`):
+
+1. Escopo = organização × tipo de canal (e plataforma × tipo): `message` → `conversation` → `channel.type`. **`max_messages` e `max_favorites` valem
+   para o escopo inteiro** (C-3: "por organização e tipo de canal"), não por conversa; o ranking é `created_at DESC, id DESC` (o desempate por `id` é
+   obrigatório: um lote do webhook empata `created_at`).
+2. Ordem **idade, contagem, favoritas acima do teto**. Idade: `NOT is_favorite AND created_at < ageCutoff`. Contagem: `NOT is_favorite`, ranque
+   `> max_messages` **e `created_at < floorAt`**. Favoritas: `UPDATE message SET is_favorite = false, favorited_at = NULL, favorited_by = NULL`
+   nas favoritas de ranque `> max_favorites` **e `created_at < floorAt`** (o `CHECK` exige os três juntos); elas só somem no ciclo seguinte.
+   O piso (`floorAt`) vale nas três; `LIMIT plan.batchLimit` em cada fase.
+3. Só executa com `plan.canPurge`. Prévia (`dryRun`) usa `plan.effective` (funciona com a retenção desligada, para o proprietário ver antes de
+   ligar) e **não altera nada nem grava `message_retention_state`**.
+4. Apagar mensagem apaga também o `file` dela (`owner_type = 'message'`, `owner_id = message.id`; a linha na transação e o objeto **depois do commit**,
+   como `purgeContacts`). `message.file_id` e `reply_to_message_id` já são `set null`.
+5. A conversa esvaziada **permanece**. Não zere `last_message_at`, `last_inbound_at` (âncora da janela de 24 h) nem `last_message_direction`. Zere
+   `last_message_preview` das conversas que ficaram sem mensagem (ele guarda o texto da última). `unread_count` fica como está.
+   (A R2 ampliou: a prévia sai sempre que a mensagem mais recente da conversa foi apagada, esvaziada ou não; ver "R2: o que foi feito".)
+6. Depois de uma execução de verdade, grave `message_retention_state` por escopo (upsert; `last_run_at`, `last_result` no formato de
+   `RetentionRunResult`). Conversa afetada: `notifyInbox` só com ids, como a regra do domínio.
+7. Job com `singletonKey` e cron diário (`JOBS_MODE`); sem `INTERVAL`. Erro vai a `logError`, nunca com texto de mensagem.
+
+**O que a R3 pode assumir:**
+
+1. `message.is_favorite`, `favorited_at` e `favorited_by` existem; favoritar grava os três (`favorited_at = now()`, `favorited_by` = quem está na sessão),
+   desfavoritar zera os três. A estrela é **da conversa**, não da pessoa: quem tem acesso à conversa vê a mesma marca.
+2. `PUT /api/inbox/messages/:id/favorite` é da R3 (`inbox:reply` + `visibleConversation`, auditoria sem texto, bloqueada em personificação); o
+   teto de favoritas do escopo é aviso de tela (a limpeza é quem rebaixa), não recusa.
+3. **Aviso da conversa vazia sem coluna nova:** a thread vazia com `conversation.last_message_at` não nulo mostra "Mensagens antigas removidas pela
+   política de retenção" (sem números). A R2 garante o item 5 acima para isso valer.
+4. A tela do `/admin` lê e grava `retention_policy` (por `(tenant_id, channel_type)`, `updated_by` = quem ajustou) e lê `message_retention_state` com
+   `readRunResult`; os campos da linha têm teto `RETENTION_LIMIT_MAX` no Zod; `NULL` no campo da tela é "herda" (mostre o `plan.sources`: "padrão do
+   sistema" × "fixado"). A parte do `/admin` **depende da R2** (prévia e rotas `/api/admin/retention/*` ficam com a R2, que é quem tem o serviço); a
+   estrela e o aviso não dependem.
+
+**LGPD:** as colunas novas não são dado pessoal do titular. `favorited_by` aponta para uma conta: a anonimização (`detachUserFromInbox`) a zera,
+mantendo a estrela, como faz com `sender_user_id` (teste em `tests/db/inbox-lgpd.test.ts`); a exportação do titular não ganhou campo (a favorita é
+marca da equipe, não do cliente). `retention_policy` e `message_retention_state` saem com a organização (`cascade`). `lgpd.md` tem a linha nova;
+a linha das mensagens continua "sem prazo automático" até a R2.
+
+**Testes:** `src/lib/inbox/retention-policy.test.ts` (a matriz da precedência: `0` nunca apaga, ausência nunca apaga, desligado nunca apaga, o piso vence,
+valor torto, `.env` por tipo de canal, resultado da execução) e as validações novas de `src/lib/env.test.ts`; `tests/db/retention-schema.test.ts`
+(padrões das colunas novas, `CHECK` da favorita e das três dimensões, unicidade, `set null`, `cascade`, índices, e o isolamento: o tenant e o `bizu_app`
+cru não leem, não gravam nem alteram as duas tabelas; a plataforma sim); `tests/db/rls.test.ts` (as duas tabelas no inventário das só-da-plataforma).
+
+**Decisões da R1 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R1-1 | Como a tela sabe que a conversa teve mensagens removidas | Sem coluna: conversa sem mensagem e com `last_message_at` (como na origem). Aviso só na conversa **esvaziada**; a parcialmente podada não tem aviso | `conversation.retention_purged_at`, que também avisaria a parcialmente podada |
+| R1-2 | Escopo de `max_messages` e `max_favorites` | A organização inteira, por tipo de canal (leitura de C-3 e da origem), não por conversa | Por conversa (o índice parcial das favoritas, por conversa, também serviria) |
+| R1-3 | Piso | Nunca abaixo de 24 h, como na origem; o `.env` abaixo disso **derruba a subida** (padrão 72) | Aceitar e levantar em silêncio para 24 |
+| R1-4 | Variável torta no `.env` | Derruba a subida (convenção do projeto), em vez de virar "sem limite" com aviso, como na origem | O comportamento da origem |
+| R1-5 | Última execução | Uma linha por escopo (`message_retention_state`), não um singleton, e sem `running_since` (o `singletonKey` do job basta) | Singleton do deploy inteiro, como na origem |
+| R1-6 | Índices além dos da SPEC | `message_tenant_created_idx` e `message_favorited_by_idx`, e o `CHECK` do carimbo da favorita | Só os da SPEC (a varredura passa a depender dos índices de conversa) |
+| R1-7 | `channel_type` | Sem `CHECK` no banco (como `channel.type`): tipo novo não pede migration | `CHECK … in ('whatsapp_cloud','whatsapp_qr')` |
+| R1-8 | Tetos de cada limite | Só no `.env` e na rota do `/admin` (`RETENTION_LIMIT_MAX`: 10.000.000, 3650 e 1.000.000); o banco só exige `>= 0` | Teto também em `CHECK` |
+| R1-9 | Anonimizar a conta | Zera `favorited_by`, mantém a estrela | Deixar o id da conta anonimizada |
+| R1-10 | Compose | Limites sem padrão no `compose.prod.yml` (só o `.env.prod.example` traz 5000/90/200); `ENABLED` padrão `false` | Padrões também no compose |
+
+### R2: o que foi feito (2026-11-14)
+
+Limpeza, prévia, job e rotas do `/admin`. **Apaga mensagem** quando `MESSAGE_RETENTION_ENABLED=true`. Nenhuma migration (o schema veio
+todo na R1). A precedência e o piso continuam só em `retention-policy.ts`.
+
+**Serviço `src/lib/inbox/retention.ts`:**
+
+```ts
+runRetention(target: { tenantId: string | null; channelType }, { dryRun?, now?, config? }): Promise<{ plan; result: RetentionRunResult; ran }>
+loadRetentionPlan(target, config?)            // planRetention com a linha de retention_policy (a plataforma não tem linha)
+lastRetentionRun(target)                      // { lastRunAt, result: readRunResult(last_result) } | null
+listRetentionTargets()                        // pares distintos (tenant_id, channel.type) das conversas; a plataforma com tenantId null
+runRetentionCycle({ now?, config?, targets?, run? })   // o job; targets e run só para teste
+getRetentionView(target, config?), retentionTenantExists(id), saveRetentionPolicy(id, tipo, input, actor)   // rotas do /admin
+```
+
+| Fase | O que apaga (ou rebaixa) | Ordem do lote | Nunca |
+|---|---|---|---|
+| Idade | não favorita com `created_at < ageCutoff` (`retentionCutoffs`: o corte nunca passa do piso) | as mais velhas primeiro | favorita; mais nova que o piso |
+| Contagem | não favorita cujo ranque `created_at DESC, id DESC` **entre as não favoritas que a idade deixou** passa de `maxMessages`, com `created_at < floorAt` | as de ranque mais alto (mais velhas) primeiro | favorita; mais nova que o piso |
+| Favoritas | favorita cujo ranque entre as favoritas passa de `maxFavorites`, com `created_at < floorAt`: `is_favorite = false`, `favorited_at` e `favorited_by` nulos. **Não apaga**: ela entra nas fases 1 e 2 no ciclo seguinte | as mais velhas primeiro | apagar; mais nova que o piso |
+
+- Escopo = organização × tipo de canal (e plataforma × tipo): `message.tenant_id` e a conversa num `channel.type` do escopo. Roda em `withScope`
+  (RLS do escopo; `withPlatformData` na plataforma) **e** com `tenant_id = $1` (ou `IS NULL`) e o tipo em toda sentença que toca `message`, `file`
+  e `conversation`. Uma execução de uma organização nunca alcança mensagem de outra, nem da plataforma (teste).
+- `LIMIT plan.batchLimit` por fase; `truncated = true` quando sobrou (a seleção pede `batchLimit + 1`). O que sobrou fica para o próximo ciclo.
+- Só executa com `plan.canPurge`; senão **não toca nada, nem o estado**. Quem apaga lê só `plan.run`.
+- **A prévia e a execução escolhem as vítimas pelo mesmo código** (`selectVictims`). A prévia só conta; a execução apaga exatamente aquelas, e cada
+  `DELETE`/`UPDATE` repete o escopo, o tipo, a estrela, o corte e, na contagem e nas favoritas, o próprio ranque recalculado na sentença (`overCap`):
+  uma estrela marcada entre a seleção e o `DELETE`, ou uma exclusão concorrente que traga a mensagem para dentro do teto, a salva. Por isso o que a
+  prévia conta bate com o que a execução apaga no mesmo estado (teste com as três fases, mídia e lote cortado).
+- Antes de apagar, trava as conversas afetadas (`FOR UPDATE`, por id): a mesma ordem da ingestão e do envio (conversa, depois mensagem).
+- Mídia: a linha `file` da mensagem apagada (`owner_type = 'message'` com `owner_id` dela, ou a apontada por `file_id`), no escopo e **que nenhuma mensagem
+  que sobrou aponte**, sai na transação; o objeto sai do armazenamento depois do commit (falha vai a `logError`), como `purgeContacts`.
+- Prévia do texto: `last_message_preview` vira nulo sempre que a mensagem **mais recente** da conversa (`created_at DESC, id DESC`, lida depois da
+  trava das conversas) está entre as apagadas, a conversa tendo ficado vazia ou não (sobrando uma favorita mais antiga, por exemplo); nunca é
+  recalculada a partir de uma mensagem mais antiga. A conversa em que só saíram mensagens antigas mantém a prévia. A conversa esvaziada fica.
+  `last_message_at`, `last_inbound_at`,
+  `last_message_direction`, `unread_count`, situação e dono ficam.
+- `notifyInbox` por conversa afetada (apagada ou rebaixada), `k: "message"`, só ids (`s`, `c`, `a`).
+- Depois do commit, upsert de `message_retention_state` (`last_run_at = now`, `last_result` no formato de `RetentionRunResult`).
+- Prévia (`dryRun`): `plan.effective`; funciona com a retenção desligada; não altera nada e não grava o estado. Nela, `messagesTotal` e `favoritesTotal`
+  são o estado atual; na execução, o estado depois dela.
+
+**Job `inbox.retention`** (`src/jobs/queues.ts`, `src/jobs/inbox.ts`): cron `45 4 * * *` (UTC), fila `exclusive` com `singletonKey = "inbox.retention"`
+no agendamento (`scheduleDefinitions` ganhou `singletonKey`), **sem retry** e com expiração de 6 h (um job repetido ou expirado abriria
+uma segunda passada com a primeira ainda apagando), dead letter `inbox.retention.dead`. Desligada, não percorre nada.
+Cada escopo que falha vai a `logError` ("Falha na limpeza de mensagens de um escopo", sem texto de mensagem nem id de pessoa) e o ciclo segue; a saída
+do job só tem contagens (`scopes`, `ran`, `failed`, `truncated`). Vale em `JOBS_MODE=inline` e `worker` como os demais.
+
+**Rotas `/api/admin/retention/*`** (`src/api/admin-retention.ts`, sub-router com a própria cadeia `sameOrigin` → `jsonBodyLimit` → `authRateLimit` →
+`requireAuth` → `requirePlatform()`, montado antes de `adminRoutes`). **Contrato para a tela da R3b:**
+
+| Método e rota | Quem | Resposta |
+|---|---|---|
+| `GET /api/admin/retention/tenants/:id` | equipe da plataforma | `{ scopes: RetentionView[] }`, um por tipo de canal, na ordem de `channelTypes` |
+| `PUT /api/admin/retention/tenants/:id/:channelType` | `platform_owner`, `blockWhileImpersonating` | corpo `retentionPolicySchema` (`src/lib/schemas/retention.ts`): `{ maxMessages, retentionDays, maxFavorites }`, os três obrigatórios, inteiro `>= 0` até `RETENTION_LIMIT_MAX` ou `null` (herda); `0` = sem limite; campo a mais é 400. Upsert de `retention_policy` com `updated_by`; audita `admin.retention_policy_updated` **sem `tenant_id`**, `target = tenant`, `metadata = { channelType, maxMessages, retentionDays, maxFavorites }`. Responde `{ scope: RetentionView }` |
+| `GET /api/admin/retention/tenants/:id/:channelType/preview` | equipe da plataforma | `{ preview: RetentionRunResult }` (o que a limpeza faria agora, pela política efetiva, mesmo desligada) |
+| `GET /api/admin/retention/platform` | equipe da plataforma | `{ scopes: RetentionView[] }` do escopo da plataforma (só os padrões do `.env`; não há escrita) |
+| `GET /api/admin/retention/platform/:channelType/preview` | equipe da plataforma | `{ preview: RetentionRunResult }` |
+
+```ts
+type RetentionView = {
+  channelType: "whatsapp_cloud" | "whatsapp_qr";
+  enabled: boolean;                 // MESSAGE_RETENTION_ENABLED: desligada, a política só vale na prévia (mostre um aviso)
+  floorHours: number; batchLimit: number;
+  policy: { maxMessages; retentionDays; maxFavorites } | null;   // a linha como está (null no campo = herda); null sem linha
+  policyUpdatedAt: string | null;
+  defaults: RetentionLimits;        // padrões do .env (null = sem limite)
+  effective: RetentionLimits;       // o que vale (linha, depois .env)
+  sources: Record<"maxMessages" | "retentionDays" | "maxFavorites", "policy" | "default" | "unlimited">;
+  lastRun: { at: string | null; result: RetentionRunResult } | null;   // null = nunca rodou
+};
+```
+
+Erros: 401 sem sessão; 403 `PLATFORM_FORBIDDEN` para quem não é da plataforma (e para o suporte no `PUT`); 403 `PLATFORM_2FA_REQUIRED`; 404 para
+organização inexistente ou **excluída** (`status = deleted`), id que não é UUID ou tipo de canal desconhecido; 400 com a mensagem do Zod. Como toda
+rota nova, com `PHONE_VERIFICATION_REQUIRED=true` a conta com telefone pendente recebe 403 `PHONE_UNVERIFIED` (nada daqui entrou na lista do que passa).
+
+**Texto e LGPD:** `docs/context/lgpd.md` (linha do atendimento e a da política) e a seção 6 de `src/lib/legal/privacidade.md`: a linha
+"Conversas, mensagens e arquivos" virou duas, "Mensagens e arquivos" (limpeza automática diária com prazo, teto, favoritas e piso, com os padrões
+90 dias, 5.000, 200 e 72 h) e "Contatos e conversas" (sem prazo automático). `LEGAL_VERSIONS` ficou em `2026-11`. **Revisão jurídica pendente.**
+
+**Testes:** `tests/db/inbox-retention.test.ts` (desligada, sem limite e `0` não apagam; o piso nas três fases e nunca abaixo de 24 h; idade, contagem
+pelo escopo inteiro, desempate por id, favoritas rebaixadas que só somem no ciclo seguinte, as três fases juntas; a prévia bate com a execução, com a
+retenção desligada e com o lote cortado; isolamento entre organizações, entre a plataforma e as organizações e entre tipos de canal; `batchLimit` e
+`truncated`; lote acima de 65.535 ids (um parâmetro de array só); `file` e objeto; conversa esvaziada com as âncoras; prévia do texto zerada quando a última sai por idade ou por contagem (sobrando favorita mais antiga) e mantida
+quando só as antigas saem; mensagem citada; estado gravado; `pg_notify` só com ids; reentrega de aviso antigo;
+o job: fila, agendamento, escopos e uma organização que falha). `tests/db/admin-retention.test.ts` (papéis, organização inexistente ou excluída,
+tetos e campos, `sources`, auditoria sem `tenant_id`, prévia sem apagar, última execução). `rbac.test.ts` e `impersonation.test.ts` ganharam as rotas.
+O escopo da plataforma só é limpo nos testes com o corte de 3650 dias e mensagens com mais de 10 anos; o ciclo, só com escopos explícitos.
+
+**Decisões da R2 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R2-1 | O que entra no ranque da contagem | As não favoritas **que a idade deixou** (é o que sobraria depois da fase 1; igual à execução da origem) | Ranquear antes da fase 1 (a prévia da origem contava em dobro) |
+| R2-2 | Arquivo apontado por outra mensagem que sobrou | Fica (só sai o que ninguém mais aponta) | Apagar sempre (`purgeContacts` não confere, porque leva a conversa inteira) |
+| R2-3 | Execução sem limite ou desligada | Não grava `message_retention_state` (a tela mostra só a última execução de verdade) | Gravar uma linha "sem efeito" |
+| R2-4 | Escopo que falha no job | Vai ao log e o job termina com sucesso (`failed` na saída); o job não tem retry (a falha ao listar os escopos espera o dia seguinte) | Falhar o job inteiro com retry (repetiria os escopos que já limparam: mais um lote, e poderia sobrepor duas passadas) |
+| R2-5 | Organizações suspensas ou com exclusão agendada | Entram na limpeza como as outras (a regra protege o servidor) | Pular as não ativas |
+| R2-6 | Prévia | `GET` (leitura, liberada ao suporte) | `POST` |
+| R2-7 | Escopo da plataforma | Lido e com prévia no `/admin`, sem escrita (só o `.env`, como a R1 decidiu) | Linha de política também para a plataforma (pediria migration) |
+| R2-8 | Voltar a herdar tudo | `PUT` com os três `null` (a linha fica, toda nula) | Rota `DELETE` |
+| R2-9 | Aviso às telas | `k: "message"` sem `m` (relê lista, detalhe e mensagens) | `k: "conversation"` (não relê as mensagens) |
+| R2-10 | Horário | 04:45 UTC, depois do `maintenance.prune` (04:30) | Outro horário |
+
+### R3a: o que foi feito (2026-11-14)
+
+A parte da R3 que **não depende do serviço de limpeza**: a estrela na mensagem e o aviso da conversa esvaziada. **Nenhuma migration** (o
+schema veio todo na R1) e **nenhum código apaga mensagem ou rebaixa favorita**. Fica para a **R3b** a tela de retenção do `/admin`, que
+depende da R2 (serviço, prévia e `/api/admin/retention/*`).
+
+- **`PUT /api/inbox/messages/:id/favorite`** (`src/api/inbox.ts`, serviço `src/lib/inbox/favorite.ts`, schema `favoriteMessageSchema`):
+  corpo `{ "favorite": boolean }`, resposta `{ message }` (a `MessageView` já relida). `inbox:reply` e `visibleConversation` (mensagem de
+  conversa que a pessoa não vê, de outro tenant ou inexistente: **404 igual**; id que não é UUID: 404, como toda rota com `validId`).
+  Favoritar grava `is_favorite`, `favorited_at = now()` e `favorited_by` = quem está na sessão; desfavoritar zera os três juntos (o `CHECK
+  message_favorite_stamp` exige). **Idempotente e atômica:** um único `UPDATE ... WHERE is_favorite <> alvo`; repetir não troca quem marcou
+  nem a data, e só a mudança real audita e avisa (pedidos simultâneos gravam uma vez). 60 por minuto por pessoa (o limite das escritas de
+  fila). Bloqueada em personificação (`blockMutationsWhileImpersonating`; no `it.each` de `impersonation.test.ts`) e, em `read_only`, pela
+  regra geral do `requireTenant`. **O teto de favoritas do escopo não recusa**: quem rebaixa a favorita acima do teto é a limpeza (R2).
+- **Auditoria:** `inbox.message_favorited` e `inbox.message_unfavorited`, alvo `{ type: "message", id }`, `metadata = { conversationId }`; nunca o
+  texto, o telefone nem o nome. **Aviso em tempo real:** `notifyInbox` na mesma transação, só ids (`s, c, k, m, a`), com `k = "status"`: a tela
+  relê **só as mensagens** da conversa (a lista e o detalhe não mudam com a estrela), em todas as abas de quem vê a conversa.
+- **Leitura:** `MessageView.isFavorite` (`views.ts`, por onde a tela já lê as mensagens: `GET .../conversations/:id/messages` e a mensagem
+  devolvida pelo envio e pelo `PUT`). A estrela é **da conversa**: quem tem acesso a ela vê a mesma marca (teste com owner, outro membro e
+  leitor sem `inbox:reply`, que vê o selo mas não o botão).
+- **Tela** (`message-bubble.tsx`): selo de estrela cheia ao lado da hora na bolha da favorita (para todos que leem) e o botão de estrela ao lado do
+  "Responder" (só com `inbox:reply`; a API decide). Aparece ao passar o mouse ou focar, e sempre em tela de toque; **a favorita fica sempre à vista**
+  (a estrela cheia e `aria-pressed`). Escrita pela API e **releitura** (`useInboxMutation`, método `PUT`); nunca escreve no cache.
+- **Aviso da conversa esvaziada** (`message-thread.tsx`, `format.ts`: `emptiedByRetention`, `RETENTION_EMPTY_NOTICE`): thread sem nenhuma
+  mensagem (nem envio em andamento) e `conversation.last_message_at` preenchido mostra "Mensagens antigas removidas pela política de retenção", sem números
+  e sem coluna nova. Conversa nova (sem `last_message_at`) segue com "Nenhuma mensagem ainda. Escreva a primeira abaixo." A R2 garante que a limpeza não
+  zera `last_message_at` (item 5 do contrato).
+- **Atendimento da plataforma:** `PUT /api/admin/inbox/messages/:id/favorite` (`src/api/admin-inbox.ts`), mesmo serviço com `Scope = platform`,
+  `PLATFORM_REPLY_ROLES` (`platform_owner` e `platform_support`) e a auditoria com `actor_type = platform` e sem `tenant_id`. A tela é a mesma
+  (`inbox-scope.tsx` já dá `api` e `can` do escopo). Ver a decisão R3a-1.
+
+**Testes:** `tests/db/inbox-favorite.test.ts` (13 casos: 401/403, 404 de outra pessoa, de outro tenant e inexistente, corpo inválido, os três campos
+gravados e zerados juntos, idempotência com outra pessoa repetindo, pedidos simultâneos, a mesma marca para quem tem acesso, o teto que não recusa,
+auditoria sem texto nem telefone, aviso só com ids, plataforma e o isolamento nos dois sentidos); a rota em `rbac.test.ts` (matriz de papéis) e no
+`it.each` de `impersonation.test.ts`; a da plataforma na matriz de acesso e na personificação de `inbox-platform.test.ts`; `format.test.ts`
+(`emptiedByRetention`). Conferência no navegador: estrela, selo, tempo real entre abas e aviso, em 1024 e 375 px de largura, no tenant e na plataforma.
+
+**Decisões da R3a a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R3a-1 | Estrela no atendimento da plataforma | **Vale também**: `PUT /api/admin/inbox/messages/:id/favorite` para `platform_owner` e `platform_support` (os que respondem). A limpeza também poda `tenant_id` nulo com os padrões do `.env` (SPEC, "Escopo conta × tipo de canal"), e a equipe da plataforma também guarda mensagens que quer poupar | Sem estrela na plataforma (a tela esconderia o botão) |
+| R3a-2 | Quem pode marcar | `inbox:reply` (como a SPEC), não `inbox:read`: o leitor vê o selo e não marca | `inbox:read` |
+| R3a-3 | Aviso em tempo real | `k = "status"` (só relê as mensagens da conversa), sem tipo novo de aviso e sem mexer no `use-inbox-events.ts` | Tipo `favorite` próprio, ou `k = "message"` (relê também a lista e o detalhe) |
+| R3a-4 | Auditar a estrela | Sim, uma ação para cada sentido (`inbox.message_favorited` e `inbox.message_unfavorited`), só quando muda de fato | Não auditar (marca da equipe, sem efeito fora a retenção) |
+| R3a-5 | Limite de taxa | 60/min por pessoa, o mesmo de assumir e mudar a situação (`queueLimit`) | Limite próprio mais baixo |
+
+**Limites conhecidos da R3a:** a prévia da conversa na lista (`last_message_preview`) fica em branco depois que a R2 a zera, e a R3a não
+mostra texto no lugar (o aviso só aparece dentro da conversa); a estrela não aparece nas mensagens do portal do cliente (não há atendimento
+lá); o texto de privacidade ainda não cita a favorita como marca que poupa a mensagem da retenção (bloco L, quando a R2 ligar a limpeza).
+
+### R3b: o que foi feito (2026-11-14)
+
+A tela de retenção do `/admin`, **só sobre rotas que já existiam** (`/api/admin/retention/*`, ver "R2: o que foi feito"). Nenhuma migration,
+nenhuma regra de servidor, permissão, schema Zod de entrada nem serviço de limpeza foi alterado. A tela **não apaga nada**: a prévia é `GET` e a
+limpeza de verdade só roda no job diário, com `MESSAGE_RETENTION_ENABLED=true`.
+
+**Onde fica**
+
+| Onde | O quê |
+|---|---|
+| `/admin/tenants/:id` (`TenantRetentionCard`, `src/components/admin/retention-card.tsx`) | Cartão "Retenção de mensagens", entre "Assinatura" e "Membros": um bloco por tipo de canal. Some na organização `deleted` (a rota responde 404); em `deleting` é só leitura |
+| `/admin/configuracoes` (`PlatformRetentionCard`) | "Retenção de mensagens da plataforma": os padrões do `.env` que valem para o atendimento da própria plataforma e a prévia; **só leitura**, até para o proprietário (não há linha de política da plataforma) |
+
+**O que cada bloco mostra** (`retention-scope.tsx`; textos e decisões em `src/lib/inbox/retention-format.ts`, módulo puro):
+
+- **Aviso de estado**, uma vez no topo (`RetentionStateNotice`): desligada, "A política fica gravada, mas nenhuma mensagem é apagada até a retenção ser
+  ligada (`MESSAGE_RETENTION_ENABLED`). A prévia mostra o que aconteceria."; ligada, "A limpeza roda uma vez por dia e apaga mensagens sem volta.
+  Mensagem favorita e mensagem mais nova que o piso de idade, de N horas, não são apagadas."
+- **O que vale hoje** em cada limite (mensagens, dias, favoritas), tirado de `effective`, e de onde vem, tirado de `sources`: "fixado para esta
+  organização" (`policy`, inclusive o `0` fixado, que aparece como "sem limite"), "padrão do sistema" (`default`) ou "nenhum limite definido"
+  (`unlimited`: nem a política nem o `.env` definem um). Na plataforma o rótulo nunca fala em organização.
+- **Piso de idade** (`floorHours`, "72 horas (3 dias)") e **última limpeza**: "Nunca rodou." ou quando rodou, as quatro contagens (por idade, por
+  contagem, favoritas rebaixadas, arquivos), o estado depois dela e, se o lote foi cortado, que o resto fica para o dia seguinte.
+- **Formulário da política** (só `platform_owner`; o suporte e a plataforma veem tudo sem ele): cada limite tem **três opções distintas**, em
+  `radio`: "Herdar o padrão do sistema (X)" (o X é o padrão que seria herdado, de `defaults`; manda `null`), "Sem limite" (manda `0`) e "Definir um
+  valor" (campo numérico de 1 até `RETENTION_LIMIT_MAX`, que só habilita nessa opção). Em "Definir um valor", vazio, `0`, negativo, fracionário e
+  acima do teto são recusados na tela com frase própria (o `0` manda escolher "Sem limite"), antes do `PUT`; o corpo sai com os três campos e passa
+  no `retentionPolicySchema`. "Salvar política" só habilita com alteração; "Descartar alterações" volta ao gravado. Voltar a herdar tudo é salvar
+  com as três opções em "Herdar" (R2-8). **Com a retenção ligada, salvar um limite mais apertado pede confirmação**
+  (`saveConfirmation`, em `retention-format.ts`): o diálogo lista cada limite que aperta, de quanto para quanto, e lembra
+  que a limpeza apaga sem volta e que a prévia só considera a política depois de salva. "Mais apertado" é passar a ter um
+  número onde não havia limite, ou um número menor que o que **vale** hoje (`effective`), inclusive ao voltar a herdar um
+  padrão mais baixo. Desligada, ou sem apertar nada, salva direto.
+- **Prévia** (botão "Ver prévia", depois "Atualizar prévia"; `GET .../preview`): as contagens do que a limpeza faria agora e os totais do escopo.
+  O texto diz que **não apaga nada** e que **usa a política já gravada, não o que está digitado**; com alteração não salva, diz para salvar antes.
+  Depois de salvar, a prévia aberta é relida sozinha (a escrita invalida as consultas do `/admin`). Com o lote cortado, avisa o limite por dia.
+
+**Arquivos novos:** `src/lib/inbox/retention-format.ts` (modos de cada limite, rascunho ↔ corpo da API, rótulos de origem, resumos da prévia e da
+última limpeza, aviso de estado), `src/components/admin/retention-scope.tsx` (apresentação, sem busca) e `src/components/admin/retention-card.tsx`
+(busca, grava e abre a prévia sob demanda, com `useAdminQuery` e `useAdminMutation`). Os nomes dos tipos de canal vêm de `CHANNEL_KINDS`
+(`components/channels/channel-kinds.tsx`), o mesmo das telas de canal; a tela não escreve nome de módulo. Sem `loader`.
+
+**Testes:** `src/lib/inbox/retention-format.test.ts` (as três opções, `0` ≠ vazio ≠ herdar, tetos, corpo montado passando no Zod da rota, "tem
+alteração", a confirmação ao apertar um limite com a retenção ligada, rótulos de origem, resumo da última limpeza e da prévia, avisos de estado) e `src/components/admin/retention-scope.test.ts` (renderiza
+o componente: aviso de ligada e de desligada, as nove opções do proprietário, o suporte e a plataforma sem formulário, última limpeza e prévia).
+Não há teste de banco novo: a R3b não toca servidor.
+
+**Conferência no navegador** (servidor de desenvolvimento e contas do seed; dados locais de teste criados e removidos): proprietário em 1872 px e em
+375 px (sem rolagem horizontal), suporte (sem formulário, com prévia; o `PUT` direto responde 403), erro de campo vazio e de `0`, salvar um valor,
+"sem limite" fixado e voltar a herdar (`0` e `null` aparecem diferentes), prévia com contagens diferentes de zero, última limpeza preenchida e
+"Nunca rodou." e o cartão da plataforma. O aviso de **ligada** foi conferido por teste do componente e também, em 1872 e 375 px, num servidor de
+desenvolvimento **à parte, sobre um banco descartável** com a retenção ligada (o roteiro abaixo).
+
+**Roteiro manual da R3 (retenção ligada, só em banco de teste).** Nunca ligue `MESSAGE_RETENTION_ENABLED` no `.env.local` nem rode a limpeza
+contra um banco com dados que importam: ela apaga sem volta. O roteiro usa um banco descartável no mesmo Postgres do Docker e variáveis do
+terminal (o `dotenv` do projeto não sobrescreve variável já definida, então o `.env.local` não é alterado). Foi executado em 2026-11-14 nos passos 1 a 3, 5 a 7 e 10, com a tela do
+`/admin` aberta com a retenção ligada **depois** do primeiro ciclo (aviso de ligada, última limpeza e prévia vazia). **Não foram executados**: a prévia do
+passo 4 antes do ciclo (os 47, 0 e 3 vêm da conta e do resultado do primeiro ciclo: 151 → 104 e favoritas 5 → 2), o passo 8 (a tela do atendimento; no
+banco a conversa ficou sem mensagem, com `last_message_at` e sem prévia do texto) e o passo 9. Confira esses três na primeira vez.
+
+1. **Banco descartável.** Como superusuário (`docker exec -i <container do postgres> psql -U postgres`): `CREATE DATABASE bizu_retencao OWNER bizu_owner;`
+   e, conectado nele (`-d bizu_retencao`), os mesmos privilégios de `docker/postgres/init.sql`: `REVOKE CREATE ON SCHEMA public FROM PUBLIC;`,
+   `GRANT CONNECT ON DATABASE bizu_retencao TO bizu_app;`, `GRANT USAGE ON SCHEMA public TO bizu_app;` e os dois `ALTER DEFAULT PRIVILEGES FOR ROLE
+   bizu_owner IN SCHEMA public` (tabelas e sequências) do arquivo. Sem eles o seed falha com `42501`.
+2. **Variáveis do terminal** (troque só o nome do banco nas URLs do `.env.local`): `DIRECT_URL`, `DATABASE_URL` e `REALTIME_DATABASE_URL` com
+   `/bizu_retencao`, `MESSAGE_RETENTION_ENABLED=true`, `JOBS_MODE=off` e, se subir em outra porta, `APP_URL=http://localhost:<porta>`. Nesse mesmo
+   terminal: `npm run db:migrate` e `npm run db:seed`.
+3. **Dados** (SQL como superusuário no banco descartável; `acme` é a organização do seed): um canal `whatsapp_cloud`, dois contatos, uma conversa com
+   150 mensagens, uma por dia, de 1 a 150 dias atrás, e uma segunda conversa com **uma só mensagem de 200 dias** (`last_message_at` de 200 dias atrás e
+   `last_message_preview` preenchido); cinco mensagens da primeira, de 141 a 145 dias, marcadas favoritas (`is_favorite = true`,
+   `favorited_at = now()`); e uma linha em `retention_policy` da `acme` para `whatsapp_cloud` com `max_messages = 0`, `retention_days = 100` e
+   `max_favorites = 2`.
+4. **Tela** (servidor de desenvolvimento no mesmo terminal, `npx react-router dev --port <porta>`; entre como `owner@bizu.local`):
+   `/admin/tenants/<id da acme>` mostra o aviso de **ligada** ("roda uma vez por dia e apaga sem volta"), "sem limite" e "100 dias" e "2 favoritas",
+   todos "fixado para esta organização", e "Nunca rodou.". Em "Ver prévia": **47 por idade** (as 46 não favoritas de mais de 100 dias e a de
+   exatamente 100 dias, que já passou do corte quando a conta roda), **0 por contagem** e **3 favoritas rebaixadas** (as acima do teto de 2).
+5. **Rodar a limpeza uma vez**, em vez de esperar o cron das 04:45 UTC: crie na raiz do projeto, sem versionar, `tmp-retencao.mts` com
+   `import { config } from "dotenv"; config({ path: ".env.local", quiet: true }); const { runRetentionCycle } = await import("@/lib/inbox/retention"); try { console.log(await runRetentionCycle()); } finally { process.exit(0); }`
+   e rode `node_modules/.bin/tsx --tsconfig tsconfig.app.json tmp-retencao.mts` no mesmo terminal (saída `{ scopes: 1, ran: 1, failed: 0, truncated: 0 }`).
+   Apague o arquivo no fim.
+6. **Primeiro ciclo** (conferir no banco descartável): 151 mensagens passam a **104** (47 apagadas por idade). As favoritas passam de 5 para **2**:
+   as 3 acima do teto perderam a estrela mas **continuam lá**, porque favorita nunca é apagada, só rebaixada. A segunda conversa fica **sem
+   mensagem**, com `last_message_at` intacto e `last_message_preview` nulo. No `/admin`, "Última limpeza" mostra a data e as contagens.
+7. **Segundo ciclo:** as 3 rebaixadas, mais velhas que 100 dias, **saem agora** (104 → **101**, favoritas continuam 2). É o "ciclo seguinte" da regra.
+8. **Aviso da conversa esvaziada:** entre como `acme.owner@bizu.local` em `/app/atendimento` (o canal do passo 3 precisa estar visível à pessoa) e abra a
+   segunda conversa: "Mensagens antigas removidas pela política de retenção", sem números. A primeira segue com as mensagens e as duas favoritas com a
+   estrela cheia.
+9. **Piso e desligar:** reinicie o servidor sem `MESSAGE_RETENTION_ENABLED`: o aviso volta a "desligada" e rodar o ciclo de novo não apaga nada
+   (`ran: 0`). Mensagem de menos de 72 horas nunca sai, qualquer que seja a política.
+10. **Limpar:** pare o servidor, apague `tmp-retencao.mts` e rode `DROP DATABASE bizu_retencao;`. O `.env.local` e o banco de desenvolvimento não são tocados.
+
+**Decisões da R3b a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| R3b-1 | Onde fica | Cartão na página da organização e cartão da plataforma em `/admin/configuracoes`, sem rota nem item de menu novos | Página própria `/admin/retencao` com seletor de organização |
+| R3b-2 | Forma do campo | Três opções em `radio` (herdar, sem limite, definir) e número só em "definir", que recusa vazio e `0` | Campo único com vazio = herdar e `0` = sem limite (mais curto, mas confunde) |
+| R3b-3 | Prévia | Sob demanda (botão), usa a política gravada, relida sozinha depois de salvar | Prévia ao vivo do que está digitado (pediria rota que aceite política no corpo) |
+| R3b-4 (**decidida pelo proprietário em 2026-11-14**) | Salvar com a retenção ligada | **Diálogo de confirmação quando a política nova aperta algum limite**, listando de quanto para quanto. Desligada, ou só afrouxando, salva direto | Descartada: salvar sempre direto, só com o aviso do topo |
+| R3b-5 | Aviso de estado | Um só, no topo do cartão, citando `MESSAGE_RETENTION_ENABLED` | Um aviso por tipo de canal |
+| R3b-6 | Organização `deleting` | Cartão visível e só leitura (como etiquetas e campos); `deleted` não mostra o cartão | Esconder também em `deleting` |
+| R3b-7 | Horário da última limpeza | No fuso do navegador, `dd/mm/aaaa, hh:mm` | UTC, como o cron |
+
+**O que faltou no servidor (nada bloqueou a tela):** (1) nenhuma rota informa **quando será a próxima limpeza**; a tela diz só "uma vez por dia" (o
+cron é 04:45 UTC, `src/jobs/queues.ts`). Menor mudança: um campo `nextRunAt` em `RetentionView`, derivado do cron. (2) `lastRun` não distingue "rodou
+e não havia nada" de "nunca rodou" (R2-3: a execução sem efeito não grava): a tela mostra "Nunca rodou." nos dois casos. Menor mudança: gravar
+`message_retention_state` também na execução sem efeito, ou devolver um `lastCheckedAt`. (3) A prévia não lista **quais** conversas seriam afetadas
+(só contagens, por decisão da R2): se o proprietário quiser ver, seria uma rota nova.
+
+---
+
+## Bloco L: texto legal (P5)
+
+`src/lib/legal/privacidade.md` e `termos.md` não citam WhatsApp, e o item "Conta" não cita o
+telefone, hoje obrigatório.
+
+- **`privacidade.md`:** telefone na conta e no cadastro; conversas, mensagens e mídia do
+  atendimento por WhatsApp; dados do contato que escreve sem ser cliente (número e nome do
+  WhatsApp); operadores (Meta, na Cloud API, e o servidor Evolution da plataforma, no canal por
+  QR Code; armazenamento de arquivos); linhas novas na tabela de retenção (mensagens conforme a
+  política do bloco R, avisos de canal por `CHANNEL_EVENT_RETENTION_DAYS`); a verificação de
+  telefone por link; o que a exclusão de cliente e de conta apaga.
+- **`termos.md`:** o atendimento por WhatsApp no serviço; responsabilidade do owner pelo uso
+  dos números e pelas políticas da Meta; o canal por QR Code é conexão não oficial, com risco de
+  bloqueio do número pelo WhatsApp; o owner remove os números antes de excluir a organização.
+- **Versão:** `LEGAL_VERSIONS` sobe `terms` e `privacy` juntas (o aceite grava uma versão só
+  para as duas, `consent-dialog.tsx:39`). Formato `AAAA-MM`: usar o mês do deploy. Não há
+  aceite real a preservar.
+- **Verificação:** `src/lib/legal/legal.test.ts`; teste novo exige que os dois textos contenham
+  "WhatsApp". **LLM:** Sonnet 5.5 no texto; revisão jurídica é humana.
+
+### L: o que foi feito (2026-11-13)
+
+- `privacidade.md` (agora com 9 seções) e `termos.md` (11) citam telefone e WhatsApp. Cada afirmação foi conferida no
+  código e em `lgpd.md`: dados do atendimento (contato, nome do perfil, mensagens, mídia, aviso de canal), operadores
+  (Meta na Cloud API; servidor Evolution da plataforma no QR Code; armazenamento), a confirmação do telefone por link
+  (canal do responsável, quem vê a mensagem no QR Code, liberação à mão), prazos (aviso de canal 30 dias,
+  pedido de telefone encerrado 30 dias, backup 14 dias) e o que cada exclusão apaga.
+- **Só o que vale hoje:** conversas e mensagens aparecem como **sem prazo automático** (o bloco R não existe ainda; quando
+  existir, a seção 6 do texto muda com ele). O efeito de D-11 (ficha de cliente de quem é da equipe) entra no texto no
+  bloco E, junto com o código que o faz valer.
+- `LEGAL_VERSIONS` já estava em `2026-11` (de `66893fa`): o bloco L mantém `2026-11` para as duas, como a SPEC pede
+  para o mês do deploy; **por isso nenhum aceite existente é invalidado**. Se algum banco já tem aceite de `2026-11` e
+  o re-aceite importa, suba para o mês do deploy real.
+- Teste novo em `legal.test.ts`: os dois textos contêm "WhatsApp" e "telefone"; os termos citam "não oficial" e a
+  remoção dos números; a privacidade cita Meta, Evolution e a exclusão de cliente.
+- **Para o olhar de um advogado:** responsabilidade do owner pelos números e pelas políticas da Meta e limite de
+  responsabilidade (termos, seções 4 e 9); o canal por QR Code como conexão não oficial e o risco de banimento (4);
+  o papel de controlador × operador nas conversas de WhatsApp (privacidade, 1); as bases legais do atendimento e da
+  confirmação do telefone (3); o compartilhamento com Meta e Evolution (4); a ausência de prazo de retenção das conversas
+  (6); a frase de que o dono do número por QR Code vê o link de confirmação (5); o que a exclusão não apaga (7: faturas,
+  consentimento, auditoria, backups); o controlador e o encarregado continuam entre colchetes.
+
+---
+
+## Bloco E: exclusões (P6, P7)
+
+| Item | Estado atual | Mudança |
+|---|---|---|
+| Excluir cliente | Apaga contatos vinculados, conversas, mensagens e arquivos (`deleteCustomer`, `customers.ts:331-372`). O diálogo só fala do portal (`customer-detail-page.tsx:243-249`) | O diálogo passa a dizer que as conversas e os arquivos do atendimento são apagados sem volta, com a contagem de conversas. `GET /api/customers/:id` devolve `conversationCount` |
+| Remover membro | `removeMember` apaga `member` e devolve as conversas à fila; `customer` não tem `created_by` e toda FK para `user` é `set null` | `removeMember` e `anonymizeUser` passam a apagar **só a ficha de cliente ligada à própria pessoa** (`customer.user_id`), com as conversas dela (D-11). O diálogo de remoção e o de exclusão de conta avisam quando a ficha existe, com a contagem de conversas. Teste em `tests/db`: remover o membro e anonimizar o `user` apagam a ficha ligada e o conteúdo dela, e mantêm todos os outros clientes, contatos, conversas e mensagens, com os campos de autoria nulos |
+| Excluir organização | Não toca em `channel`; credenciais cifradas e a instância no provedor continuam; o cartão não cita números (`organization-deletion-card.tsx:92-103`) | Comportamento mantido (P6). O cartão lista os números ainda ativos e pede a remoção antes; o pedido não é bloqueado |
+
+**LLM:** Sonnet 5.5.
+
+### E: o que foi feito (2026-11-14)
+
+- **Excluir cliente:** `GET /api/customers/:id` devolve `conversationCount` (todas as conversas dos contatos ligados, o
+  que `deleteCustomer` apaga) e o diálogo da ficha diz que as conversas, as mensagens e os arquivos do atendimento saem
+  sem volta, com a contagem. `deleteCustomer` virou `deleteCustomerIn` (na transação de quem chama) mais
+  `afterCustomerDeleted` (objetos e identidade órfã do portal, depois do commit), para o D-11 reaproveitá-lo.
+- **Remover membro e excluir conta (D-11, C-1):** `removeMember` apaga, na mesma transação, a ficha ligada à pessoa
+  (`customer.user_id`) **naquela organização**; `anonymizeUser` apaga as ligadas em **todas**, antes de zerar o
+  telefone da conta. Código em `src/lib/tenant/team-customer-removal.ts`; detalhe em `tech/28-crm-cadastro.md`.
+  - **(a)** `DELETE /api/customers/:id/team-link` (`customer:update`, auditada como `customer.team_unlinked`, recusada em
+    personificação, 204 idempotente, 404 de outra organização) e o cartão "Também é da equipe" na ficha. **Criar** a
+    ligação à mão ficou de fora (feita em 2026-11-14, no bloco T: "Ligação manual da ficha com a equipe").
+  - **(b)** só saem os contatos da ficha cujo `phone_key` é o do telefone **confirmado** da pessoa
+    (`purgeTeamCustomerContacts`); os outros só perdem o vínculo e a conversa fica. Sem telefone confirmado, a ficha
+    sai e nenhum contato é apagado.
+  - **(c)** o que decide é `customer.user_id`; `chat_contact.user_id` nunca. Outras fichas, outros contatos e outras
+    conversas não são tocados, e trocar o papel não apaga nada (testes em `tests/db/team-customer-delete.test.ts`).
+  - **Avisos:** diálogo de remoção do membro (`GET /api/team` traz `customerRecord` só a quem tem `member:delete`),
+    cartão e diálogo da exclusão da conta (`GET /api/me/deletion` traz `customerRecords`) e o diálogo de exclusão do
+    `/admin/usuarios/:id` (mesmo caminho `anonymizeUser`), todos com a contagem das conversas que seriam apagadas.
+- **Excluir organização (P6):** comportamento intacto. O cartão lista os números de WhatsApp que não estão desativados
+  (e cita os desativados, que também ficam cadastrados), pede a remoção antes e **não bloqueia** o pedido.
+- **Decisões minhas, a confirmar pelo proprietário (E-1 a E-6):** E-1: "telefone confirmado" é o do **sistema inteiro**
+  (`userPhoneConfirmedGlobally`), não a liberação de uma organização, o mesmo critério que liga a ficha sozinha;
+  E-2: pessoa sem telefone confirmado perde a ficha mas nenhum contato é apagado (a SPEC não fechava, e o caso não
+  escolhe a opção que apaga mais); E-3: o aviso da remoção conta só as conversas que seriam apagadas (contatos do número
+  confirmado), enquanto o da ficha de cliente conta todas; E-4: `customerRecord` não traz id nem nome da ficha, para
+  quem remove sem `customer:read`; E-5: a rota de desfazer fica em `customer:update` e sem corpo, e o `/admin` também
+  avisa na exclusão de usuário; E-6: a remoção do membro **não** zera autoria (a conta continua; `sender_user_id`,
+  `closed_by` e `file.created_by` só ficam nulos na anonimização da conta, que já os zerava).
+- **Não coberto:** o diálogo de exclusão da organização com número ativo em navegador real (ver relatório da sessão); o
+  caminho "ficha com conta no portal" na exclusão por D-11 usa o mesmo `dropOrphanPortalUser` do `deleteCustomer`, sem
+  teste próprio.
+
+---
+
+## Bloco S: senha forte (P8)
+
+### Estado atual
+
+Só tamanho: 10 a 128 (`src/lib/schemas/auth.ts:4-20`; `minPasswordLength: 10` em
+`src/lib/auth/server.ts:90` e `portal.ts:89`). Sem medidor. `POST /api/auth/reset-password` e
+`/change-password` só passam pelo Better Auth, sem Zod; o `set-password` do portal só passa
+pelo Zod (`src/lib/portal/profile.ts:91-142`).
+
+### Desenho (SPEC 054 da origem)
+
+- `src/lib/auth/password-policy.ts` (puro, com teste): `evaluatePassword`, `isPasswordValid`,
+  `normalizePassword` (`trim` + NFC) e as constantes.
+- Regras: maiúscula, minúscula, número, um especial de `!@#$%^&*()_+-=[]{}:;,.?/~`, sem
+  caractere de controle, espaço permitido no meio.
+- **Mínimo fica em 10** (a origem usa 8; não se reduz o que já é mais forte).
+- **Máximo fica em 128 caracteres.** O limite de 72 bytes da origem é do bcrypt; aqui o Better
+  Auth usa o hasher padrão (scrypt). A T-S1 confirma o hasher antes de fixar.
+- `newPassword` de `src/lib/schemas/auth.ts` passa a refinar com `isPasswordValid`: cobre
+  cadastro, convite, redefinição, autocadastro do portal e `set-password` do portal.
+- Servidor: hook `before` nas duas instâncias do Better Auth em `/sign-up/email`,
+  `/reset-password` e `/change-password` aplica a mesma regra e a normalização. O login
+  normaliza do mesmo jeito (senão a senha com espaço no fim deixa de entrar).
+- `src/components/auth/password-strength-meter.tsx`: checklist ao vivo e barra; usado nas cinco
+  telas. O botão de enviar fica desabilitado até a senha valer.
+- O login não valida complexidade (senhas antigas seguem entrando; só existem as de dev).
+- `SEED_PASSWORD` passa a exigir a mesma regra; atualizar `.env.example`.
+
+**Fases:** S1 módulo, schema e hooks (`npm test`, `tests/db/auth.test.ts` e
+`portal-auth.test.ts`: senha fraca recusada nas cinco entradas, inclusive por chamada direta à
+rota); S2 medidor nas telas. **LLM:** Opus 5.5 na S1 (toca auth) com `/security-review`;
+Sonnet 5.5 na S2.
+
+---
+
+## Bloco F: perfil do owner e da equipe (D-8)
+
+### Estado atual
+
+Não existe tela de perfil. `/app/settings` só tem `ChangeEmailCard`
+(`src/routes/app.settings.tsx:24`) e a de segurança só tem 2FA
+(`app.settings.security.tsx`, `admin/security.tsx:28`). Nome e telefone só mudam pelo
+`/admin`. `POST /api/auth/change-password` está aberta, sem tela.
+
+### Desenho
+
+Página "Perfil" em `/app` e em `/admin` (o mesmo componente), para owner, admins, membros e
+equipe da plataforma. Toda escrita é bloqueada em personificação.
+
+| Campo | Como muda | Regra |
+|---|---|---|
+| Foto | `POST /api/me/avatar` (multipart) e `DELETE /api/me/avatar` | PNG, JPEG ou WebP conferidos pela assinatura do arquivo (não pela extensão); sem SVG; teto `AVATAR_MAX_KB` (padrão 1024); recorte quadrado de 256 px feito no navegador antes do envio |
+| Nome | `PATCH /api/me` `{ name }` | 2 a 120 caracteres; audita `user.profile_updated` |
+| E-mail | `ChangeEmailCard`, que já existe | Segue com verificação por link no e-mail novo |
+| Telefone | `POST /api/me/phone-change` (bloco T) | Só número com WhatsApp; vale depois do link ou da liberação do responsável; a tela mostra "troca pendente", reenviar e cancelar |
+| Senha | Cartão novo sobre `POST /api/auth/change-password` | Pede a senha atual; usa o medidor do bloco S; derruba as outras sessões |
+
+**Foto.**
+
+- Guardada pelo `StorageProvider` como `file` com `owner_type = 'user_avatar'` e `tenant_id`
+  nulo: a pessoa é global e a foto não conta em `storage_mb` de nenhuma organização.
+  `user.image` guarda o id do arquivo; trocar apaga o anterior.
+- Servida por `GET /api/avatars/:userId`, só para sessão da equipe que divide organização com
+  a pessoa ou para a equipe da plataforma; `Content-Type` do registro, `nosniff` e cache
+  privado. Nunca por URL pública do armazenamento.
+- Aparece no cabeçalho, na lista de membros e no atendimento (quem atende), pelo
+  `ui/avatar.tsx` que já existe, com as iniciais como reserva.
+- LGPD: `anonymizeUser` apaga a foto; a exportação da pessoa a inclui.
+
+**Fases e LLM:** F1 API (nome, foto, rota de leitura, LGPD), com `tests/db` cobrindo tipo
+falso, tamanho, autorização da leitura e personificação: Opus 5.5 na leitura e no upload,
+com `/security-review`; F2 tela (**feita**): Sonnet 5.5. Depende de S1 (medidor) e de T2 (troca de
+telefone).
+
+### F1: o que foi feito (2026-11-13)
+
+Implementada no servidor, sem tela (F2). Detalhe em `tech/08-auth.md` ("Perfil da própria conta") e
+`tech/27-lgpd-arquivos.md` ("Módulo de arquivos").
+
+- **Nome:** `PATCH /api/me { name }` (`profileNameSchema`, `src/lib/schemas/profile.ts`: 2 a 120 caracteres, sem
+  campo a mais), audita `user.profile_updated` com `{ name: true }` (o nome não vai para a auditoria).
+- **Foto:** `POST /api/me/avatar` (multipart, campo `file`) e `DELETE /api/me/avatar` (`src/api/profile.ts`,
+  `src/lib/profile/avatar.ts`). PNG, JPEG ou WebP pela assinatura do conteúdo; SVG, tipo falso e vazio recusados
+  (415, 400); acima de `AVATAR_MAX_KB` (variável nova, padrão 1024) 413, também no `bodyLimit` antes da sessão. Guardada
+  pelo `StorageProvider` (`avatars/<userId>/…`) como `file` com `owner_type = 'user_avatar'` e `tenant_id` nulo;
+  `user.image` guarda o id. A troca apaga a anterior (conta travada na transação; objeto depois do commit). Auditoria
+  `user.avatar_updated` e `user.avatar_removed`.
+- **Leitura:** `GET /api/avatars/:userId`, com `requireAuth`, para a própria pessoa, a equipe da plataforma e quem
+  divide uma organização com ela; fora disso, ou sem foto, 404 (não diz se a conta existe). Tipo do registro (só os
+  três), `nosniff`, `inline`, `private, max-age=300` e CSP `sandbox`. `GET /api/me` traz `user.avatarUrl`.
+- **LGPD:** a anonimização da conta apaga a foto (registro e objeto); a exportação traz `foto-de-perfil.<ext>`.
+- **Bloqueios:** toda escrita (nome e foto) recusa a personificação (`IMPERSONATION_BLOCKED`); a leitura não. Nada do
+  perfil entrou na lista do bloqueio de telefone: com o telefone pendente, nome, foto e leitura de foto respondem 403
+  `PHONE_UNVERIFIED`.
+- **Better Auth:** `/update-user` entrou em `disabledPaths` (nome e foto passavam por ali sem auditoria, e `image`
+  aceitava qualquer texto).
+- **Testes:** `tests/db/profile.test.ts` (nome; PNG/JPEG/WebP, troca e remoção; tipo falso, SVG e vazio; teto; leitura
+  por colega, plataforma, outra organização e sem sessão; arquivo de organização marcado `user_avatar`; personificação;
+  bloqueio de telefone; LGPD) e o `DELETE /api/me/avatar` e o envio multipart sobre o servidor Node em
+  `tests/db/tenant-http.test.ts`.
+
+**Revisões (troca de telefone e F1, 2026-11-13).** `/code-review` (alto): 8 achados, 7 corrigidos: as telas
+`/portal/conta` e "Editar cliente" passaram a dizer que o número novo só vale depois do link ou da liberação (antes
+diziam "atualizado"); o expurgo do cadastro pendente (`purgeExpiredPendingSignup`) apaga a foto de perfil, que
+ficaria órfã; a detecção de tipo da foto reaproveita `matchesSignature`; a visão do portal traz a troca na mesma
+consulta (era uma por ficha); o parâmetro de `GET /api/avatars/:userId` usa `avatarParamSchema`; a troca que cai
+quando a pessoa sai da organização responsável é auditada (`phone.change_canceled`, `left_tenant`). Ficou sem
+mudança a consulta extra de foto em `GET /api/me` (custo pequeno; `user.image` não é fonte confiável). As rotas
+novas bloqueadas em personificação entraram no `it.each` de `tests/db/impersonation.test.ts`. `/security-review`:
+nenhum achado com confiança 8 ou mais; como defesa extra, `issueVerificationToken` passou a conferir o escopo
+esperado pelo canal (a troca movida para a plataforma entre a decisão e a emissão não sai pelo canal da
+organização). Abaixo do critério e registrado: o colaborador pode pedir a troca da ficha para um número dele e
+convencer o cliente a abrir o link logado no portal (exige a vítima agir; antes o colaborador gravava o número
+direto).
+
+**Decisões da F1 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| F1-1 | `update-user` do Better Auth | Desligado: nome e foto só pelas rotas do perfil | Deixar aberto e validar `image` num hook |
+| F1-2 | Quem lê a foto | Também a própria pessoa (a SPEC cita só colegas e a plataforma) | Só colegas e plataforma |
+| F1-3 | Leitura negada | 404, o mesmo de "sem foto" | 403 |
+| F1-4 | Foto e telefone pendente | Fechada (nada do perfil passa pelo bloqueio) | Deixar trocar foto e nome com o telefone pendente |
+| F1-5 | Recorte de 256 px | Fica na tela (F2); o servidor só confere tipo e tamanho, sem reprocessar a imagem | Redimensionar no servidor (biblioteca de imagem nova) |
+
+### F2 e telas da troca: o que foi feito (2026-11-14)
+
+Só tela sobre rota que já existe: nenhuma regra de servidor, permissão, migration, schema de entrada nem a lista de
+`src/api/phone-gate.ts` mudou. Detalhe em `tech/11-dashboard.md`, `tech/08-auth.md`, `tech/25-portal-clientes.md` e
+`tech/28-crm-cadastro.md`.
+
+- **Página "Perfil"** (`src/pages/profile-page.tsx`), o mesmo componente em `/app/perfil` e `/admin/perfil` (item "Perfil" no
+  menu do usuário): foto (escolher, recortar, enviar, remover), nome (2 a 120), `ChangeEmailCard`, telefone (troca pelo
+  pedido) e senha (`POST /api/auth/change-password` com o medidor do bloco S e `revokeOtherSessions`). Na personificação
+  nada é editável (a tela acompanha a API, que recusa).
+- **Foto:** diálogo de recorte (`avatar-crop-dialog.tsx`, regras puras em `src/lib/profile/avatar-crop.ts`): arrastar ou
+  setas, zoom, quadrado de 256 px em WebP (PNG se o navegador não gerar). Mensagem própria para 415, 413, 403 de
+  personificação e 429; tipo fora de PNG, JPEG e WebP e imagem ilegível são recusados antes do envio. A foto aparece no
+  menu do usuário e no topo (da própria conta), na lista de membros e em quem atende a conversa, com as iniciais como reserva.
+- **Troca de telefone** (`phone-change-section.tsx`, um componente para três usos): perfil da equipe (`/api/me/phone-change`),
+  `/portal/conta` (`/api/portal/me/phone-change`) e a ficha do cliente em `/app/clientes/:id` (cartão "Trocar o telefone",
+  `/api/customers/:id/phone-change`, `customer:update`). Mostra o número atual, a troca pendente (final do número novo,
+  link enviado ou aguardando liberação e de quem, data do pedido), reenvia (equipe e portal), cancela e substitui, e diz
+  que o número atual continua valendo até o novo ser confirmado. Na ficha o texto segue a TC-5 (vale quando o cliente
+  confirma o link no portal ou quem tem `phone:confirm` libera; liberada, a ficha volta a receber as conversas do número).
+  Mensagens próprias: `PHONE_UNCHANGED` (400), `PHONE_IN_USE` (409, com o nome da ficha que devolve a API), limite (429).
+- **Acertos:** "Confirme seu WhatsApp" da equipe troca o "fale conosco" pelo campo de corrigir o número, com a troca
+  pendente (rota que já passava pelo bloqueio); o portal usa o mesmo componente. As filas de liberação marcam
+  `purpose = change` ("Troca de número", "Número novo …", diálogo "Liberar a troca"). `/app/configuracoes` deixou o
+  `ChangeEmailCard` (agora no Perfil) e ganhou o link; em `/portal/conta` o telefone saiu do cartão "Perfil" e tem cartão próprio.
+- **Testes:** `avatar-crop.test.ts` (recorte, zoom, limites, tipos) e `phone-change-api.test.ts` (mensagens). As telas foram
+  conferidas num navegador, em desktop e em celular, com as contas do seed (a lista do que não foi aberto está no relatório
+  da fase: atendimento sem conversas no seed e aba "Telefones" do `/admin` com a troca).
+
+**Decisões da F2 a confirmar pelo proprietário**
+
+| # | Ponto | Escolha | Alternativa |
+|---|---|---|---|
+| F2-1 | Foto de outras pessoas (membros, quem atende): nenhuma rota devolve o endereço nem se há foto | A tela tenta `GET /api/avatars/:userId` sem `?v=`; sem foto o 404 cai nas iniciais (aparece como 404 no console). Trocar a foto de um colega pode levar até 5 min (`max-age`) para aparecer | Devolver `avatarUrl` em `GET /api/team`, `GET /api/inbox/assignees` e `assignedTo` (única mudança de servidor para fechar isso) |
+| F2-2 | Onde fica o `ChangeEmailCard` | Só no Perfil; `/app/configuracoes` aponta para ele | Manter nos dois lugares |
+| F2-3 | Número atual no perfil da equipe | Só o final (`phoneHint` de `GET /api/me/phone-verification`) e "ainda não confirmado" se há pedido do número atual: nenhuma rota devolve o número da conta | Devolver o número em `GET /api/me` |
+| F2-4 | Teto da foto na tela | O servidor decide (`AVATAR_MAX_KB`); a tela só impõe 20 MB para abrir a imagem escolhida e recorta antes. 413 tem mensagem própria | Expor `AVATAR_MAX_KB` em `GET /api/me` |
+| F2-5 | Portal: telefone e `PATCH /api/portal/me` | O cartão "Perfil" manda o número da ficha da organização ativa (`GET /api/portal/customer`) junto do nome, que o servidor grava direto por ser o mesmo; sem número guarda o campo | Rota só do nome |
+| F2-6 | Ficha: reenviar o link | Sem botão (a equipe não tem rota para isso): pedir de novo o mesmo número reenvia | Rota `…/phone-verification/resend` para a ficha |
+| F2-7 | Personificação na ficha do cliente | A troca fica liberada (a API de clientes não bloqueia a personificação; só o perfil bloqueia) | Travar também |
+| F2-8 | Tela de bloqueio do portal com duas fichas com troca | Mostra a primeira (a tela não conhece a organização ativa, porque `/api/portal/me` está bloqueado); em `/portal/conta` vale a ativa | Rota que devolva a ativa no bloqueio |
+
+**Não feito por falta de rota:** foto de outras pessoas com o endereço certo (F2-1); número completo da conta da equipe
+(F2-3); reenvio do link da ficha pela equipe (F2-6); filtro de fila por tipo (`?subject=`, já listado na T4).
+
+---
+
+## Bloco B: bloqueio de login por tentativas (P9)
+
+### Estado atual
+
+Só rate limit por IP e caminho, com valores fixos (3 a cada 10 s; `server.ts:204-215`,
+`portal.ts:174-182`). Não há contagem por conta. O único bloqueio é o do 2FA.
+
+### Desenho
+
+```bash
+LOGIN_LOCKOUT_SCOPE=email       # email | email_ip | off
+LOGIN_MAX_ATTEMPTS=5            # falhas seguidas até bloquear
+LOGIN_ATTEMPT_WINDOW_MINUTES=15 # janela em que as falhas se somam
+LOGIN_LOCKOUT_MINUTES=15        # duração do bloqueio
+```
+
+| `LOGIN_LOCKOUT_SCOPE` | O que é bloqueado | Efeito |
+|---|---|---|
+| `email` (padrão) | O e-mail, venha de onde vier | Segura ataque distribuído; um terceiro consegue bloquear a conta errando a senha |
+| `email_ip` | O par e-mail e IP | **O e-mail nunca fica bloqueado para o dono** (D-4): só o IP que errou espera. Não segura ataque vindo de muitos IPs |
+| `off` | Nada | Só o limite por IP de hoje |
+
+A chave do contador muda com o escopo: `HMAC(e-mail)` ou `HMAC(e-mail + IP)`, com o IP de
+`clientKey`.
+
+- Tabela `login_throttle`: `realm` (`team`, `portal`), `key_hash` (HMAC do e-mail normalizado
+  com `AUDIT_SALT`), `failures`, `window_started_at`, `locked_until`; PK `(realm, key_hash)`.
+  Sem `tenant_id`: escrita pelo `bizu_app` fora de escopo de tenant, como `rate_limit_bucket`.
+- `src/lib/auth/login-throttle.ts`: decisão pura (`evaluate(state, now, config)`) e a casca de
+  banco com `INSERT … ON CONFLICT DO UPDATE` atômico.
+- Aplicado no proxy Hono antes do Better Auth, em `POST /api/auth/sign-in/email`
+  (`src/api/auth-ext.ts`) e no login do portal (`src/api/portal.ts`): bloqueado responde 429
+  com `Retry-After`; resposta 401 soma falha; 200 zera.
+- **Não revela se o e-mail existe:** e-mail inexistente soma e bloqueia igual; a mensagem é a
+  mesma de hoje ("Muitas tentativas. Tente mais tarde.").
+- Redefinir a senha zera o contador daquele e-mail.
+- Audita `auth.login_locked`, sem o e-mail e sem o hash dele (a auditoria dura muito mais
+  que o contador; ajuste da revisão de segurança). Linhas vencidas saem no
+  `maintenance.prune`.
+- O limite por IP continua como está.
+
+**Limite conhecido.** Com `email`, quem sabe o e-mail de alguém consegue mantê-lo bloqueado
+errando a senha de propósito; a saída da vítima é redefinir a senha, ou a operação troca o
+escopo para `email_ip`.
+
+**Verificação:** teste unitário da decisão; `tests/db`: N falhas bloqueiam, sucesso zera, o
+bloqueio expira, e-mail inexistente se comporta igual, portal e equipe não compartilham
+contador; com `email_ip`, outro IP entra com a senha certa durante o bloqueio; com `off`,
+nada bloqueia. **LLM:** Opus 5.5 + `/security-review`.
+
+---
+
+## Bloco I: importação de clientes (P10)
+
+> **Do bloco T (2026-11-14):** a linha cujo número já é de outra ficha da organização é `duplicate`, sem link e sem
+> `claim` (importação não dispara mensagens; "Telefone que já existe").
+
+### Estado atual
+
+Não existe importador nem dependência de planilha. O cadastro valida com `customerSchema`
+(`src/lib/schemas/customer.ts:31-42`) e aplica `assertWithinLimit(tenantId, "customers")`.
+
+### Desenho (SPEC 052 da origem)
+
+- **Leitura no navegador:** `src/lib/spreadsheet/` (puro, com teste): `parse-csv.ts` com
+  delimitador detectado no cabeçalho (`,`, `;`, tab), aspas envolventes e `""` conforme RFC
+  4180, apóstrofo preservado; `parse-xlsx.ts` com `read-excel-file` (import dinâmico) e
+  escolha da aba que tem coluna de telefone; `template-file.ts` gera o modelo.
+- **Colunas:** `phone` (obrigatória; `telefone`, `celular`, `whatsapp`, `numero`), `name`
+  (`nome`), `email` (`e-mail`), `document` (`documento`, `cpf`, `cnpj`), `tags` (`etiquetas`;
+  separador `;`), `notes` (`observacoes`). Colunas desconhecidas são ignoradas. Sem `name`, usa
+  o telefone formatado. Campos adicionais ficam fora (como na origem).
+- **Escrita no servidor** (a origem inseria pelo navegador; aqui não):
+  `POST /api/customers/import`, lotes de até 500 linhas, `customer:create`. Cada linha passa
+  por `customerSchema`, `normalizePhone` e `assertPhoneFreeInTenant`; duplicada (no arquivo ou
+  na base) é ignorada, nunca atualiza. Resposta por linha:
+  `created | duplicate | invalid(reason) | limit`.
+- **Limite do plano:** `GET /api/customers/import/quota` devolve as vagas; a tela avisa antes
+  ("cabem N de M") e o servidor para no limite com `limit`, sem transformar em "ignorada".
+- **Etiquetas:** as existentes são ligadas; as novas só são criadas com a permissão de gerir
+  etiquetas, respeitando o teto de 100; sem permissão, são ignoradas com aviso.
+- Telefone importado nasce com `phone_verified_via = team` (bloco T). A unicidade é conferida
+  só entre clientes. A linha cujo número é o telefone **confirmado** de um membro da equipe é criada
+  e ligada a ele (D-9), e o resultado da linha informa a ligação. **O e-mail nunca liga** (decisão da
+  revisão de segurança do bloco T; este texto dizia "o telefone ou o e-mail").
+- **Tetos:** 10 MB e 10.000 linhas. Rate limit `customer-import`. Auditoria
+  `customer.imported` com as contagens.
+- **Tela:** diálogo em `/app/clientes`: soltar arquivo, modelo para baixar, referência de
+  colunas, prévia das 5 primeiras, contadores `lidas · válidas · duplicadas · inválidas`,
+  progresso e a lista de rejeitadas (linha e motivo) **visível depois do resultado**.
+- **Google Planilhas por link:** fase separada (I3): rota de servidor que baixa o CSV público,
+  com guarda de SSRF (só `docs.google.com`, sem redirecionamento para outro host) e rate limit. **Emenda da I3:** a exportação
+  do Google redireciona para `doc-XX-YY-sheets.googleusercontent.com`, que entrou na lista fechada (decisão I3-1, a confirmar).
+
+**Fases:** I1 `src/lib/spreadsheet/` com os casos A a K da origem como teste; I2 rota e tela;
+I3 Google Planilhas. **LLM:** Sonnet 5.5; Opus 5.5 na guarda de SSRF da I3.
+
+### I1: o que foi feito (2026-11-14)
+
+A leitura da planilha, **no navegador e sem tocar em banco, rota nem tela**: `src/lib/spreadsheet/` (puro, com 76 testes). Sem migration. A
+dependência nova é só `read-excel-file`, **fixada em `9.3.14`** (MIT, mantida por catamphetamine; publicada em 2026-10-29, mais de duas semanas
+antes; a origem usava a `9.3.5`; a `9.3.17` tinha menos de dois dias). Ela só entra por `import("read-excel-file/browser")`, então quem usa só CSV
+nunca baixa esse pedaço, e descompacta e lê o XML em segundo plano (Web Worker), fora da thread da tela.
+
+| Arquivo | Faz |
+|---|---|
+| `types.ts` | Tetos (`MAX_SPREADSHEET_BYTES` 10 MB, `MAX_IMPORT_ROWS` 10.000, `MAX_CELL_CHARS` 2.000, `MAX_COLUMNS` 100), `SpreadsheetParseError` (código estável e mensagem legível em português), `RawImportRow` e `ParsedTable` |
+| `columns.ts` | `IMPORT_COLUMNS`: **fonte única** das colunas e dos apelidos (o leitor, o modelo e a referência da tela leem daqui); `normalizeHeader` (sem BOM, acento e caixa) e `mapColumns` |
+| `parse-csv.ts` | Tokenizador RFC 4180 de um passo (sem backtracking): delimitador `,` `;` ou tab detectado **só no cabeçalho**, aspas e `""`, quebra de linha dentro de aspas, BOM, `\r\n` `\n` `\r`, dica `sep=;` do Excel, apóstrofo nunca removido |
+| `rows.ts` | `parseTagCell` e a montagem das linhas (`tableFromRecords`), comuns ao CSV e ao XLSX |
+| `parse-xlsx.ts` | `parseXlsxSheets` (puro, escolhe a aba que tem coluna de telefone) e `readXlsxBytes` (a biblioteca, em import dinâmico; números chegam como texto, sem ponto flutuante) |
+| `zip-guard.ts` | Lê o diretório central do `.xlsx` e recusa, **antes de descomprimir**, a soma declarada acima de 64 MB, mais de 2.000 entradas ou ZIP64 (bomba de zip) |
+| `read-file.ts` | `readSpreadsheetFile(file)`: tamanho, extensão, o **conteúdo** manda (um `.xlsx` renomeado para `.csv` abre), decodificação (UTF-8 estrito, senão Windows-1252, que é o "CSV" do Excel em português; UTF-16 com marca de ordem) |
+| `template-file.ts` | `buildTemplateCsv`: o modelo, gerado de `IMPORT_COLUMNS` (`;`, BOM e CRLF, para abrir em colunas no Excel em português) |
+| `customer-row.ts` | `customerFieldsFromRow`: os campos para `customerSchema`; **sem `name`, o telefone formatado vira o nome** |
+| `testing/xlsx-builder.ts` | Só para teste: monta um `.xlsx` de verdade (zip sem compressão) |
+
+**Entrada hostil (tudo com teste):** o leitor nunca executa nem altera conteúdo (célula que começa com `=`, `+`, `-` ou `@` é só texto; o
+valor guardado é o digitado, e **qualquer exportação futura em CSV ou XLSX precisa neutralizar esses prefixos**: hoje o projeto não exporta
+clientes em planilha); célula acima de 2.000 caracteres vira linha recusada com motivo (o leitor guarda só 2.001 caracteres dela, então uma
+célula de 5 MB não pesa); milhões de delimitadores ou de aspas terminam em milissegundos; aspas sem fechar são o erro `unclosed_quote` com a
+linha (não engolem o arquivo); arquivo acima de 10 MB é recusado **pelo tamanho declarado, antes de ler**, e de novo pelos bytes lidos; binário
+com nome `.csv`, `.xls` antigo e arquivo vazio têm mensagem própria; mensagem de erro nunca carrega conteúdo do arquivo.
+
+**Os casos A a K da SPEC 052 da origem** (`docs/spec-052-importacao-de-contatos-multiformato.md`, §2.2 e §9.1) viraram teste
+(`parse-csv.test.ts`, `parse-xlsx.test.ts` e `template-file.test.ts`):
+
+| Caso | O que confere | Teste |
+|---|---|---|
+| A | CSV `,` com `vip,lead` sem aspas na última coluna guarda só `vip` (documenta a perda; a defesa é recomendar `;`) | `parseCsv: casos A a K › A` |
+| B | `"vip, lead"` entre aspas guarda as duas | `… › B` |
+| C | `vip;lead` guarda as duas sem aspas | `… › C` |
+| D | Etiquetas no meio sem aspas deslocam as colunas seguintes (documenta) | `… › D` |
+| E, E2, E3 | CSV `;` reconhece as colunas; `"vip, lead"` com `;`; vírgula dentro de campo entre aspas não muda o delimitador. **E4 (novo):** tab | `… › E`, `E2`, `E3`, `E4` |
+| F | `Maria D'Ávila` e `O'Brien & Co` preservados | `… › F` |
+| G | `"Maria ""Bibi"" Souza"` vira `Maria "Bibi" Souza` | `… › G` |
+| H | XLSX, célula `vip, lead` sem aspas vira duas etiquetas | `parseXlsxSheets › H` (e a leitura real em `readXlsxBytes`) |
+| I | XLSX, telefone como número e como texto `'0 19 99249-6598'` chegam ao normalizador e dão `5519992496598` | `parseXlsxSheets › I` |
+| J | Telefone com DDD 10, sem DDI, estrangeiro, legado de 8 dígitos, conferidos contra `normalizePhone` **deste projeto** | `template-file.test.ts › caso J` |
+| K | Só `;` e `,` separam etiquetas (`\|` e `/` não), sem repetir e sem diferenciar a caixa | `… › K` |
+
+**Onde esta SPEC difere da origem (decisões da I1 a confirmar pelo proprietário):**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I1-1 | **Etiquetas: `;` e `,` separam**, com `;` recomendado no modelo e na tela. A SPEC fala em "separador `;`", mas os casos B, E2 e H da origem dependem de a vírgula separar dentro da célula (um `"vip, lead"` virar uma etiqueta só seria pior para quem segue o guia da origem) | Só `;` separar |
+| I1-2 | **Caso J, `999999999999`:** na origem era `invalid_ddd`; aqui entra como número estrangeiro (12 dígitos, DDI 99), porque o projeto só aplica a regra do Brasil ao DDI 55 e o resto passa pelo tamanho do E.164. É regra do telefone (`src/lib/phone/br.ts`), fora desta SPEC; o teste registra o comportamento | Mudar `normalizePhone` (fora do escopo) |
+| I1-3 | **Apóstrofo nunca é removido**, nem o par que envolve a célula (a origem tirava o par: `'Zé'` virava `Zé`). Alterar o que a pessoa digitou em silêncio é pior que um nome com aspas simples. **Emenda (I2-10): só no telefone o apóstrofo sai**, porque o cadastro só aceita dígitos e `+ ( ) - .` | Tirar o par envolvente, como a origem |
+| I1-4 | **O modelo usa `;`** (abre em colunas no Excel em português; em Excel configurado para inglês abre numa coluna só, mas o leitor entende os dois). A origem usava `,` | `,` |
+| I1-5 | O CSV é lido **em UTF-8 ou, se não for UTF-8 válido, em Windows-1252** (o "CSV" do Excel em português), e em UTF-16 com marca de ordem. A origem só lia UTF-8 | Só UTF-8 (acentos viram lixo no CSV padrão do Excel) |
+| I1-6 | **Fórmula não é alterada nem recusada:** vira texto como veio (ver "Entrada hostil"). Neutralizar com apóstrofo na entrada mudaria dado válido (telefone com `+`, observação com `-`) | Prefixar `'` nas células de texto que começam com `=`, `+`, `-`, `@` |
+| I1-7 | `.xls` antigo é recusado com mensagem; o conteúdo manda sobre a extensão | Aceitar só pela extensão |
+
+**O que não foi testado:** a leitura de um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade (os testes montam o arquivo à mão, com
+texto em linha e sem estilos; células mescladas e datas formatadas ficaram sem arquivo real) e o desempenho da biblioteca com 10 MB reais no
+navegador (a etapa de navegador da I2 confere um arquivo de milhares de linhas).
+
+### I2: o que foi feito (2026-11-14)
+
+A rota, o serviço e a tela. **Sem migration.** A leitura é a da I1 (no navegador); o servidor só recebe as linhas.
+
+| O quê | Onde |
+|---|---|
+| `POST /api/customers/import` (lote de até 500 linhas, `customer:create`) e `GET /api/customers/import/quota` | `src/api/customer-import.ts` (registrado **antes** de `customerRoutes` em `app.ts`: o corpo passa de 16 KB) |
+| Contratos, tetos e tipos da resposta | `src/lib/schemas/customer-import.ts` |
+| O serviço (`importCustomers`, `customerImportQuota`) | `src/lib/tenant/customer-import.ts` |
+| A validação de uma linha, **igual na tela e no servidor** (`customerSchema`, `phoneValues`, etiquetas) | `src/lib/spreadsheet/prepare-row.ts` |
+| Contar, separar o que vale enviar e enviar em lotes (puro) | `src/lib/spreadsheet/import-plan.ts` |
+| `withinLimitRoom` (vagas em vez de 403) e `matchingTeamMembers` (a regra da D-9 em lote) | `src/lib/billing/limits.ts`, `src/lib/tenant/team-customer.ts` |
+| Diálogo de importação | `src/components/app/customers/import/`, botão "Importar planilha" em `/app/clientes` |
+
+**Resultado por linha** (`results`, mesma ordem e mesmo `sourceRow`, **nunca com nome, telefone ou e-mail**; `reason` é texto fixo do sistema):
+
+| Status | Quando |
+|---|---|
+| `created` | A ficha foi criada (`teamLinked: true` se nasceu ligada à pessoa da equipe) |
+| `duplicate` | O número (a `phone_key`, com ou sem o 9º dígito) já é de outra ficha da organização, ou se repete no arquivo. **Nunca atualiza** a ficha existente, nunca abre `claim` e nunca envia mensagem |
+| `invalid` | Não passou pelo cadastro (telefone, nome, e-mail, documento, observação, etiqueta) ou o e-mail é de outra ficha |
+| `limit` | O plano não tem mais vaga. **Não é "ignorada"**: com vagas, entra |
+
+**Como o lote usa a transação (decisão I2-1).** Uma transação por lote, e **só instruções em conjunto dentro dela**: uma leitura dos telefones e e-mails
+já cadastrados, uma da equipe, **um `INSERT` de todas as fichas** (`ON CONFLICT DO NOTHING`), um das etiquetas e as auditorias. Nada roda por linha.
+Com a trava de `customers` tomada, o lote custa uns 8 comandos, então a trava da organização cai em dezenas de milissegundos e um cadastro manual ou outro lote da
+mesma organização só espera isso. As alternativas pesadas: **uma transação por linha** pagaria a trava, a contagem e o `COMMIT` 500 vezes por lote (e
+um lote de 500 levaria segundos a 10 ms por linha); **sublotes** só encurtariam a espera às custas de mais ida e volta, sem ganho depois de o lote
+virar um `INSERT`. Medido: 10.000 linhas em 20 lotes terminaram em cerca de 6 s no servidor de desenvolvimento.
+
+**O pool (RISK-015).** Dentro da transação, tudo usa a `tx` recebida: nada chama `getDb()`, `withTenant`, `createTag` (que abre a própria transação) nem o Better Auth.
+O que precisa de outra conexão (ler o plano, resolver e criar etiquetas) corre **antes**, em sequência, sem segurar nada. A trava é a de `withinLimit`: a mais
+externa, tomada antes de qualquer outra (limite, número, conta ou ficha, pedido), e a importação não pede nenhuma das outras depois dela.
+`tests/db/pool-saturation.test.ts` roda 14 importações simultâneas (sem limite, com limite folgado, com poucas vagas, em 14 organizações e junto com 14 cadastros manuais).
+
+**O limite (decisão I2-2).** `withinLimitRoom(tenantId, metric, options, run(tx, room))` é o `withinLimit` que, em vez de recusar com 403 quando falta vaga, entrega a `run`
+quantas vagas restam (`0` com o plano cheio, `null` sem limite, que nem toma a trava). As primeiras linhas **que seriam criadas**, na ordem do arquivo, ocupam
+as vagas e as demais saem `limit` (decisão I2-3: linha inválida ou duplicada continua sendo `invalid` ou `duplicate` mesmo sem vaga, pois mudar de plano não a resolve). O
+servidor para no limite; a tela segue enviando os lotes seguintes (cada um é classificado por ele). `GET .../quota` devolve `{ limit, used, available }` (sem trava, só um aviso:
+"cabem N de M linhas").
+
+**Etiquetas (decisão I2-5).** As existentes (sem diferenciar a caixa) são ligadas. As novas só são criadas por quem tem `tag:manage`, até o teto de 100 por organização
+(`createTag`, com a trava e a auditoria de sempre); sem a permissão ou acima do teto, a ficha entra **sem** a etiqueta e a resposta traz `tags: { created, ignored, ignoredReason }`. A resolução
+corre **antes** da transação das fichas (cada `createTag` tem a própria), então uma etiqueta nova pode ficar criada mesmo que a linha dela saia `duplicate` ou `limit` (não se cria etiqueta
+para a segunda ocorrência de um telefone no lote nem com o plano já cheio). Linha com mais de 20 etiquetas (`CUSTOMER_TAG_LIMIT`) ou etiqueta de mais de 40 caracteres é `invalid`.
+
+**Equipe que também é cliente (D-9).** A ficha nasce ligada **só** quando o número é o telefone **confirmado no sistema** de um membro da organização que ainda não tem ficha (a mesma
+`matchingTeamMember`, agora em lote: `matchingTeamMembers`); **o e-mail nunca liga**. O resultado da linha traz `teamLinked` e a auditoria `customer.team_linked` (`via: imported`).
+
+**Tetos e abuso.** 500 linhas por pedido; corpo de até 5 MB (limite próprio da rota, `jsonBodyLimitOf`; as demais rotas de cliente seguem em 16 KB); `customer-import`: 40 pedidos por
+10 minutos por pessoa e organização (cabem 20.000 linhas); 10 MB e 10.000 linhas no arquivo (na tela). O envelope só limita tamanho (campo fora do contrato é 400; conteúdo ruim é `invalid`).
+**Personificação e `read_only` como o cadastro** (`POST /api/customers`): a importação é permitida na personificação e leva o `impersonator_id`; `read_only` recusa com 403 `TENANT_READ_ONLY`
+(a quota, um `GET`, segue lendo); suspensa, 403 `TENANT_SUSPENDED`; com telefone pendente, a rota nasce bloqueada (nada entra na lista do que passa).
+
+**Auditoria (decisão I2-7).** `customer.imported` por lote, **só se ao menos uma ficha foi criada**, com contagens (`rows`, `created`, `duplicate`, `invalid`, `limit`, `teamLinked`,
+`tagsCreated`, `tagsIgnored`) e nenhum dado de cliente. Não há `customer.created` por ficha (10.000 linhas encheriam o log); cada ligação à equipe tem o próprio `customer.team_linked`.
+Nada de nome, telefone ou e-mail em auditoria, log nem resposta.
+
+**Tela.** Diálogo em `/app/clientes` (só com `customer:create`): soltar o arquivo (ou clicar), modelo para baixar, referência de colunas, seletor de aba (`.xlsx`), prévia das 5 primeiras linhas, contadores
+`lidas · válidas · duplicadas · inválidas`, aviso "cabem N de M", barra de progresso com "Cancelar" (para antes do próximo lote; o que entrou fica), e, **depois do resultado**, a lista das não
+importadas (linha, situação e motivo, 200 por vez) com os contadores finais, o aviso de limite, de etiquetas ignoradas e de fichas ligadas à equipe. Falha de um lote para os seguintes, mostra o motivo e
+o que já entrou; importar de novo é seguro (o que entrou sai `duplicate`).
+
+**Testes.** `tests/db/customer-import.test.ts` (33): permissão e isolamento entre organizações; cada resultado de linha; duplicata na base e no arquivo sem atualizar a ficha; o 9º dígito;
+500 linhas e o 501º; corpo fora do contrato e acima do teto de corpo; o limite parando no meio, entre lotes seguidos, com **três importações simultâneas**, com **importações e cadastros manuais no
+meio** (conferido à mão que, sem a trava, os dois testes de corrida falham) e a trava de uma organização não segurando outra; `read_only` e suspensa; etiquetas existentes, novas, sem permissão,
+no teto de 100, acima de 20 por linha e sem criar para linha que não entra; a ligação pelo telefone confirmado de um membro (e a ausência dela com o telefone pendente, pelo e-mail e entre organizações);
+auditoria só com contagens; rate limit. Mais: a rota em `rbac.test.ts` (e a sessão exigida), o portão de telefone em `phone-gate.test.ts` (que percorre todas as rotas), a personificação em
+`impersonation.test.ts`, a saturação em `pool-saturation.test.ts` e, sem banco, `import-plan.test.ts` (planejamento, lotes, cancelamento e falha).
+
+**Conferido no navegador** (servidor de desenvolvimento, organização seed local, desktop e 375 px; os dados de teste foram removidos): `.xlsx` de duas abas (a capa foi pulada) com linhas válidas, repetida no arquivo e
+sem DDD, num plano de 8 clientes (cabem 6 de 12: entraram 6, 6 `limit`); CSV do Excel em português (`;`, Windows-1252, quebra de linha em aspas, fórmula como texto, duplicata da base, pessoa da equipe
+ligada, etiqueta nova e existente); 10.000 linhas lidas em ~200 ms e importadas em ~6 s; mensagens de erro para arquivo de 11 MB, binário com nome `.csv`, PDF, `.xls`, sem telefone e aspas sem fechar. No celular
+o conteúdo do diálogo estourava a largura (a tabela esticava a coluna do grid); corrigido com `grid-cols-[minmax(0,1fr)]`.
+
+**Decisões da I2 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I2-1 | O lote é **uma transação com instruções em conjunto** (acima) | Uma transação por linha, ou sublotes |
+| I2-2 | `withinLimitRoom` é um helper novo em `limits.ts` (mesma trava, mesma ordem, a regra do limite não mudou): entrega as vagas em vez de lançar 403 | Capturar o 403 e marcar tudo como `limit` (não diz quantas linhas cabiam) |
+| I2-3 | Sem vaga, linha **inválida ou duplicada** segue sendo isso; só o que seria criado vira `limit` | Tudo o que sobra vira `limit` |
+| I2-4 | **E-mail de outra ficha é `invalid`** ("Já existe um cliente com este e-mail."), a ficha não é criada sem o e-mail; só o telefone define `duplicate` | Criar a ficha sem o e-mail |
+| I2-5 | Etiquetas novas são criadas **antes** da transação (podem sobrar sem uso; sem permissão a ficha entra sem elas, com aviso) | Criar dentro da transação (exigiria reescrever `createTag`) ou recusar a linha |
+| I2-6 | A tela **não envia** linha que já sabe inválida nem a repetida no arquivo (o servidor revalida tudo o que recebe, com a mesma função) | Enviar tudo |
+| I2-7 | Um `customer.imported` por lote, só se criou ficha; sem `customer.created` por ficha | Um evento por ficha |
+| I2-8 | Personificação e `read_only` como `POST /api/customers` | Bloquear a importação na personificação (`blockWhileImpersonating`) |
+| I2-9 | `customer-import`: 40 pedidos em 10 minutos por pessoa e organização; corpo de até 5 MB | Outros números |
+| I2-10 | No **telefone** (e só nele), o apóstrofo que marca texto no Excel (`'1198...`) sai na leitura (I1-3, emenda): o cadastro só aceita dígitos e `+ ( ) - .` | Recusar a linha |
+
+**Revisões da I1 e da I2 (`/code-review` e `/security-review`, 2026-11-14)**
+
+| Achado | Destino |
+|---|---|
+| Caractere NUL num campo derrubava o `INSERT` do lote inteiro (500 do pedido; reenviar repetia o erro) | **Corrigido:** `prepareRow` recusa a linha (`invalid`); o arquivo de texto com byte nulo em qualquer ponto é recusado na leitura. Teste em `import-plan.test.ts`, `read-file.test.ts` e `customer-import.test.ts` |
+| Célula de **texto** como `1E5` virava `100000` no `.xlsx` (a conversão de notação científica valia para texto também) | **Corrigido:** só o `parseNumber` da biblioteca converte; texto fica como foi digitado. Testes em `parse-xlsx.test.ts` (inclusive com um `.xlsx` real) |
+| `pickSheet` convertia todas as linhas de cada aba só para achar o cabeçalho | **Corrigido:** para no primeiro cabeçalho (teste com `Proxy`) |
+| Releitura das etiquetas criadas comparava `lower()` do JS com o do Postgres | **Corrigido:** relê todas as da organização (no máximo 100) e compara só em JS |
+| A tela descarta a repetição de um telefone no arquivo mesmo quando a **primeira** ocorrência é recusada pelo servidor (e-mail de outra ficha): a segunda nunca é enviada | **Não corrigido, aceito:** é consequência da decisão I2-6 (a tela não envia o repetido); caso raro, e a lista diz "repetido no arquivo". Alternativa: enviar também as repetidas e deixar o servidor classificar tudo |
+| Cada lote lê o plano e conta clientes duas vezes (`customerImportQuota` e `withinLimitRoom`) | **Não corrigido:** duas consultas por lote de 500; a leitura sem trava serve para não criar etiquetas com o plano cheio |
+| `withinLimitRoom` repete a estrutura de `withinLimit` | **Não corrigido:** manter o código da Q1 intacto; unificar é refatoração à parte |
+| `/security-review` | **Nenhum achado com confiança acima de 8.** Conferidos: autorização e isolamento entre organizações, `tag:manage` no servidor, `INSERT` com colunas explícitas (sem atribuição em massa), consultas parametrizadas, resposta e auditoria sem dado de cliente, leitura do arquivo só no navegador, o que a personificação pode fazer (igual ao cadastro) |
+
+**O que não foi testado:** vários processos do servidor ao mesmo tempo (a trava é do Postgres, e os testes rodam num processo só); um `.xlsx` salvo pelo Excel ou pelo Google Planilhas de verdade;
+Firefox e Safari (só o navegador do painel); queda do processo no meio de um lote (as fichas dos sublotes já confirmados ficam sem o evento de auditoria do lote, e importar de novo as pula); o tempo da
+trava sob carga de produção (medido só em desenvolvimento); a lista de rejeitadas com milhares de linhas (renderiza 200 por vez).
+
+### I3: o que foi feito (2026-11-14)
+
+Importar pelo link do Google Planilhas. **Sem migration** e sem mudança no leitor da I1 nem nas regras da I2: o servidor baixa o CSV e a tela o
+embrulha num `File`, que segue pelo mesmo `readSpreadsheetFile`, prévia, contadores, lotes de `POST /api/customers/import` e lista de rejeitadas.
+
+| O quê | Onde |
+|---|---|
+| `POST /api/customers/import/google-sheets` (`customer:create`; corpo `{ url }`, 16 KB; devolve o CSV) | `src/api/customer-import.ts` (mesmo grupo e mesma cadeia de guardas da importação) |
+| Leitura do link e montagem do endereço (puro, na tela e de novo no servidor) | `src/lib/spreadsheet/google-sheets-link.ts` (`parseGoogleSheetLink`, `googleSheetExportUrl`) |
+| A busca com a guarda de SSRF | `src/lib/spreadsheet/google-sheets-fetch.server.ts` (`fetchGoogleSheetCsv`, transporte e resolvedor injetáveis) |
+| IP público | `src/lib/net/public-ip.ts` (`isPublicIp`) |
+| Contrato e rate limit | `src/lib/schemas/customer-import.ts` (`googleSheetImportSchema`, `GOOGLE_SHEET_RATE_LIMIT`) |
+| Tela | `customer-import-dialog.tsx` ("Ou cole o link do Google Planilhas", ao lado de soltar o arquivo), `import-api.ts` (`fetchGoogleSheetFile`), `src/lib/api/client.ts` (`apiFetchBytes`) |
+
+**Como a exportação do Google se comporta** (observado em 2026-11-14 com a planilha pública de exemplo do próprio Google, sem conta e com agente genérico).
+`GET https://docs.google.com/spreadsheets/d/<id>/export?format=csv&gid=0` responde **307** para
+`https://doc-08-4o-sheets.googleusercontent.com/export/<tokens>/<id>?format=csv&gid=0`, que responde **200** `text/csv; charset=utf-8`,
+`Transfer-Encoding: chunked` (**sem `Content-Length`**), `nosniff` e `Content-Disposition: attachment`. Três pedidos seguidos foram ao mesmo host.
+Id que não existe: **404** `text/html` já em `docs.google.com`. `gid` que não existe: 307 e depois **400** `text/html` no `googleusercontent`. Um documento
+de texto no lugar de planilha: 404. **A planilha privada não foi observada** (sem conta do Google nesta sessão); o comportamento documentado é redirecionar para
+`accounts.google.com` (ou responder 401/403), e os três casos dão a mensagem de planilha privada (testados com transporte falso). O endpoint `gviz/tq?tqx=out:csv`
+responde 200 direto em `docs.google.com`, sem redirecionamento, mas **não foi usado** (decisão I3-2).
+
+**Hosts aceitos** (lista fechada e exata, conferida em cada salto; `https`, sem porta e sem credenciais):
+
+| Host | Caminho | Por quê |
+|---|---|---|
+| `docs.google.com` | `/spreadsheets/` | É o endereço que o servidor monta (e um redirecionamento relativo dentro dele) |
+| `doc-XX-YY-sheets.googleusercontent.com`, com `XX` e `YY` de exatamente dois caracteres `[0-9a-z]` (`EXPORT_CONTENT_HOST`) | `/export/` | É onde a exportação é entregue hoje (307 acima). O padrão é o mais estreito que funcionou. O `googleusercontent.com` inteiro **não** entra: ele serve conteúdo enviado por qualquer usuário |
+
+Redirecionamento para `accounts.google.com` (ou `docs.google.com/accounts/...`, `/ServiceLogin`) é "planilha privada"; para qualquer outro lugar, encerra com
+"o Google respondeu de um jeito inesperado" e `warn` no log com o código e o salto. Até **3 saltos** (hoje é 1).
+
+**As defesas e o teste de cada uma**
+
+| Defesa | Teste |
+|---|---|
+| O link colado nunca é buscado: só o id (`[A-Za-z0-9_-]{20,100}`) e o `gid` (dígitos) saem dele; o endereço é montado | `google-sheets-link.test.ts` (matriz: válidos; `docs.google.com.evil.com`, `evil.com/docs.google.com/...`, `docs.google.com@evil.com`, credenciais, `http`, porta, IPv4 e IPv6 literais, decimal e hexa, metadados, `localhost`, ponto final, homógrafo cirílico, punycode, ponto ideográfico, documento, apresentação, formulário, desenho, Drive, "Publicar na Web", id com `..`, `%2f`, `%00`, acentuado, curto e absurdo, controle, nulo, `DEL`, largura zero, inversão de direção, espaço, `gid` hostil); `tests/db/customer-import-google.test.ts` (o endereço pedido é o montado e o link hostil não gera busca) |
+| Redirecionamento à mão, um por um, `https`, host na lista, caminho esperado, teto de saltos | `google-sheets-fetch.server.test.ts` › "redirecionamentos" (fora da lista, `googleusercontent` genérico, sufixo, grupo a mais, caminho, `http`, porta, credenciais, IP privado, metadados, `localhost`, `file:`, `javascript:`, login do Google, sem `Location`, cadeia acima do teto, ciclo) |
+| Todos os IPs do host conferidos (privada, loopback, link-local, metadados, CGNAT, IPv6 ULA e link-local, IPv4 mapeado, NAT64 interno, 6to4, Teredo) e a conexão fixada neles | `public-ip.test.ts`; `google-sheets-fetch.server.test.ts` › "resolução de nome" (host da lista resolvendo para faixa interna, um IP privado no meio de públicos, nenhum IP, falha de DNS) e › "httpsTransport" (conecta no IP fixado, não no do DNS) |
+| Sem cookies, sem cabeçalho do usuário, sem compressão | `google-sheets-fetch.server.test.ts` (só `User-Agent`, `Accept`, `Accept-Encoding: identity`; resposta comprimida recusada); `customer-import-google.test.ts` |
+| Tempo limite para conectar (5 s) e total (20 s, somando saltos e a leitura) | `google-sheets-fetch.server.test.ts` (sem resposta, corpo parado no meio, total entre saltos, resposta tardia fechada, tempo para conectar no transporte real) |
+| 10 MB contados enquanto lê, sem confiar no `Content-Length` | `google-sheets-fetch.server.test.ts` (acima do teto sem `Content-Length`, com o verdadeiro, com um mentiroso, exatamente no teto) |
+| Só `text/csv` ou `text/plain`; nunca zip nem byte nulo | idem (HTML de login com 200, binário, XLSX, JSON, sem tipo) |
+| A resposta ao navegador é texto: `text/csv`, `nosniff`, `attachment`, `no-store`; erro nunca repassa o corpo do Google | `customer-import-google.test.ts` |
+| Mensagem do que fazer: privada, inexistente, aba que não existe, grande demais, não é texto, tempo, Google limitando | `google-sheets-fetch.server.test.ts` › "respostas de erro do Google" |
+| Permissão, sem organização, outra origem, `read_only`, suspensa, rate limit, teto de corpo | `customer-import-google.test.ts`; `rbac.test.ts` (a rota na matriz); `impersonation.test.ts`; `phone-gate.test.ts` (a rota nasce bloqueada com telefone pendente) |
+
+**Log e auditoria (decisão I3-5).** Nada do link, do id da planilha nem do conteúdo vai a log, auditoria ou resposta de erro. A guarda só registra `warn`
+(código e salto, sem endereço) quando recusa um redirecionamento ou um IP. Não há evento de auditoria da busca: ela não grava nada, e o que entra é auditado
+por `customer.imported`, como na I2.
+
+**Conferido no navegador** (servidor de desenvolvimento, organização seed local, desktop e 375 px): a planilha pública de exemplo do Google foi baixada de verdade
+pelo servidor (2 saltos, cerca de 0,7 s) e lida no navegador, que mostrou a mensagem do leitor "Não achei a coluna de telefone" (ela não tem telefone); id inexistente
+deu "Não encontrei a planilha..."; `gid` inexistente, "O Google não encontrou esta aba..."; os links `docs.google.com.evil.com` e `docs.google.com@169.254.169.254`
+foram recusados antes de qualquer busca; o CSV volta com `text/csv`, `nosniff`, `attachment` e `no-store`; o log do servidor só tem método, caminho e status.
+O fluxo com telefones (prévia, contadores, importação e rejeitadas) foi conferido com a resposta **desta rota substituída no navegador** por um CSV fictício (sem conta
+do Google não há planilha pública com telefones fictícios): 6 lidas, 3 importadas, 2 duplicadas (base e arquivo), 1 inválida, etiqueta nova criada. No celular
+o campo e o botão ficam em coluna, sem estouro horizontal. Os dados de teste foram removidos (3 fichas, a etiqueta e as duas linhas de auditoria).
+
+**Roteiro para o proprietário** (o que não deu para conferir aqui): criar uma planilha com `telefone;nome` e 2 linhas fictícias; (1) compartilhada como "qualquer pessoa
+com o link", colar o link com a aba aberta e importar; (2) a mesma planilha **restrita**, colar o link: deve aparecer "A planilha é privada..." (e no log do servidor nenhum
+`warn`); (3) uma segunda aba, colar o link dela: deve importar a segunda aba.
+
+**Decisões da I3 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| I3-1 | **A SPEC dizia "sem redirecionamento para outro host"**; a exportação depende de redirecionar para `doc-XX-YY-sheets.googleusercontent.com`, que entrou na lista com o padrão mais estreito que funcionou (dois grupos de dois caracteres, caminho `/export/`). Se o Google mudar o formato do host, a importação pelo link falha com "respondeu de um jeito inesperado" e um `warn` no log | Não seguir redirecionamento e usar o `gviz` (I3-2) |
+| I3-2 | **Exportação `/export?format=csv`, não o `gviz/tq?tqx=out:csv`** (que responderia direto em `docs.google.com`): o `gviz` deduz o tipo de cada coluna e esvazia os valores que não combinam (um telefone digitado como texto numa coluna de números some) e trata o cabeçalho por conta própria | O `gviz`, sem redirecionamento |
+| I3-3 | **Toda falha da busca é 422**, não 502/504: o `rateLimit` devolve a tentativa em 5xx, e cada busca que falha também custou uma ida ao Google | 502/504 e um limite que não devolve |
+| I3-4 | Rate limit `customer-import-google`: **10 buscas por 10 minutos** por pessoa e organização (a importação tem 40) | Outro número |
+| I3-5 | **Sem auditoria da busca**; `warn` só quando a guarda recusa | Um evento `customer.import_fetched` (sem o link) |
+| I3-6 | Aceitos `/spreadsheets/d/<id>`, `/u/N/` e o antigo `/a/<domínio>/` do Workspace; o link de **"Publicar na Web"** (`/d/e/2PACX-...`) é recusado com mensagem para usar o de compartilhamento (outro identificador, sem planilha de teste para conferir) | Aceitar também o link publicado |
+| I3-7 | O servidor devolve os bytes **sem ler o conteúdo** (só confere tipo, zip e byte nulo); a leitura é a do navegador, como no arquivo enviado. `read_only` e personificação seguem a importação (a busca não grava, mas só serve para importar) | Ler no servidor e devolver as linhas |
+| I3-8 | Tempos: **5 s** para conectar e **20 s** no total; até **3** saltos | Outros números |
+
+**Revisões (`/code-review` e `/security-review`, 2026-11-14)**
+
+| Achado | Destino |
+|---|---|
+| O transporte ouvia `error` com `once`: um segundo erro (o sinal abortando depois de uma falha) ficaria sem ouvinte e derrubaria o processo | **Corrigido:** `on` |
+| Soltar um arquivo enquanto a busca pelo link corria fazia um resultado sobrescrever o outro | **Corrigido:** o soltar é ignorado durante a busca |
+| A rota herdava o teto de 5 MB do corpo da importação | **Corrigido:** 16 KB (`jsonBodyLimit`); teste em `customer-import-google.test.ts` |
+| Todo 400 virava "aba não encontrada" | **Corrigido:** só no host do conteúdo; em outro salto é falha do Google. Teste |
+| Link antigo do Workspace (`/a/<domínio>/spreadsheets/...`) era recusado | **Corrigido:** aceito (o domínio nunca é usado). Teste |
+| Resposta que chegasse depois do tempo limite não era fechada | **Corrigido:** fechada ao chegar. Teste |
+| `isGoogleSheetLink` só servia aos testes | **Corrigido:** removida |
+| `readCapped` repete a leitura com teto de `downloadMedia` (canais) | **Não corrigido:** erros e semântica de job próprios dos canais; unificar é refatoração à parte |
+| `/security-review` | **Nenhum achado com confiança acima de 8.** Conferidos: host e protocolo fora do controle do usuário; `Location` com credenciais, barra invertida, `%2e`, ponto final, IDN e CR/LF; IP interno e troca de DNS (conexão fixada); só três cabeçalhos fixos; cadeia de guardas; resposta como anexo de texto; nada do link em log |
+
+**O que não foi testado:** a planilha privada real (sem conta do Google; ver o roteiro acima); a importação real de uma planilha do Google com telefones (o fluxo foi conferido com a
+resposta substituída no navegador); um link de "Publicar na Web"; planilha real perto de 10 MB; o padrão do host de conteúdo ao longo do tempo (só um host observado, `doc-08-4o`); rede só IPv6
+(NAT64); Firefox e Safari.
+
+---
+
+## Bloco X: atendimento (P11)
+
+Comparação com as SPECs 049, 056 e 066 da origem.
+
+| Recurso da origem | Aqui | Ação |
+|---|---|---|
+| Conversa única por contato e canal, canal imutável (049) | Existe (`inbox.ts:150-157`, gatilho em `0033`) | Nenhuma |
+| Selo do canal na lista e na conversa (049 §4.2) | Existe (`channel-badge.tsx`) | Nenhuma |
+| Escolher o número ao iniciar conversa (049 §4.6) | Existe (`new-conversation-dialog.tsx`) | Nenhuma |
+| Composer conforme a capacidade do canal (049 §4.3) | Existe para modelo; não há interativo nem gravação de áudio a esconder | Nenhuma |
+| Filtro de canal na URL (049 §4.1) | Filtro existe, em estado local (`conversation-list.tsx:85`) | **X1 (implementada):** `?canal=<id>`; id inválido cai em "todos" |
+| "Também neste contato" (049 §4.4) | Não existe | **X1 (implementada):** seção no `contact-panel.tsx` com as outras conversas do contato, respeitando `visibility.ts` |
+| Filtro de clientes por canal (049 §4.5) | Não existe | **X4**, opcional: parâmetro `channelId` em `GET /api/customers` com `EXISTS` |
+| Continuar por outro canal (056) | Servidor pronto: `startConversation` é o find-or-create por contato e canal (`contact-actions.ts:358-432`); falta a ação | **X2 (implementada)** |
+| Seletor de emoji (066) | Não existe; `Textarea` controlado sem ref de cursor (`composer.tsx:394-411`) | **X3 (implementada)** |
+| Motores cientes de canal, teto de envio frio, enquete, API v1, webhooks de saída, IA (049 F6) | Não existem neste projeto (`plano.md`, "O que não é portado") | Fora |
+| Opt-out do contato e aviso de número não oficial (056) | Não existe o campo | Fora (D-5) |
+
+**X2: continuar por outro canal.**
+
+- `eligibleTransferChannels` em `src/lib/inbox/transfer.ts` (puro): canal do mesmo escopo,
+  diferente do atual, `connected`; com `sessionWindow24h`, só com a janela aberta **naquela**
+  conversa de destino; devolve o motivo da recusa.
+- `POST /api/inbox/conversations/:id/transfer` `{ channelId, text }`: valida a elegibilidade no
+  servidor, chama `startConversation` com o `contactId` da conversa (o schema passa a aceitar
+  contato existente), envia o texto pela conversa de destino e devolve o id dela. Conversa de
+  destino atribuída a outra pessoa responde 409 `ALREADY_ASSIGNED`, como hoje.
+- Nada muda no envio: a mensagem sai pelo canal da conversa de destino.
+- Entradas: botão "Continuar por outro número" na faixa "Janela de 24 horas encerrada", ao lado
+  de "Enviar modelo", e na seção "Também neste contato". Só aparecem com canal elegível.
+- O diálogo mostra o **nome do número** de saída e a frase "O contato vai receber de outro
+  número, e a conversa continua por lá". Sem aviso de "número não oficial" (D-5): é só mais
+  um número da organização. Só texto; depois o composer completo está na conversa de destino.
+- Sentido QR para oficial com a janela fechada: ação desabilitada com o motivo, apontando o
+  modelo.
+
+**X3: seletor de emoji.**
+
+- `frimousse` (dependência) e `emojibase-data` (dev). Dados em `public/emojibase/pt/`, copiados
+  por `scripts/sync-emojibase.mjs`: a CSP segue com `connect-src 'self'`
+  (`src/api/security.ts:19-31`).
+- `src/lib/emoji/` puro, com teste: `insert-at-cursor.ts`, `recents.ts` (16 mais recentes, por
+  usuário, em `localStorage` com chave `bizu:emoji:*`), `preferences.ts` (tom de pele).
+- `src/components/ui/popover.tsx` **não existe**: criar no padrão dos outros componentes base.
+- Painel carregado com `React.lazy` na primeira abertura; o popover fica aberto para várias
+  inserções e o foco volta ao campo ao fechar.
+- `composer.tsx` ganha ref no `Textarea`; o botão segue a mesma regra de bloqueio do campo.
+- Conferir o cabeçalho de cache de `/emojibase/*` no servidor de arquivos estáticos.
+
+**Fases e LLM:** X1 e X3 com Sonnet 5.5; X2 com Opus 5.5 (cria conversa e envia por outro
+número) e `/security-review`.
+
+### X1: o que foi feito (2026-11-14)
+
+Filtro de número na URL e "Também neste contato". **Sem migration**, sem mudança de regra de visibilidade. A X2 (continuar por outro número, feita depois: ver "X2: o que foi feito") e a X4 não foram tocadas; a X3 vem em seguida,
+em commit próprio, na mesma branch.
+
+**Filtro de número na URL (`?canal=<id>`)**
+
+- `src/components/inbox/channel-filter.ts` (puro, com teste): `parseChannelParam` (só o formato de id; o resto é descartado), `resolveChannelFilter` (só vale o id que está na lista de números **do escopo**)
+  e `inboxPath`. A lista (`conversation-list.tsx`) lê o parâmetro com `useSearchParams`; o estado local do número saiu.
+- Formato inválido, canal inexistente, canal de outro escopo (um número de organização aberto em `/admin`, e o inverso) e lista de números que falhou caem em "todos", sem erro, e o parâmetro é
+  removido da URL com `replace` (não empilha o histórico). Com o parâmetro e os números ainda sendo lidos, a lista espera (`useConversations(filters, enabled)`), sem pedir "todos" antes.
+- Trocar o número no seletor ou em "Limpar" **empilha** o histórico: voltar desfaz a troca. A URL guarda **só** o id do canal: busca, situação, etiquetas e atendente ficam em estado local (nome,
+  telefone e etiqueta nunca vão à barra de endereço), e a troca descarta qualquer outro parâmetro.
+- `useInboxPath()` (`use-inbox-path.ts`) leva o filtro adiante: linha da lista, "voltar" da conversa, "Voltar ao atendimento" e a conversa recém-iniciada.
+
+**"Também neste contato"**
+
+- Serviço `listRelatedConversations(actor, conversationId)` (`src/lib/inbox/conversations.ts`): a conversa atual por `requireVisibleConversation` (fora do alcance, 404 igual a id inexistente) e as
+  outras do mesmo `contact_id` (há uma por contato e número) por `visibleConversation(actor)`, da mais recente à mais antiga, teto de 50. Rotas finas em `src/api/inbox.ts` e
+  `src/api/admin-inbox.ts` (`GET .../conversations/:id/related`, `inbox:read` no tenant; qualquer papel de plataforma em `/admin`), sem escrita e sem limite de taxa próprio além do geral.
+- Resposta `{ items: [{ id, status, channel: { id, name, type }, lastMessageAt, createdAt }] }`: **nenhum** outro campo (dono, prévia, contador, nome, telefone, etiqueta). Sem `customer`, a
+  plataforma não ganha caminho novo até cliente de organização.
+- `related-conversations.tsx` no `contact-panel.tsx`, nos dois escopos e em todo tipo de vínculo: selo do número (`ChannelBadge`), situação e data (`formatListTime`); clicar leva à conversa com o
+  filtro. Carregando, erro e lista vazia **não desenham nada**. A chave da consulta mora sob `conversations` (qualquer releitura da lista, inclusive a do SSE, relê esta; ciclo de 60 s com o SSE).
+- **Lugar da X2:** o componente tem o slot `footer` (abaixo da lista) para "Continuar por outro número"; a X1 não implementa a ação. A seção só existe com outra conversa visível, então a X2 também
+  precisa tratar o contato sem outras conversas (a faixa "Janela de 24 horas encerrada" é a outra entrada da SPEC).
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X1-1 | O parâmetro se chama `canal` e leva só o id; qualquer outro parâmetro da URL é descartado quando o filtro muda ou é limpo |
+| X1-2 | A leitura é uma **rota própria** (`.../related`), não um campo de `GET .../conversations/:id`: o detalhe já é pesado e a seção é opcional; o custo é uma requisição a mais por conversa aberta |
+| X1-3 | "Do mesmo contato" é o mesmo `chat_contact` (mesma `phone_key` no escopo), não "o mesmo cliente vinculado": dois contatos de um mesmo cliente **não** se enxergam aqui |
+| X1-4 | Quem lê a conversa vê a seção; ela não pede `customer:read` (não há dado de cliente nela) |
+| X1-5 | Trocar o número empilha o histórico (voltar desfaz); parâmetro inválido é limpo com `replace` |
+| X1-6 | A lista de números que não carregou (por exemplo, papel sem `channel:read`) trata o filtro da URL como "todos": sem a lista não há como confirmar que o canal é do escopo |
+
+**Fora de escopo e observado:** o redirecionamento do login (`/login?next=`) descarta a consulta da URL, então abrir um link com `?canal=` sem sessão perde o filtro depois do login; é do
+`ProtectedRoute`, não do atendimento, e ficou como está.
+
+### X3: o que foi feito (2026-11-14)
+
+Seletor de emoji no composer do atendimento. **Sem migration**, sem mudança na CSP e sem rota nova: o seletor só escolhe o caractere. A X2 e a X4 não foram tocadas.
+
+**Dependências** (versões fixadas, sem `^`; `npm audit` sem achado nos pacotes novos: restam 4 moderados que já existiam, de `esbuild` via `drizzle-kit`)
+
+| Pacote | Versão | Tipo | Publicada | Observação |
+|---|---|---|---|---|
+| `frimousse` | `0.4.0` | dependência | 2026-09-21 (54 dias) | Liveblocks, MIT, sem dependências (`react` e `typescript` como peer); é o pacote que a SPEC nomeia |
+| `emojibase-data` | `18.0.0` | **dev** | 2026-10-16 (29 dias) | MIT; a anterior (`17.0.0`) é de 2025-11. Pede o peer `emojibase` |
+| `emojibase` | `18.0.0` | dev (transitiva) | | Instalada sozinha como peer de `emojibase-data`; **não estava na SPEC** |
+
+O popover **não** pediu pacote: `@base-ui/react` (já usado por dropdown, tooltip e select) traz o `Popover`.
+
+**Como funciona**
+
+- `src/components/ui/popover.tsx` (novo, no padrão de `dropdown-menu`): `Popover`, `PopoverTrigger`, `PopoverContent` (`side`, `align`, `finalFocus`), `PopoverTitle` e `PopoverDescription`.
+- `src/lib/emoji/` (puro, com teste): `insert-at-cursor.ts` (início, meio, fim, sobre seleção; nunca parte um emoji; não passa de `maxLength`), `recents.ts` (16 mais recentes, sem repetição, **por usuário**, chave `bizu:emoji:recents:<id>`),
+  `preferences.ts` (tom de pele, `bizu:emoji:skin-tone:<id>`) e `storage.ts` (todo acesso a `localStorage` em `try/catch`: valor corrompido ou armazenamento indisponível vira "sem dado", nunca exceção). O que vem do armazenamento é tratado como não confiável (recente que não parece emoji é descartado).
+- `scripts/sync-emojibase.mjs` (`npm run emoji:sync`): copia `pt/data.json` e `pt/messages.json` de `emojibase-data` para `public/emojibase/pt/`, confere o formato antes de gravar, só grava o que mudou e deixa um `README.txt` com a versão. Os arquivos copiados **são versionados** (`data.json` 796 KB, ~103 KB comprimido pelo Caddy; `messages.json` 6,7 KB).
+- `emoji-button.tsx` + `emoji-panel.tsx` (`src/components/inbox/`): o botão de carinha no composer e o painel (`frimousse`: busca, categorias, recentes, tom de pele), este em `React.lazy`: o chunk `emoji-panel-*.js` (28,6 KB) só é baixado na primeira abertura. `emojibaseUrl="/emojibase"`, idioma `pt`.
+- `composer.tsx`: ref no `Textarea`, `insertEmoji` (lê `selectionStart/End` do campo, passa por `insertAtCursor` e pelo mesmo `change` do texto digitado, então o contador, o rascunho e o envio veem o de sempre) e o cursor devolvido depois do emoji (`useLayoutEffect`). O botão: `disabled = blocked || send.isPending || audioAttached` (a mesma regra do campo, mais o envio em andamento); o painel aberto fecha quando o campo bloqueia.
+- **Cabeçalho de cache de `/emojibase/*`:** o servidor de estáticos (`react-router-hono-server`) responde `Cache-Control: public, max-age=3600` a tudo de `public/` fora de `/assets/` (lido no código, ver abaixo): uma hora, sem `immutable` (o nome não tem hash), o que serve: o conteúdo só muda ao atualizar o pacote. O servidor de estáticos **não** comprime; em produção quem comprime é o Caddy (`encode zstd gzip`). A biblioteca ainda guarda os dados em `localStorage` (`frimousse/data//emojibase/pt`), dado público.
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X3-1 | Os dois pacotes entram **fixados** (`0.4.0` e `18.0.0`), não com `^`; subir a versão é ato consciente, seguido de `npm run emoji:sync` |
+| X3-2 | Os arquivos de `public/emojibase/` são **versionados** (0,8 MB no repositório), em vez de gerados no build: o build já tem as devDependencies, mas assim o resultado é revisável e reproduzível sem rodar nada |
+| X3-3 | `emojibase-data` `18.0.0` (29 dias) em vez da `17.0.0`: a `frimousse` `0.4.0` leu o formato sem ajuste (conferido no navegador) e a `18` traz os emojis mais novos; emoji que o navegador não desenha é filtrado pela própria biblioteca |
+| X3-4 | O tom de pele tem seletor **próprio** (seis botões, `aria-pressed`), não o `SkinToneSelector` da biblioteca (que só alterna e não avisa a mudança): é assim que a escolha vira preferência do usuário |
+| X3-5 | A seção "Recentes" tem **altura fixa** (legenda e duas fileiras), mesmo vazia, para a lista não se mexer sob o dedo quando o primeiro emoji vira recente; custo: perde-se uma fileira de lista |
+| X3-6 | Ao chegar no limite de caracteres, o emoji **não** é inserido e há um toast; nunca se corta no meio de um emoji composto |
+| X3-7 | Recentes e tom de pele são **por usuário e por navegador** (`localStorage`), sem ir ao servidor: não acompanham a pessoa entre aparelhos |
+
+**Roteiro conferido no navegador** (desenvolvimento; ver o relatório): abrir pelo mouse e pelo teclado, inserir vários sem fechar, inserir no meio, sobre a seleção e no fim, emoji composto (`👋🏾`), recentes e tom de pele que sobrevivem a recarregar, Escape devolve o foco ao campo, botão bloqueado com o número desconectado, nos dois escopos, em 800 px e 375 px, sem nenhum pedido fora da própria origem.
+
+**O que não foi testado:** o seletor em Firefox e Safari; teclado virtual no celular de verdade (só a emulação de 375 px); leitor de tela; o cabeçalho de cache **medido** em produção (o `npm start` local recusa o `.env` de desenvolvimento: o valor foi lido no código do servidor de estáticos); um `JOBS_MODE` ou proxy que comprima `data.json` de outro jeito.
+
+### X2: o que foi feito (2026-11-14)
+
+Continuar a conversa por outro número. **Sem migration** (a conversa já é única por contato e número, e `message.client_id` já dá a idempotência) e sem mudança na regra de visibilidade nem no envio.
+A X4 não foi tocada.
+
+**Servidor**
+
+- `src/lib/inbox/transfer.ts` (puro, com teste): `eligibleTransferChannels({ scopeTenantId, currentChannelId, channels, destinations, now })` devolve os **outros** números do escopo, cada um com
+  `eligible` e `reason` (`disconnected`, `assigned_to_other`, `window_closed`, nesta ordem de conferência). Ficam de fora, sem motivo: o número da conversa atual, o de outro escopo e o desativado
+  (`disabled`). Número com `sessionWindow24h` só serve com a janela aberta **naquela** conversa de destino (`sessionWindow` sobre o `last_inbound_at` dela); sem conversa lá, a janela está fechada.
+- `src/lib/inbox/transfer-actions.ts`: `listTransferChannels(actor, conversationId)` e `continueOnChannel(actor, conversationId, { channelId, text, clientId })`. A origem passa por
+  `requireVisibleConversation` (fora do alcance, 404 igual a id inexistente). O envio revalida a elegibilidade, acha ou cria a conversa do **mesmo `contact_id`** no destino (`openConversation`) e
+  grava a mensagem pelo `queueMessage` de sempre, tudo em **uma transação**; o provedor é chamado depois, por `dispatch`. Nada muda no envio: número conectado, janela de 24 h, dono (a da fila é
+  assumida, a encerrada reabre) e `clientId` são os do envio normal, conferidos de novo com a conversa travada.
+- `openConversation(tx, actor, channelId, contactId, via)` (`contact-actions.ts`): o achar-ou-criar que estava repetido em `startConversation` e `startPlatformConversation` virou uma função só,
+  usada pelas três. Comportamento de "iniciar conversa" inalterado (a auditoria `inbox.conversation_claimed` leva `via: "start"` ou `"transfer"`).
+- Rotas, nos dois escopos (`src/api/inbox.ts` e `src/api/admin-inbox.ts`), schema `transferConversationSchema` (`src/lib/schemas/inbox.ts`, `.strict()`):
+
+| Rota | Quem | Resposta |
+|---|---|---|
+| `GET .../conversations/:id/transfer-channels` | `inbox:reply` (plataforma: quem responde) | `{ items: [{ channel: { id, name, type }, eligible, reason }] }`, em ordem de nome; nenhum outro campo |
+| `POST .../conversations/:id/transfer` `{ channelId, text, clientId }` | `inbox:reply`, 20/min (`inbox-transfer`) e mais o limite de envio (60/min) | `{ conversationId, message }`: 201 enviada ou sem resposta do provedor, 200 com a mensagem `failed` |
+
+- Recusas do `POST`: origem fora do alcance ou de outro escopo 404; o próprio número 400 `SAME_CHANNEL`; número inexistente ou de outro escopo 404; desativado 409 `CHANNEL_DISABLED`; desconectado
+  409 `CHANNEL_NOT_CONNECTED`; janela fechada no destino 409 `SESSION_WINDOW_CLOSED`; conversa de destino de outro atendente 409 `ALREADY_ASSIGNED` (só o erro e o dono, como em "iniciar
+  conversa"); sessão personificada 403 `IMPERSONATION_BLOCKED`; organização em `read_only` recusada pela regra geral. Nenhuma recusa deixa conversa vazia para trás.
+- **Idempotência:** `clientId` repetido devolve a mesma mensagem sem chamar o provedor de novo; a conversa é única por contato e número. Dois pedidos simultâneos: uma conversa, uma mensagem, um envio.
+  O pedido repetido é reconhecido **antes** das recusas de estado (a mensagem com aquele `clientId` na conversa do contato naquele número, dentro do alcance do ator): se o número caiu ou a
+  janela fechou depois do envio, a resposta ainda é a mesma mensagem, e não um 409 que levaria a pessoa a mandar de novo.
+- **Auditoria:** `inbox.conversation_continued`, alvo a conversa de **destino**, `metadata = { fromConversationId, channelId, created }`, só quando a mensagem é gravada de fato (o pedido repetido
+  não audita de novo). Nunca o texto nem o telefone. A conversa de origem **não é tocada** (dono, situação, prévia).
+
+**Tela** (nos dois escopos)
+
+- `src/components/inbox/continue-on-channel.tsx`: o botão "Continuar por outro número" e o diálogo. Duas entradas: na faixa "Janela de 24 horas encerrada" do composer, ao lado de "Enviar
+  modelo", e no slot `footer` de "Também neste contato". O diálogo lista os números (`ChannelBadge`), com o que não serve desabilitado e o motivo, mostra "Vai sair pelo número **nome**" e a
+  frase "O contato vai receber de outro número, e a conversa continua por lá", e pede só o texto. Sem aviso de número não oficial (D-5).
+- `transfer-entry.ts` (puro, com teste): o botão aparece com número elegível; só com número oficial de janela fechada aparece **desabilitado**, com o motivo apontando o modelo; nos demais casos
+  (nenhum outro número, só desconectado, só de outro atendente) não aparece. Também some sem `inbox:reply`, na sessão personificada e em `read_only`.
+- Depois do envio a tela abre a conversa de destino (`useInboxPath()` com `moveFilterTo`: com o filtro `?canal=` ligado, ele passa ao número de destino). Mensagem recusada pelo provedor: a
+  conversa abre do mesmo jeito, com a mensagem `failed` e um aviso; reenviar é por lá.
+- `useTransferChannels` (chave sob `conversations`, como `related`: relida com a lista) e `useContinueOnChannel` em `inbox-api.ts`. Tentar de novo o mesmo número e o mesmo texto reaproveita o
+  `clientId`.
+
+**Divergências da SPEC**
+
+- O corpo do `POST` leva `clientId` além de `{ channelId, text }`: sem ele não há como garantir que dois cliques não mandem duas mensagens (X2-1).
+- "O schema passa a aceitar contato existente" **não** foi feito: `startConversationSchema` segue igual. A rota nova chama o mesmo achar-ou-criar por dentro (`openConversation`), com o
+  `contact_id` lido da conversa de origem; expor `contactId` em `POST /api/inbox/conversations` abriria uma entrada pública nova que pediria conferência própria de alcance do contato (X2-2).
+
+**Decisões a confirmar**
+
+| # | Decisão |
+|---|---|
+| X2-1 | `clientId` é obrigatório no `POST .../transfer`, com o mesmo formato do envio |
+| X2-2 | `contactId` não entra no schema público de "iniciar conversa"; o reaproveitamento é interno (`openConversation`) |
+| X2-3 | A lista de números é uma **rota própria** (`.../transfer-channels`, `inbox:reply`), não um campo de `.../related`: `related` é de quem lê, some sem outras conversas, e a faixa da janela precisa da lista mesmo assim |
+| X2-4 | Vale nos **dois escopos** ("canal do mesmo escopo"): a plataforma segue por outro número da plataforma, sem dono, e nunca por número de organização |
+| X2-5 | A conversa de origem não muda: não encerra, não troca de dono, não ganha marca de "continuada" |
+| X2-6 | Achar ou criar a conversa e gravar a mensagem são uma transação só: recusa não deixa conversa vazia. Recusa **do provedor** deixa a conversa de destino com a mensagem `failed` (200), para reenviar por lá |
+| X2-7 | Conversa de destino de outro atendente: na lista sai só `assigned_to_other` (sem dono e sem dizer nada da janela); no `POST`, 409 `ALREADY_ASSIGNED` com o dono, igual a "iniciar conversa". Quem responde fica sabendo que o contato já é atendido por outra pessoa naquele número, como já ficava ao iniciar conversa |
+| X2-8 | A lista sai para quem tem `inbox:reply`, **sem** pedir `channel:read`: nome e tipo dos números não desativados do escopo (o estado só como o motivo "desconectado") |
+| X2-9 | Número `connecting` ou `error` é tratado como desconectado; o desativado nem é listado |
+| X2-10 | O botão só aparece desabilitado no caso que a SPEC nomeia (número oficial com a janela fechada); só desconectado ou só de outro atendente, ele some |
+| X2-11 | Limite próprio de 20/min por pessoa (`inbox-transfer`, `admin-inbox-transfer`), somado ao de envio |
+| X2-12 | Auditoria com ação nova (`inbox.conversation_continued`) em vez de só a `conversation_claimed`; a conversa que nasce pela ação registra `via: "transfer"` |
+| X2-13 | O diálogo é só texto, sem citação, anexo nem modelo (o composer completo está na conversa de destino) |
+| X2-14 | Depois do envio, o filtro `?canal=` ligado passa ao número de destino (senão a lista esconderia a conversa aberta) |
+
+**Roteiro manual** (organização com um número oficial e um QR conectados, e um contato que escreveu pelo oficial há mais de 24 horas)
+
+1. Abrir a conversa do contato no número oficial: a faixa "Janela de 24 horas encerrada" mostra "Enviar modelo" e "Continuar por outro número".
+2. Clicar em "Continuar por outro número": o diálogo traz o número QR já escolhido, "Vai sair pelo número …" e a frase da SPEC. Enviar um texto.
+3. A tela abre a conversa nova, no número QR, com a mensagem enviada e você como responsável; o contato recebe pelo outro número. A conversa antiga segue como estava.
+4. Nas duas conversas, o painel mostra "Também neste contato" com a outra; o botão aparece ali também.
+5. Da conversa do QR, tentar seguir pelo oficial sem o contato ter escrito por ele: o botão aparece desabilitado, com o motivo apontando o modelo (ou, com um terceiro número, o oficial aparece desabilitado dentro do diálogo).
+6. Desconectar o QR e reabrir a conversa do oficial: o botão some (sem outro número que sirva).
+7. Com outro atendente (papel sem supervisão) dono da conversa do QR: o número aparece desabilitado com "Outra pessoa já atende este contato por este número"; forçar o envio pela API responde 409.
+8. Clicar duas vezes em "Enviar": uma mensagem só.
+9. Repetir 1 a 3 em `/admin/atendimento`, com dois números da plataforma.
+
+**O que não foi testado:** a tela no navegador (diálogo, foco, 375 px, leitor de tela); o envio real por um provedor (os testes usam provedor simulado); Firefox e Safari.
+
+---
+
+## Bloco Q: planos e quotas (P12)
+
+Comparação com a SPEC 059 da origem.
+
+| Recurso da origem | Aqui | Ação |
+|---|---|---|
+| Catálogo com limites em JSON, chave ausente = ilimitado | Existe (`plan.limits`, `src/db/schema/billing.ts:59-86`) | Nenhuma |
+| Limites de contatos, membros e canais por tipo | Existem: `members`, `customers`, `channels_whatsapp_*`, mais `storage_mb`, `custom_roles`, `organizations` | Nenhuma |
+| Convite pendente ocupa vaga | Existe (`limits.ts:66-89`) | Nenhuma |
+| Contato que chega por mensagem não é bloqueado | Existe: `chat_contact` não conta (T4 do plano) | Nenhuma |
+| Suspensão e somente leitura | Existe (`access_mode`, `billingState`) | Nenhuma |
+| Troca de plano pelo owner e pelo admin | Existe (`/api/billing/change-plan`, `/api/admin/tenants/:id/plan`) | Nenhuma |
+| Enforcement no banco por trigger | Só na aplicação | **Não portar.** Na origem o navegador grava direto no banco; aqui toda escrita passa pela API |
+| Interruptor global de quotas | Não existe | **Não portar.** O plano gratuito com limites nulos cumpre o papel |
+| Contador de uso | `count(*)` na hora | **Não portar** agora; reavaliar se a contagem de `customers` pesar |
+| Garantia contra corrida | Em canais, organizações e, **desde a Q1 (implementada)**, `customers` e `members` | **Q1:** `pg_advisory_xact_lock` por tenant e métrica, em `withinLimit` (`src/lib/billing/limits.ts`), para `customers` e `members` (a importação torna a corrida real). Ver "Q1: o que foi feito" |
+| Tela "Plano e uso" com barras | Não existe; `/api/me` devolve limites sem uso | **Q2:** `GET /api/billing/usage` e barras em `/app/assinatura` (aviso a partir de 80%) |
+| Exceção de limite por conta (`limit_overrides`) | Não existe | **Q3:** `subscription.limit_overrides` (jsonb), aplicado em `checkLimit`, editado em `/admin` com motivo e auditoria |
+| Recurso por plano (`plan_feature`) | `plan.features` existe, sem `hasFeature` | **Q4**, opcional: `hasFeature` no servidor e na tela; primeiro uso natural é a importação |
+| Histórico de mudança de plano | Só no `audit_log` | Nenhuma |
+| Limite por papel (admin × agente) | Não existe | Fora |
+
+**LLM:** Sonnet 5.5 em Q1, Q2 e Q4; Opus 5.5 em Q3 (toca cobrança) com `/security-review`.
+
+### Q1: o que foi feito (2026-11-14)
+
+A garantia contra corrida nos limites de `customers` e `members`. **Sem migration e sem mudança de regra:** o que conta em cada métrica, o
+que o plano permite, a mensagem e o código (403 `PLAN_LIMIT_REACHED`) são os de antes. Não portado, como a tabela manda: trigger,
+interruptor global e contador de uso. Q2, Q3 e Q4 não foram tocadas.
+
+**Como funciona**
+
+- `withinLimit(tenantId, metric, options, run)` (`src/lib/billing/limits.ts`): lê o limite do plano, abre a transação do tenant, toma
+  `pg_advisory_xact_lock(hashtextextended('limit:<tenant>:<métrica>', 0))`, conta **na mesma transação** e, se couber, executa `run(tx)`.
+  O `COMMIT` solta a trava. Duas requisições simultâneas esperam uma pela outra, e a segunda já enxerga a primeira.
+- A trava é por organização **e** por métrica: a de `customers` não segura `members`, nem um tenant segura outro. Plano sem limite na métrica
+  (chave ausente ou `null`) nem toma a trava.
+- O limite é lido **antes** de abrir a transação: ler o plano por outra conexão, já segurando uma, esgotaria o pool (10 conexões) sob
+  concorrência.
+- **Duas formas, por causa do pool (correção posterior à primeira entrega da Q1; ver "Pool travado" abaixo).** `withinLimit` (`customers`)
+  grava só pela própria transação: quem espera a trava segura uma conexão, mas o dono da trava não pede outra e termina. `withinLimitNested`
+  (`members`) é para quem grava **por outra conexão** do pool enquanto a trava está tomada (o `createInvitation` e o `acceptInvitation` do Better
+  Auth): com limite, passa por `nestedSection` (`src/db/nested-section.ts`), um teto de 3 seções ao mesmo tempo no processo, e as demais esperam
+  **sem** segurar conexão; sem limite na métrica, `run` roda direto, sem abrir transação.
+- `assertWithinLimit` continua, para o que não corre: `custom_roles` (teto fixo de 20 do plugin) e canais (que já têm `lockScopeType`).
+  A doc dele diz que só confere.
+
+**Os caminhos que criam ficha de cliente ou ocupam vaga de membro**
+
+| Caminho | Onde | O que foi feito |
+|---|---|---|
+| Cadastro de cliente pela equipe (`POST /api/customers`) | `createCustomer`, `src/lib/tenant/customers.ts` | Entra: a transação do cadastro **é** a de `withinLimit`; conferência e `INSERT` sob a trava. A conferência continua antes de `phoneOf`, `assertPhoneFree` e do resto (plano cheio responde 403 antes de qualquer outra recusa) |
+| "Salvar contato como cliente" no atendimento | `saveContactAsCustomer` → `createCustomer` | Entra por `createCustomer` (mesma transação, `afterCreate` dentro dela); perdeu a vaga ou a corrida do vínculo, nada é criado |
+| Autocadastro do portal (e-mail confirmado) | `confirmPortalSignup`, `src/lib/portal/login.ts` | Entra: o `checkLimit` que ficava **antes** da transação virou `withinLimit` ao redor dela. Plano cheio devolve a mesma resposta neutra (nenhuma ficha, nenhum `claim`, nenhum lead ligado), como antes |
+| Abertura do `claim` | `confirmPortalSignup` → `openPortalClaim` | Entra, pela mesma conferência do autocadastro (CL-12: o limite é conferido só na abertura) |
+| Confirmação do `claim` | `applyCustomerClaim`, `src/lib/phone/claim.ts` | **Fora, de propósito.** Apaga a ficha que tinha o número e cria a nova na mesma transação: o total de fichas não sobe, então não há vaga a disputar. Se a ficha antiga sumiu antes da confirmação, a nova entra sem conferir; é o que a CL-12 já registra, e conferir ali seria regra nova (Q1-3) |
+| Convite (`POST /api/team/invitations`) | `src/api/team.ts` | Entra: a conferência e o `createInvitation` do Better Auth correm sob a trava de `members`; o convite só é devolvido depois de gravado, e a trava cai no fim |
+| Aceite do convite (`POST /api/invitations/:id/accept`) | `src/api/invitations.ts` | Entra, na mesma trava de `members`, com `ignoreInvitationId`; o convite pendente segue ocupando a vaga |
+| Reenvio do convite (`/resend`) | `src/api/team.ts` | **Fora:** renova o prazo do mesmo convite, não ocupa assento novo e hoje já não confere o limite |
+| Remover membro, cancelar convite, mudar papel | `src/lib/tenant/team.ts` | **Fora:** só liberam ou mantêm vaga. Quem concorre com um convite no máximo é recusado por instantes que a remoção ainda não confirmou |
+| Primeiro owner da organização | `createOrganizationWithinLimit` | Fora: a organização é nova e o limite que vale é o de organizações por dono (já travado) |
+| Seed e fixtures de teste | `src/db/seed.ts`, `addMember` dos testes | Fora: não são caminhos de produto |
+
+Nenhum outro `INSERT` em `customer`, `member` ou `invitation` existe fora desses (conferido por busca no código).
+
+**Ordem das travas (sem ciclo)**
+
+1. **Limite do plano (`withinLimit`)**: sempre a mais externa. Abre a própria transação e a toma antes de qualquer outra; ninguém a pede
+   dentro de uma transação que já segure outra trava.
+2. O número (`lockPhoneKey`).
+3. A conta ou a ficha (`for update`: `lockMembers` e depois a ficha em `removeMember`, `lockUser`).
+4. O pedido (`phone_verification`).
+
+Quem toma a trava de limite nunca a pede depois de ter o número, a conta, a ficha ou o pedido; o `claim` confirmado, que segura o número e
+a ficha, **não** pede a de limite. Por isso não fecha ciclo com `lockPhoneKey`, `lockMembers` nem com a ordem dos membros antes da ficha na
+remoção. Dentro da trava de `customers` rodam o `INSERT`, as etiquetas e o vínculo do contato (`afterCreate`); dentro da de `members`, só o
+`createInvitation` ou o `acceptInvitation` (o que vem depois do aceite, como ligar a ficha, a ativação do tenant e o pedido de telefone, roda
+fora, depois de a trava cair).
+
+**Testes** (`tests/db/limit-lock.test.ts`, mais um caso em `tests/db/inbox-contacts.test.ts`)
+
+- `customers`, uma vaga e seis pedidos simultâneos: um `201`, cinco `403 PLAN_LIMIT_REACHED`, uma ficha no banco; três vagas com pedidos de
+  sobra nunca passam do limite.
+- Autocadastro do portal (dois) e equipe disputando uma vaga: fica uma ficha. Plano cheio: o autocadastro não abre ficha nem `claim`.
+- "Salvar como cliente" com dois contatos e uma vaga: um cria, o outro recebe 403 e segue sem vínculo.
+- `members`, uma vaga e seis convites: um `201`, cinco `403`, um convite no banco. Convite pendente continua ocupando a vaga (o aceite dele passa e
+  um convite novo, não, ao mesmo tempo); aceite e cinco convites novos nunca fazem membros + convites passar do limite.
+- A trava de uma organização não segura outra; a de `customers` não segura o convite, e a de `members` não segura o cliente; plano sem
+  limite na métrica não toma a trava. A trava é segurada numa transação à parte, para o teste não depender de tempo.
+- Conferido à mão que, com a trava desligada, 7 dos 10 testes de `limit-lock` falham.
+- Os testes de limite que já existiam (`billing`, `customers`, `inbox-contacts`, `team`, `limits.test.ts`) passam sem mudar expectativa.
+
+**Decisões da Q1 a confirmar pelo proprietário**
+
+| # | Decisão | Alternativa |
+|---|---|---|
+| Q1-1 (**revista**) | Não há prazo de espera pela trava (o `lock_timeout` de 15 s da primeira entrega saiu: não cobria o plano sem limite nem organizações diferentes). Quem pede outra conexão enquanto segura uma passa por um teto de 3 seções no processo (`nestedSection`); quem só usa a própria transação (`customers`) espera a trava sem teto, porque o dono dela sempre termina | Prazo de espera, ou aumentar o pool (não resolve: só sobe o número de pedidos simultâneos que o travam) |
+| Q1-2 | Plano sem limite na métrica não toma a trava (nada a proteger, e a importação de quem não tem limite não paga a fila) | Travar sempre |
+| Q1-3 | A confirmação do `claim` não confere o limite (CL-12): não aumenta o total quando a ficha antiga existe. Quando ela sumiu antes do link, a ficha nova entra sem conferir | Conferir também na confirmação (muda a regra: o `claim` poderia ser recusado depois de o link ser aceito) |
+| Q1-4 | Reenvio, remoção e cancelamento de convite não tomam a trava | Tomar em todos os caminhos de membro |
+| Q1-5 | A trava de limite é a mais externa (limite, número, conta ou ficha, pedido) | Outra posição na ordem |
+
+**Pool travado (achado da conferência da Q1; corrigido num segundo commit)**
+
+- **O problema.** O pool de runtime é um só, de 10 conexões (`src/db/index.ts`), e o Better Auth usa o mesmo (`drizzle(getDb())`). A primeira
+  versão da trava de `members` abria `withTenant` (uma conexão em transação) e, dentro dela, chamava o Better Auth, que pede **outra**. Com 10
+  pedidos simultâneos, as 10 conexões ficam presas em transações que esperam o Better Auth, e o Better Auth fica na fila do pool, que o
+  `postgres.js` não limita no tempo: nada libera, e **todo o acesso ao banco do processo para até reiniciar**. O `lock_timeout` de 15 s só cobria
+  quem esperava a **mesma** trava; não cobria plano sem limite (sem trava, mas com a transação aberta) nem organizações diferentes (cada uma com a
+  trava própria). Quem convida derrubaria a plataforma: o limite de taxa é de 20 por 10 minutos por pessoa.
+- **`createOrganizationWithinLimit` (anterior à Q1) tinha o mesmo desenho** (transação de plataforma e lock por pessoa, com `createOrganization`
+  do Better Auth lá dentro), sem prazo nenhum: 10 criações simultâneas, da mesma pessoa (esperando o lock) ou de pessoas diferentes, travavam o
+  pool do mesmo jeito. Registrado em `docs/context/tech/16-bugs-riscos.md` (RISK-015).
+- **`customers` não tem o problema:** tudo o que roda dentro da trava (INSERT, etiquetas, campos, auditoria, `afterCreate` do atendimento, `openPortalClaim`
+  e `ensureCustomerVerification` do autocadastro) recebe a `tx`; o dono da trava não pede outra conexão. Conferido por teste (14 pedidos).
+- **A correção.** `src/db/nested-section.ts`: `nestedSection` é um semáforo em memória (`NESTED_SECTIONS_MAX = floor(POOL_MAX / 3) = 3`). As seções
+  que seguram uma conexão e pedem outra (`withinLimitNested` com limite, e `createOrganizationWithinLimit`) passam por ele; as demais esperam numa fila de
+  promessas, **sem** conexão. O número é seguro: cada seção segura 1 e o código de dentro usa até 2 ao mesmo tempo (o Better Auth grava em sequência;
+  2 é folga), então no pior caso 3 seções seguram 3 e pedem 6, no total 9 de 10, e sempre sobra conexão para quem está dentro terminar. O pedido
+  comum nunca entra num ciclo, só atrasa. O pool **não** foi aumentado. A seção não aninha outra `nestedSection`.
+- **Testes** (`tests/db/pool-saturation.test.ts`, com prazo de 25 s para não pendurar a suíte; `src/db/nested-section.test.ts` para o semáforo): 14 pedidos
+  (mais que as 10 conexões) de convite com `members` sem limite; de convite em 14 organizações diferentes, cada uma com a trava; de convite numa
+  organização com limite; 14 aceites; 14 criações de organização por pessoas diferentes e 14 da mesma pessoa; e 14 cadastros de cliente (sem limite, com
+  limite folgado e com uma vaga) e 14 confirmações de autocadastro do portal. Antes da correção os de convite e de organização estouram o prazo (pool
+  travado); depois terminam em poucos segundos.
+
+**O que não foi testado:** a confirmação do `claim` com a ficha antiga já apagada e o
+plano cheio; várias instâncias do servidor (a trava é do Postgres, não do processo, e os testes rodam num processo só); e o desempenho da
+contagem de `customers` com muitas fichas (a SPEC deixa o contador de uso para depois).
+
+---
+
+## Ordem e portão de produção
+
+| Ordem | Blocos | Segura o deploy? | Por quê |
+|---|---|---|---|
+| 1 | S, B | Sim | Segurança de conta; pequenos e isolados |
+| 2 | T, F | Sim | Fecha o achado aberto da revisão de segurança da caixa de entrada; sem o perfil (F), owner e equipe não têm onde trocar o telefone |
+| 3 | E, L | Sim | Avisos de exclusão e texto legal precisam valer no primeiro aceite real. **Implementados** (L em 2026-11-13, E em 2026-11-14), decisões E-1 a E-6 e a revisão jurídica pendentes |
+| 4 | R | Sim | Protege o servidor (D-7): produção sobe com a retenção ligada e os padrões baixos; em desenvolvimento fica desligada. **R1, R2, R3a e R3b implementadas** (schema, precedência, limpeza, prévia, job, rotas, estrela na mensagem, aviso da conversa esvaziada e tela de retenção do `/admin`); falta a revisão jurídica do texto de privacidade (ver "R3b: o que foi feito", com o roteiro manual). Com `MESSAGE_RETENTION_ENABLED=true` a limpeza apaga mensagem |
+| 5 | Q1 antes de I; depois I, X, Q2 a Q4 | Não | Recursos novos, sem risco para o que já existe. **Q1 implementada** (trava por organização e métrica em `customers` e `members`; "Q1: o que foi feito"). **I1, I2 e I3 implementadas** (importação de clientes: leitura no navegador, rota, tela, link do Google Planilhas com guarda de SSRF; "I1: o que foi feito", "I2: o que foi feito" e "I3: o que foi feito") |
+
+Cada fase termina com `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:db`,
+`npm run build` e `/code-review`; `/security-review` onde a tabela de fases indica.
+
+## Decisões
+
+Todas as decisões de produto (P1 a P18 e D-1 a D-13) estão na tabela "Decisões do
+proprietário". Em aberto, para o proprietário confirmar: as decisões T3-1 a T3-9 da T3 (em "T3: o
+que foi feito"), T4-1 a T4-4 (em "T4: o que foi feito"), TC-1 a TC-10 da troca de telefone (em "Troca
+de telefone pelo pedido: o que foi feito"), TL-2 a TL-6 da ligação manual da ficha com a equipe (em "Ligação manual da ficha com a equipe: o que foi feito"; TL-1 decidida), CL-2, CL-4 a CL-6 e CL-8 a CL-14 do `claim` (em "Telefone que já existe (`claim`): o que foi feito"; CL-1, CL-3, CL-7 e CL-13 decididas), F1-1 a F1-5 do perfil (em "F1: o que foi feito"), R1-1 a R1-10 da retenção (em "R1: o que foi feito"), R2-1 a R2-10 da limpeza (em "R2: o que foi feito") Q1-1 (revista) a Q1-5 da trava dos limites (em "Q1: o que foi feito"), I1-1 a I1-7 da leitura da planilha (em "I1: o que foi feito") I2-1 a I2-10 da rota e da tela de importação (em "I2: o que foi feito") e I3-1 a I3-8 do Google Planilhas (em "I3: o que foi feito").
+
+**Leituras que esta SPEC fez das últimas respostas, confirmadas na aprovação (2026-11-11):**
+
+| # | Leitura confirmada | Alternativa descartada |
+|---|---|---|
+| C-1 | D-11 vale nos dois caminhos: **remover a pessoa da equipe** apaga a ficha ligada naquela organização, e **excluir a conta** apaga as fichas ligadas em todas | Valer só na exclusão da conta; remover da equipe apenas desfaz a ligação |
+| C-2 | D-1: apagar a ficha antiga apaga também as conversas dela (é `deleteCustomer`) | Passar o contato e as conversas do número para a ficha nova |
+| C-3 | D-7: 5.000 mensagens, 90 dias e 200 favoritas por organização e tipo de canal; o exemplo de produção vem com a retenção **ligada** | Outros números, ou produção desligada até decisão de operação |
+
+**Decisões técnicas desta SPEC:**
+
+| Decisão | Motivo | Alternativa descartada |
+|---|---|---|
+| Unicidade de owner e equipe por função com trava, sem índice | `user` é global e o papel fica em `member` | Índice único em `user.phone_key` (impediria a mesma pessoa em duas organizações com contas distintas) |
+| Unicidade de conta só entre telefones confirmados | Número declarado não pode reservar o telefone de outra pessoa nem revelar que ele tem conta | 409 no cadastro |
+| Cliente criado ou importado pela equipe não recebe link | Importação viraria envio em massa a quem nunca escreveu | Link para todo telefone novo |
+| Sessão criada com telefone pendente, bloqueio no servidor | Reenviar e corrigir o número exigem identidade | Recusar o login, como no e-mail não verificado |
+| Token novo a cada tentativa de envio | O token nunca fica no payload do job | Guardar o token cifrado no pedido |
+| Retenção em serviço Drizzle e job pg-boss | Drizzle é a única camada de dados; o projeto já tem agendador | Função SQL e rota de cron, como na origem |
+| Sem trigger de quota, contador de uso e interruptor global | Toda escrita passa pela API | Portar o motor da SPEC 059 inteiro |
+| Dados de emoji no próprio servidor | `connect-src` segue `self` | CDN |
+
+## Atualização de contexto
+
+Na entrega de cada bloco:
+
+- [ ] `tech/28-crm-cadastro.md`: verificação e unicidade do telefone (T), importação (I)
+- [ ] `tech/30-caixa-de-entrada.md`: fechar os limites de vínculo e de retenção (T, R), avisos de exclusão (E), transferência, emoji e filtro na URL (X)
+- [ ] `tech/08-auth.md` e `tech/26-seguranca.md`: política de senha, bloqueio de login, bloqueio por telefone pendente e perfil (S, B, T, F)
+- [ ] `tech/21-tenant-rbac.md`: permissão `phone:confirm`; `tech/29-canais-whatsapp.md`: modelo de verificação e envio fora da caixa de entrada (T)
+- [ ] `tech/27-lgpd-arquivos.md` e `lgpd.md`: retenção de mensagens e texto legal (R, L)
+- [ ] `tech/23-billing-planos.md`: uso, exceção por tenant e trava de corrida (Q)
+- [ ] `tech/20-jobs.md`: jobs `phone.verify` e `inbox.retention`
+- [ ] `INDEX.md`, `status.md`, `.env.example`, `docker/.env.prod.example` e as rules em par (`.claude/rules/` e `.cursor/rules/`) de `auth` e `inbox`
+- [ ] `docs/specs/whatsapp-crm/plano.md`: tirar de "O que não é portado" a retenção automática de mensagens

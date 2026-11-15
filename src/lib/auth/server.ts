@@ -29,6 +29,11 @@ import {
   tenantAccessControl,
   tenantRoles,
 } from "@/lib/auth/permissions";
+import { clearLoginThrottleForEmail } from "@/lib/auth/login-throttle-store";
+import { passwordPolicyHook } from "@/lib/auth/password-hook";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import { ensureUserVerification } from "@/lib/phone/requests";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/password-policy";
 import { logError } from "@/api/log";
 import { getEnv } from "@/lib/env";
 
@@ -58,8 +63,10 @@ function createAuth() {
     // limite por e-mail); personificação, pela política de consentimento (`impersonation.ts`);
     // escrita sobre usuários, por /api/admin/*, com as regras e a auditoria de lá (o plugin
     // não compara o papel do alvo); sessões, por /api/me/sessions, com auditoria e sem
-    // expor tokens. `auth.api.*` continua disponível no servidor.
+    // expor tokens; nome e foto da própria conta, por /api/me e /api/me/avatar (bloco F), com auditoria e
+    // sem deixar `image` virar um texto qualquer. `auth.api.*` continua disponível no servidor.
     disabledPaths: [
+      "/update-user",
       "/send-verification-email",
       "/request-password-reset",
       "/list-sessions",
@@ -87,7 +94,8 @@ function createAuth() {
       // O cadastro nunca abre sessão: a resposta é a mesma para e-mail novo e existente, e
       // `onExistingUserSignUp` avisa o dono. Sem verificação, o cliente entra em seguida.
       autoSignIn: false,
-      minPasswordLength: 10,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: ({ user, token }) =>
         sendResetPasswordLink(user, token),
@@ -100,6 +108,8 @@ function createAuth() {
             .set({ emailVerified: true })
             .where(eq(schema.user.id, user.id));
         }
+        // Quem provou o e-mail pelo link volta a entrar, mesmo com o login bloqueado.
+        runInBackground(clearLoginThrottleForEmail("team", user.email));
         runInBackground(sendPasswordChangedNotice(user));
         runInBackground(
           audit("auth.password_reset", {
@@ -164,6 +174,14 @@ function createAuth() {
             await recordSignupConsent({ type: "user", id: user.id }).catch((error) =>
               logError("Falha ao registrar o consentimento", error),
             );
+            // O telefone do cadastro é só declarado: abre o pedido de confirmação e pede o envio do
+            // link pelos canais da plataforma (o job decide se é a vez dela, D-12). Quem entrar
+            // numa organização por convite leva o pedido para ela (`invitations.ts`).
+            runInBackground(
+              ensureUserVerification(user.id).then((requestId) =>
+                requestPhoneVerificationSend(requestId, { type: "user", id: user.id }),
+              ),
+            );
             runInBackground(
               audit("auth.signed_up", {
                 actor: { id: user.id },
@@ -197,6 +215,9 @@ function createAuth() {
         },
       },
     },
+
+    // Política de senha e normalização, também para quem chama a rota direto.
+    hooks: { before: passwordPolicyHook },
 
     // Só o reset usa `verification`: o token não fica legível no banco.
     verification: { storeIdentifier: "hashed" },

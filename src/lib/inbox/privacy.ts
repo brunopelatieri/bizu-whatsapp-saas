@@ -99,6 +99,74 @@ export function purgeCustomerContacts(tx: Tx, customerIds: string[]): Promise<In
 }
 
 /**
+ * Quantas conversas a exclusão da ficha apaga (`deleteCustomer`): todas as dos contatos vinculados a
+ * ela. Roda no escopo de quem chama, com o RLS limitando ao tenant.
+ */
+export async function countCustomerConversations(tx: Tx, customerId: string): Promise<number> {
+  const [row] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(conversation)
+    .innerJoin(chatContact, eq(conversation.contactId, chatContact.id))
+    .where(eq(chatContact.customerId, customerId));
+
+  return row?.total ?? 0;
+}
+
+/**
+ * As conversas das fichas, por número do contato (`phone_key`): uma consulta para todas. O aviso da
+ * remoção de um membro soma só as do telefone confirmado da pessoa, que são as que a D-11 apaga.
+ */
+export async function countConversationsByContactPhone(
+  tx: Tx,
+  customerIds: string[],
+): Promise<{ customerId: string; phoneKey: string; total: number }[]> {
+  if (customerIds.length === 0) return [];
+
+  const rows = await tx
+    .select({
+      customerId: chatContact.customerId,
+      phoneKey: chatContact.phoneKey,
+      total: sql<number>`count(*)::int`,
+    })
+    .from(conversation)
+    .innerJoin(chatContact, eq(conversation.contactId, chatContact.id))
+    .where(inArray(chatContact.customerId, customerIds))
+    .groupBy(chatContact.customerId, chatContact.phoneKey);
+
+  return rows.flatMap(({ customerId, phoneKey, total }) =>
+    customerId ? [{ customerId, phoneKey, total }] : [],
+  );
+}
+
+/**
+ * Exclusão da ficha de cliente de quem é da equipe (D-11, `docs/specs/pre-producao/spec.md`): só
+ * saem os contatos cujo número é `phoneKey`, o telefone **confirmado** da pessoa, com conversas,
+ * mensagens e mídia. Os demais contatos ligados à ficha (quem tem `customer:update` liga à mão o
+ * contato de outra pessoa à ficha) só perdem o vínculo e a conversa fica. Sem `phoneKey` (a pessoa
+ * não tem telefone confirmado), nada é apagado. Chamar **antes** de apagar a ficha.
+ */
+export async function purgeTeamCustomerContacts(
+  tx: Tx,
+  customerId: string,
+  phoneKey: string | null,
+): Promise<InboxPurge> {
+  const purged = phoneKey
+    ? await purgeContacts(
+        tx,
+        and(eq(chatContact.customerId, customerId), eq(chatContact.phoneKey, phoneKey)) as SQL,
+        { notify: true },
+      )
+    : NONE;
+
+  await tx
+    .update(chatContact)
+    .set({ customerId: null, updatedAt: sql`now()` })
+    .where(eq(chatContact.customerId, customerId));
+
+  return purged;
+}
+
+/**
  * Exclusão da organização: a linha de `organization` é anonimizada, não apagada, então o
  * `cascade` não roda. Todos os contatos do tenant saem, com conversas e mensagens. A mídia
  * (`file` com o `tenant_id`) já sai inteira em `anonymizeTenant`; as chaves daqui só somam.
@@ -109,7 +177,8 @@ export function purgeTenantInbox(tx: Tx, tenantId: string): Promise<InboxPurge> 
 
 /**
  * Anonimização de `user`. Como atendente: as mensagens que enviou ficam sem autor (e os anexos,
- * sem `created_by`) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila
+ * sem `created_by`), as que favoritou perdem só quem marcou (`favorited_by`; a estrela fica, é da
+ * conversa) e as conversas que encerrou, sem `closed_by` (as que atendia já voltaram à fila
  * por `releaseAssignments`). Como contato: só perde o vínculo, no tenant e na plataforma (SPEC). O
  * vínculo com `user` nasce do telefone que a pessoa declarou, sem verificação: apagar ou exportar
  * conversas por ele entregaria a quem declarou o número de outro as mensagens desse outro.
@@ -120,6 +189,7 @@ export async function detachUserFromInbox(tx: Tx, userId: string): Promise<void>
     .set({ userId: null, updatedAt: sql`now()` })
     .where(eq(chatContact.userId, userId));
   await tx.update(message).set({ senderUserId: null }).where(eq(message.senderUserId, userId));
+  await tx.update(message).set({ favoritedBy: null }).where(eq(message.favoritedBy, userId));
   await tx
     .update(file)
     .set({ createdBy: null })

@@ -1,5 +1,6 @@
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { POOL_MAX } from "@/db/nested-section";
 import { getEnv } from "@/lib/env";
 import * as schema from "./schema";
 
@@ -13,7 +14,7 @@ let db: Database | undefined;
  */
 export function getDb(): Database {
   if (!db) {
-    const client = postgres(getEnv().DATABASE_URL, { max: 10 });
+    const client = postgres(getEnv().DATABASE_URL, { max: POOL_MAX });
     db = drizzle(client, { schema });
   }
 

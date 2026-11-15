@@ -27,7 +27,10 @@ import {
   preferredTenantId,
 } from "@/lib/tenant/membership";
 import { loadRoleCatalog } from "@/lib/tenant/roles";
+import { teamPhoneGatePasses } from "@/lib/phone/gate";
+import { phoneVerificationRequired } from "@/api/phone-gate";
 import { listInvitationsFor } from "@/lib/tenant/team";
+import { avatarIdOf, avatarUrl } from "@/lib/profile/avatar";
 
 /**
  * O tenant ativo da sessão, se a pessoa ainda for membro. Removida dele, a sessão passa
@@ -81,10 +84,15 @@ meRoutes.get("/api/me", authRateLimit, requireAuth, async (c) => {
   const consentRequired = user.impersonatedBy
     ? []
     : await pendingConsents({ type: "user", id: user.id });
+  // Com `PHONE_VERIFICATION_REQUIRED=true` quem não passa nem chega aqui (403 em `requireAuth`);
+  // desligada, a interface mostra o aviso "Confirme seu WhatsApp".
+  const phonePending =
+    !phoneVerificationRequired() && !(await teamPhoneGatePasses(user.id, tenant?.id ?? null));
 
   return c.json<MeResponse>({
     user: {
       ...user,
+      avatarUrl: avatarUrl(user.id, await avatarIdOf(user.id)),
       activeTenant: tenant && {
         id: tenant.id,
         slug: tenant.slug,
@@ -111,6 +119,7 @@ meRoutes.get("/api/me", authRateLimit, requireAuth, async (c) => {
       platformRequires2fa: missingPlatform2fa(user),
     },
     consentRequired,
+    phonePending,
   });
 });
 

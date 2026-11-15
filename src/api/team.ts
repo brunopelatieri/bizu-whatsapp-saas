@@ -21,7 +21,7 @@ import { handleTenantError } from "@/api/tenant-errors";
 import { audit } from "@/lib/audit";
 import { roleLabel } from "@/lib/auth/permissions";
 import { getAuth } from "@/lib/auth/server";
-import { assertWithinLimit } from "@/lib/billing/limits";
+import { withinLimitNested } from "@/lib/billing/limits";
 import { changeRoleSchema, inviteSchema } from "@/lib/schemas/team";
 import {
   assertCanGrant,
@@ -59,7 +59,9 @@ teamRoutes.get("/api/team", async (c) => {
   const { id } = c.get("tenant");
 
   return c.json({
-    members: await listMembers(id),
+    members: await listMembers(id, {
+      withCustomerRecord: c.get("permissions").includes("member:delete"),
+    }),
     invitations: await listInvitations(id, teamActor(c)),
     roles: Object.keys(c.get("roleCatalog")).map((name) => ({
       name,
@@ -81,15 +83,19 @@ teamRoutes.post(
     assertKnownRole(actor.catalog, role);
     assertCanGrant(actor, role);
     await assertCanReplaceInvitation(organizationId, email, actor);
-    // O convite reserva um assento: reconvidar o mesmo e-mail não reserva outro.
-    await assertWithinLimit(organizationId, "members", {
-      ignoreInvitationEmail: email,
-    });
-
-    const invitation = await getAuth().api.createInvitation({
-      headers: c.req.raw.headers,
-      body: { email, role: role as "member", organizationId },
-    });
+    // O convite reserva um assento: reconvidar o mesmo e-mail não reserva outro. A conferência e
+    // a gravação do convite correm sob a trava de `members` (`withinLimitNested`): dois convites
+    // simultâneos não passam juntos pela última vaga.
+    const invitation = await withinLimitNested(
+      organizationId,
+      "members",
+      { ignoreInvitationEmail: email },
+      () =>
+        getAuth().api.createInvitation({
+          headers: c.req.raw.headers,
+          body: { email, role: role as "member", organizationId },
+        }),
+    );
 
     await audit("member.invited", {
       actor: { id: actor.userId },

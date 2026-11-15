@@ -22,12 +22,17 @@ import { appLink } from "@/lib/auth/links";
 import { getAuth } from "@/lib/auth/server";
 import { billingState } from "@/lib/billing/state";
 import { maskEmail } from "@/lib/email/address";
-import { phoneValues } from "@/lib/phone/columns";
+import { canWhatsApp } from "@/lib/phone/br";
+import { phoneColumns, phoneValues } from "@/lib/phone/columns";
+import { changeUserPhoneByPlatform, sendOpenedAfterChange } from "@/lib/phone/requests";
+import { verifiedPhone } from "@/lib/phone/verification";
 import { sendEmail } from "@/lib/email/send";
 import { emailChangedTemplate } from "@/lib/email/templates/email-changed";
 import { hasPortalPassword } from "@/lib/portal/profile";
 import type { UpdatePersonInput } from "@/lib/schemas/admin";
+import { WHATSAPP_PHONE_REQUIRED } from "@/lib/schemas/phone";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
+import { accountCustomerRecords } from "@/lib/tenant/team-customer-removal";
 import { findPendingDeletion } from "@/lib/lgpd/deletion";
 
 /**
@@ -150,7 +155,18 @@ export async function getUserDetail(userId: string) {
       state: billingState({ status, accessMode, subscriptionStatus }),
     })),
     deletion: await pendingDeletionOf({ type: "user", id: userId }),
+    // D-11: as fichas de cliente ligadas a esta conta saem com ela (o diálogo de exclusão avisa).
+    customerRecords: await accountCustomerRecords(userId),
   };
+}
+
+/** Conta da equipe só com número que recebe WhatsApp, também para quem não passou pelo Zod. */
+function whatsappPhoneValues(raw: string) {
+  const { kind, ...values } = phoneColumns(raw);
+  if (!canWhatsApp(kind)) {
+    throw new TenantRuleError(400, "INVALID_PHONE", WHATSAPP_PHONE_REQUIRED);
+  }
+  return values;
 }
 
 /**
@@ -177,16 +193,41 @@ export async function updateUserByAdmin(
     if (other) throw EMAIL_TAKEN();
   }
 
+  const phone = input.phone === undefined ? null : whatsappPhoneValues(input.phone);
+
+  let opened: string[] = [];
+
   const updated = await withPlatformScope("admin: edita usuário", async (tx) => {
-    const [row] = await tx
-      .update(user)
-      .set({
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
-        ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
-      })
-      .where(eq(user.id, target.id))
-      .returning({ id: user.id, name: user.name, email: user.email, emailVerified: user.emailVerified });
+    // Outro número passa pelo pedido de troca, e quem edita é o proprietário da plataforma, o
+    // responsável dela: ele o libera à mão na mesma transação (`manual`). As regras são as da
+    // liberação à mão, que não prova a posse: com outra conta do mesmo grupo (owners, a equipe de
+    // uma organização, a equipe da plataforma) já confirmada no número, 409 `PHONE_IN_USE`. O mesmo
+    // número, escrito de outro jeito, é gravado direto.
+    let samePhone = false;
+    if (phone) {
+      const [current] = await tx
+        .select({ phoneKey: user.phoneKey })
+        .from(user)
+        .where(eq(user.id, target.id));
+      samePhone = current?.phoneKey === phone.phoneKey;
+      if (!samePhone) opened = await changeUserPhoneByPlatform(tx, target.id, phone, actor.id);
+    }
+
+    const fields = {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(phone && samePhone ? phone : {}),
+      ...(emailChanged ? { email: input.email, emailVerified: false } : {}),
+    };
+    const columns = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      emailVerified: user.emailVerified,
+    };
+    const [row] =
+      Object.keys(fields).length > 0
+        ? await tx.update(user).set(fields).where(eq(user.id, target.id)).returning(columns)
+        : await tx.select(columns).from(user).where(eq(user.id, target.id));
 
     if (emailChanged) {
       await tx.delete(session).where(sessionsOf(target.id));
@@ -219,6 +260,7 @@ export async function updateUserByAdmin(
   });
 
   if (!updated) throw notFound("Usuário não encontrado.");
+  await sendOpenedAfterChange(opened, target.id);
 
   if (emailChanged) {
     await notifyEmailChanged(target, updated.email);
@@ -377,7 +419,9 @@ export async function updatePortalUserByAdmin(
       .update(portalUser)
       .set({
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.phone !== undefined ? phoneValues(input.phone) : {}),
+        ...(input.phone !== undefined
+          ? { ...phoneValues(input.phone), ...verifiedPhone("manual") }
+          : {}),
         ...(emailChanged ? { email: newEmail } : {}),
       })
       .where(eq(portalUser.id, person.id))

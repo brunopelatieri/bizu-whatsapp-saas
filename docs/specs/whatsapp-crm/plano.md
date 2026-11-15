@@ -51,8 +51,7 @@ Valem para as três SPECs. Cada SPEC só as cita.
 
 Existe na origem e fica fora deste programa: disparos em massa, automações, flows, IA,
 pipelines e negócios, API pública `/api/v1`, webhooks de saída, formulários de captação, área do
-contato, quadro de atribuição (kanban), "ver como", exportação de conversa, retenção automática
-de mensagens, checagem e captação de números pela instância QR, teto de envio frio, monitor de
+contato, quadro de atribuição (kanban), "ver como", exportação de conversa, checagem e captação de números pela instância QR, teto de envio frio, monitor de
 cobrança da Meta, criação e submissão de modelos de mensagem (só sincronizar e usar), mensagens
 interativas de saída, reações, apagar mensagem e distribuição automática (rodízio). Também fica
 fora: a plataforma iniciar conversa com os clientes dos owners e consultar `customer` de tenant

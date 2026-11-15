@@ -85,6 +85,11 @@ import {
   webhooksQuerySchema,
 } from "@/lib/schemas/admin";
 import { adminAuditQuerySchema } from "@/lib/schemas/security";
+import {
+  confirmPhoneVerificationManually,
+  listPhoneVerifications,
+} from "@/lib/phone/requests";
+import { phoneVerificationPageSchema } from "@/lib/schemas/phone";
 import { notFound } from "@/lib/tenant/errors";
 import { z } from "zod";
 // admin-crud B
@@ -195,6 +200,33 @@ adminRoutes.get(
   "/api/admin/audit",
   zValidator("query", adminAuditQuerySchema, validationError),
   async (c) => c.json(await listPlatformAudit(c.req.valid("query"))),
+);
+
+/**
+ * Fila de verificação de telefone da plataforma: quem se cadastrou sem convite (os owners) e a
+ * equipe da plataforma. Só o proprietário lê e libera à mão; a liberação vale no sistema
+ * inteiro mas não prova a posse do número: é recusada (409) se outra conta do grupo já o tem
+ * confirmado, e ninguém libera o próprio telefone (403).
+ */
+adminRoutes.get(
+  "/api/admin/phone-verifications",
+  ownerOnly,
+  zValidator("query", phoneVerificationPageSchema, validationError),
+  async (c) =>
+    c.json(await listPhoneVerifications({ kind: "platform" }, c.req.valid("query").page)),
+);
+
+adminRoutes.post(
+  "/api/admin/phone-verifications/:id/confirm",
+  ownerOnly,
+  blockWhileImpersonating,
+  validId,
+  async (c) => {
+    const { id } = c.req.valid("param");
+    await confirmPhoneVerificationManually({ kind: "platform" }, id, c.get("user").id);
+
+    return c.json({ ok: true });
+  },
 );
 
 adminRoutes.post(

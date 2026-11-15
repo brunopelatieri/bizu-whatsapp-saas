@@ -18,6 +18,7 @@ const message = (id: string, createdAt: string): MessageView => ({
   type: "text",
   text: id,
   template: null,
+  isFavorite: false,
   status: null,
   error: null,
   media: null,

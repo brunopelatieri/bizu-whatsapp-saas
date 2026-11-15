@@ -2,7 +2,7 @@
 
 - **Escopo:** Planos e preços, configurações da plataforma, assinatura e trial, estado de cobrança do tenant, limites e features, job `billing.trial`, seed. A cobrança em si (checkout, webhooks, provedores) está em `tech/24-billing-cobranca.md`.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-billing.md`, `spec-dados.md`, `spec-tenant-rbac.md` (limites), `spec-email-jobs.md`
-- **Paths do código:** `src/lib/billing/` (`constants.ts`, `trial.ts`, `state.ts`, `settings.ts`, `subscription.ts`, `limits.ts`, `organizations.ts`, `summary.ts`, `notify.ts`, `public-plans.server.ts`), `src/db/schema/billing.ts`, `src/jobs/billing.ts`, `src/db/seed.ts`, `src/lib/schemas/admin.ts`, `tests/db/{billing,admin,billing-manual}.test.ts`, `drizzle/0008_billing_planos.sql`, `drizzle/0009_rls_billing.sql`
+- **Paths do código:** `src/lib/billing/` (`constants.ts`, `trial.ts`, `state.ts`, `settings.ts`, `subscription.ts`, `limits.ts`, `organizations.ts`, `summary.ts`, `notify.ts`, `public-plans.server.ts`), `src/db/schema/billing.ts`, `src/jobs/billing.ts`, `src/db/seed.ts`, `src/lib/schemas/admin.ts`, `tests/db/{billing,admin,billing-manual,limit-lock,pool-saturation}.test.ts`, `src/db/nested-section.ts`, `drizzle/0008_billing_planos.sql`, `drizzle/0009_rls_billing.sql`
 
 ## Tabelas
 
@@ -72,10 +72,10 @@ O banner de `/app` (`BillingBanner`) só informa; quem barra é a API.
 - `members` conta membros **e convites pendentes e vigentes**: o convite já reserva o assento.
   Reconvidar o mesmo e-mail não ocupa um segundo (`ignoreInvitationEmail`); aceitar ignora o
   próprio convite (`ignoreInvitationId`).
-- Aplicado em `POST /api/team/invitations` e `POST /api/invitations/:id/accept`.
+- Aplicado em `POST /api/team/invitations` e `POST /api/invitations/:id/accept`, **sob trava** (`withinLimit`, abaixo).
 - `custom_roles` conta `organization_role` e é aplicado em `POST /api/roles`; sem limite no plano,
   vale o teto fixo de 20 do plugin. `customers` conta as linhas de `customer` do tenant e é
-  aplicado em `POST /api/customers`; `storage_mb` conta 0 até a fase 10.
+  aplicado em todo caminho que cria ficha (abaixo); `storage_mb` conta 0 até a fase 10.
 - Features: `GET /api/me` entrega a lista; `hasFeature` no servidor e `tenant_feature_override`
   ficam para quando a primeira feature for cobrada.
 - `organizations` é da **pessoa**, não do tenant (`organizations.ts`): conta as organizações não
@@ -86,7 +86,38 @@ O banner de `/app` (`BillingBanner`) só informa; quem barra é a API.
   fim. A primeira organização sempre passa. `POST /api/tenant` cria por
   `createOrganizationWithinLimit` (403 `PLAN_LIMIT_REACHED`): lock por pessoa
   (`pg_advisory_xact_lock`) e contagem na mesma transação, para duas criações simultâneas não
-  furarem o limite. O plugin não tem `organizationLimit`: é o único caminho de criação.
+  furarem o limite. A seção passa por `nestedSection` (segura uma conexão e o Better Auth pede outra; sem o teto,
+  10 criações simultâneas travavam o pool: RISK-015 em `tech/16-bugs-riscos.md`). O plugin não tem `organizationLimit`: é o único caminho de criação.
+
+### Garantia contra corrida: `customers` e `members` (Q1)
+
+`assertWithinLimit` só **confere**: duas requisições simultâneas leriam "cabe" ao mesmo tempo. `customers` e `members` passam por
+`withinLimit(tenantId, metric, options, run)` (`limits.ts`), que lê o limite do plano, abre a transação do tenant, toma
+`pg_advisory_xact_lock(hashtextextended('limit:<tenant>:<métrica>', 0))`, conta **na mesma transação** e só então executa `run(tx)`; o
+`COMMIT` solta a trava. Mesma regra, mesma mensagem, mesmo 403 `PLAN_LIMIT_REACHED`. Detalhes e decisões: SPEC `pre-producao`, "Q1: o que foi feito".
+
+- **Por organização e por métrica:** a trava de `customers` não segura `members`, nem uma organização segura outra. Plano sem limite na métrica não toma a trava.
+- O limite é lido antes da transação (ler o plano por outra conexão, segurando uma, esgotaria o pool de 10).
+- **Duas formas, por causa do pool de 10 conexões** (um só, usado também pelo Better Auth): `withinLimit` (`customers`) grava só pela própria
+  transação, então quem espera a trava segura uma conexão mas o dono dela termina. `withinLimitNested` (`members`) é para quem grava por **outra**
+  conexão com a trava tomada (o `createInvitation` e o `acceptInvitation`): sem limite na métrica, `run` roda direto, sem transação; com limite,
+  passa por `nestedSection` (`src/db/nested-section.ts`), um teto de 3 seções ao mesmo tempo no processo (`floor(POOL_MAX / 3)`: cada seção segura 1
+  conexão e pede até 2, no pior caso 9 de 10), com a fila **sem** conexão. Sem o teto, 10 pedidos simultâneos travavam o acesso ao banco do processo inteiro
+  (SPEC, "Pool travado"). Seção nova que segure uma conexão e peça outra entra por `nestedSection`; ela não aninha outra.
+- `withinLimitRoom(tenantId, metric, options, run(tx, room))` (bloco I): a mesma trava e a mesma ordem, mas, em vez de lançar 403 quando falta vaga, entrega a `run` as vagas que
+  restam (`0` com o plano cheio, `null` sem limite, que não toma a trava). Serve a quem cria **vários de uma vez**: a importação de clientes (`src/lib/tenant/customer-import.ts`), que
+  ocupa as vagas com as primeiras linhas e marca as demais `limit`. Grava só pela `tx`, como `withinLimit`.
+- `UsageOptions.tx` faz `used` contar pela transação de `withinLimit` (`customers` e `members`).
+- **Quem passa por `withinLimit`, `withinLimitRoom` ou `withinLimitNested`:** a importação de clientes (`withinLimitRoom`), `createCustomer` (equipe e "salvar contato como cliente"; a transação do cadastro é a da trava),
+  `confirmPortalSignup` (autocadastro do portal, inclusive a abertura do `claim` e ligar o lead; plano cheio devolve a mesma resposta neutra),
+  convite (`POST /api/team/invitations`) e aceite (`POST /api/invitations/:id/accept`), por `withinLimitNested`: nestes dois o `createInvitation` e o
+  `acceptInvitation` do Better Auth correm **dentro** da trava, por outra conexão, e só voltam depois de gravar.
+  **Fora, de propósito:** a confirmação do `claim` (apaga uma ficha e cria outra, o total não sobe; CL-12), reenvio, cancelamento e remoção
+  (não ocupam vaga), seed e testes. Ficha nova de cliente ou vaga de membro nova passa **sempre** por `withinLimit`; `assertWithinLimit` fica
+  para `custom_roles` e canais (que têm `lockScopeType`).
+- **Ordem das travas do projeto (sem ciclo):** 1. limite do plano (`withinLimit`, sempre a mais externa: abre a própria transação e ninguém
+  a pede dentro de uma que já segure outra); 2. o número (`lockPhoneKey`); 3. a conta ou a ficha (`for update`; na remoção, os membros
+  antes da ficha); 4. o pedido de verificação. O `claim` confirmado segura o número e a ficha e **não** pede a de limite.
 
 ## Job `billing.trial`
 
@@ -113,7 +144,7 @@ filtro, usados pelos testes. Destinatários: proprietários do tenant (`listTena
 ## Seed
 
 `npm run db:seed` (`src/db/seed.ts`): idempotente, recusa `NODE_ENV=production` sem
-`SEED_ALLOW_PRODUCTION=1`, exige `SEED_PASSWORD` (mín. 10). Cria planos `free` (1 organização),
+`SEED_ALLOW_PRODUCTION=1`, exige `SEED_PASSWORD` na política de senha (`tech/08-auth.md`). Cria planos `free` (1 organização),
 `basic` (2) e `pro` (5), com preços `manual` e `stripe` (`provider_price_ref` nulo), as três
 configurações (`trial_plan_id` = `pro`, 14 e 7 dias), `owner@bizu.local` (`platform_owner`),
 `suporte@bizu.local` (`platform_support`), o tenant `acme` (`acme.owner`, `acme.admin`,

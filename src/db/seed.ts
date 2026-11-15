@@ -2,7 +2,14 @@ import { eq } from "drizzle-orm";
 import { config } from "dotenv";
 import { pathToFileURL } from "node:url";
 import { logError } from "@/api/log";
+import {
+  evaluatePassword,
+  isPasswordValid,
+  normalizePassword,
+  PASSWORD_POLICY_MESSAGE,
+} from "@/lib/auth/password-policy";
 import { phoneValues } from "@/lib/phone/columns";
+import { verifiedPhone } from "@/lib/phone/verification";
 import { acceptCurrentVersions, pendingConsents } from "@/lib/lgpd/consent";
 
 /**
@@ -113,6 +120,12 @@ export const SEED_CUSTOMERS = {
 /** O valor de `.env.example`: público, serve só para desenvolvimento. */
 const EXAMPLE_PASSWORD = "Bizu-seed-2026!";
 
+/** O telefone do seed nasce confirmado: sem isso, ninguém do seed entra nem é vinculado. */
+const seedPhone = (phone: string) => ({ ...phoneValues(phone), ...verifiedPhone("manual") });
+// Na ficha de cliente, `manual` é o número que o cliente declarou e o owner liberou: não atrai
+// conversa. O do seed vale como informado pela equipe.
+const seedCustomerPhone = (phone: string) => ({ ...phoneValues(phone), ...verifiedPhone("team") });
+
 export function assertSeedAllowed(env: Record<string, string | undefined>) {
   if (env.NODE_ENV === "production" && env.SEED_ALLOW_PRODUCTION !== "1") {
     throw new Error(
@@ -120,10 +133,11 @@ export function assertSeedAllowed(env: Record<string, string | undefined>) {
     );
   }
 
-  const password = env.SEED_PASSWORD;
-  if (!password || password.length < 10) {
+  // Normalizada como no cadastro: é esta a forma gravada, e o login a confere igual.
+  const password = normalizePassword(env.SEED_PASSWORD ?? "");
+  if (!isPasswordValid(evaluatePassword(password))) {
     throw new Error(
-      "Defina SEED_PASSWORD (mínimo de 10 caracteres) em .env.local.",
+      `Defina SEED_PASSWORD em .env.local. ${PASSWORD_POLICY_MESSAGE}`,
     );
   }
 
@@ -242,7 +256,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
     const [created] = await db
       .insert(user)
-      .values({ name, email, role, emailVerified: true, ...phoneValues(phone) })
+      .values({ name, email, role, emailVerified: true, ...seedPhone(phone) })
       .returning({ id: user.id });
     if (!created) throw new Error(`usuário ${email} não foi criado`);
 
@@ -430,7 +444,7 @@ export async function runSeed(password: string): Promise<SeedSummary> {
 
   await db
     .insert(portalUser)
-    .values({ ...julia, ...phoneValues(julia.phone), emailVerified: true })
+    .values({ ...julia, ...seedPhone(julia.phone), emailVerified: true })
     .onConflictDoNothing({ target: portalUser.email });
 
   const [juliaUser] = await db
@@ -462,13 +476,13 @@ export async function runSeed(password: string): Promise<SeedSummary> {
   for (const tenantId of [acme.id, beta.id]) {
     await seedCustomer(tenantId, {
       ...julia,
-      ...phoneValues(julia.phone),
+      ...seedCustomerPhone(julia.phone),
       tenantId,
       portalUserId: juliaUser.id,
       status: "active",
     });
   }
-  await seedCustomer(acme.id, { ...lead, ...phoneValues(lead.phone), tenantId: acme.id });
+  await seedCustomer(acme.id, { ...lead, ...seedCustomerPhone(lead.phone), tenantId: acme.id });
 
   // Campos adicionais de exemplo do tenant acme (SPEC crm-cadastro, A3): um de lista, um de
   // data e um de lista múltipla. Idempotente pelo índice único `(tenant_id, entity, key)`.

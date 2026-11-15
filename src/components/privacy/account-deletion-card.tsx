@@ -6,10 +6,18 @@ import { type IdentityValues, IdentityDialog } from "@/components/privacy/identi
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiFetch } from "@/lib/api/client";
+import { accountRecordsWarning } from "@/lib/format/conversations";
 
 export type DeletionStatus = {
   account: string | null;
   tenants: Array<{ tenantId: string; scheduledFor: string; origin?: "self" | "platform" }>;
+  /** Portal: a conta tem senha (senão o pedido é confirmado por e-mail). Ausente na equipe. */
+  needsPassword?: boolean;
+  /**
+   * Equipe (D-11): fichas de cliente ligadas à pessoa, em todas as organizações, que a exclusão da
+   * conta apaga com as `conversationCount` conversas de WhatsApp do número dela.
+   */
+  customerRecords?: { customers: number; conversationCount: number };
 };
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
@@ -74,6 +82,9 @@ export function AccountDeletionCard({
   });
 
   const scheduled = query.data?.account ?? null;
+  // O servidor sabe se a conta tem senha; a prop é o que a tela já sabia (`/api/portal/me`).
+  const askPassword = query.data?.needsPassword ?? needsPassword;
+  const recordsWarning = accountRecordsWarning(query.data?.customerRecords);
 
   return (
     <Card>
@@ -99,6 +110,11 @@ export function AccountDeletionCard({
                 prazo. Faturas e registros de auditoria são mantidos sem identificar você. Quem é o
                 único proprietário de uma organização precisa transferi-la ou excluí-la antes.
               </p>
+              {recordsWarning ? (
+                <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-foreground">
+                  {recordsWarning}
+                </p>
+              ) : null}
               <Button variant="destructive" onClick={() => setOpen(true)}>
                 Excluir minha conta
               </Button>
@@ -110,13 +126,16 @@ export function AccountDeletionCard({
           open={open}
           title="Excluir sua conta?"
           description={
-            needsPassword
-              ? "Confirme com a sua senha. A exclusão acontece em 30 dias, e até lá você pode cancelar."
-              : "Enviaremos um e-mail para confirmar que foi você. A exclusão acontece 30 dias depois da confirmação."
+            <>
+              {askPassword
+                ? "Confirme com a sua senha. A exclusão acontece em 30 dias, e até lá você pode cancelar."
+                : "Enviaremos um e-mail para confirmar que foi você. A exclusão acontece 30 dias depois da confirmação."}
+              {recordsWarning ? <strong> {recordsWarning}</strong> : null}
+            </>
           }
           confirmLabel="Excluir conta"
           needsTotp={needsTotp}
-          needsPassword={needsPassword}
+          needsPassword={askPassword}
           pending={remove.isPending}
           onConfirm={(values) => remove.mutate(values)}
           onCancel={() => setOpen(false)}

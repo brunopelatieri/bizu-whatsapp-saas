@@ -5,8 +5,9 @@ import { getDb } from "@/db";
 import { consentLog } from "@/db/schema";
 import type { ConsentKind, ConsentSubjectType } from "@/db/schema/lgpd";
 import { hashIp } from "@/lib/audit";
-import { phoneErrorMessage } from "@/lib/phone/br";
-import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { canWhatsApp, phoneErrorMessage } from "@/lib/phone/br";
+import { InvalidPhoneError, phoneColumns } from "@/lib/phone/columns";
+import { WHATSAPP_PHONE_REQUIRED } from "@/lib/schemas/phone";
 import {
   LEGAL_VERSIONS,
   REQUIRED_CONSENTS,
@@ -166,7 +167,13 @@ export function signupPhoneValues(subjectType: ConsentSubjectType) {
   }
 
   try {
-    return phoneValues(context.phone);
+    const { kind, ...values } = phoneColumns(context.phone);
+    // Conta da equipe: só número que recebe WhatsApp (o Zod da rota já recusou; aqui é a
+    // última barreira, para quem chamar o Better Auth por outro caminho).
+    if (subjectType === "user" && !canWhatsApp(kind)) {
+      throw new APIError("BAD_REQUEST", { message: WHATSAPP_PHONE_REQUIRED });
+    }
+    return values;
   } catch (error) {
     if (error instanceof InvalidPhoneError) {
       throw new APIError("BAD_REQUEST", { message: phoneErrorMessage(error.reason) });

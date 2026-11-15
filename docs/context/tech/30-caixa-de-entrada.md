@@ -24,6 +24,11 @@
   `tests/db/inbox-realtime.test.ts` e `tests/db/fixtures/inbox-realtime-worker.ts` (C4),
   `tests/db/inbox-media-send.test.ts` (C5),
   `src/lib/channels/providers/*/inbox.db.test.ts`,
+  da X3: `src/components/inbox/emoji-button.tsx`, `emoji-panel.tsx`, `src/components/ui/popover.tsx`, `src/lib/emoji/` (`insert-at-cursor.ts`, `recents.ts`, `preferences.ts`, `storage.ts`), `scripts/sync-emojibase.mjs`, `public/emojibase/`,
+  da X1: `src/components/inbox/channel-filter.ts` (e o teste), `use-inbox-path.ts`, `related-conversations.tsx`, `listRelatedConversations` em `conversations.ts`,
+  `tests/db/inbox-related.test.ts`,
+  da X2: `src/lib/inbox/transfer.ts` (e o teste), `transfer-actions.ts`, `openConversation` em `contact-actions.ts`, `src/components/inbox/continue-on-channel.tsx`, `transfer-entry.ts` (e o teste),
+  `tests/db/inbox-transfer.test.ts`,
   da C7: `tests/db/inbox-lgpd.test.ts` e os ganchos em `src/lib/lgpd/deletion.ts`, `src/lib/lgpd/export.ts`,
   `src/lib/tenant/customers.ts` (`deleteCustomer`), `src/lib/channels/events.ts` (`purgeTenantChannelEvents`) e
   `src/api/roles.ts`
@@ -81,9 +86,14 @@ canais); `undefined` volta à ingestão real. Retorno `false` = aviso `ignored`.
 2. **Contato** (`contacts.ts`): `providerPhone` normaliza com `+` (a regra do Brasil só vale com DDI
    55; número que o normalizador recusa fica com os próprios dígitos). `upsertContact` acha ou cria pela
    `phone_key` em um comando (`xmax = 0` diz se nasceu). Só o recém-criado ganha vínculo automático
-   (`autoLinkContact`), cada um **só com correspondência única**: membro do tenant (não banido), depois
-   cliente do tenant; na plataforma, usuário, e nunca `customer` de tenant. `linkCandidates` é a mesma
-   consulta que o painel (C2) usa para os candidatos. `wa_name` atualiza a cada mensagem recebida (no
+   (`autoLinkContact`), **só com correspondência única e só com telefone confirmado**
+   (`tech/28`: a ficha com `team`, `whatsapp` ou `inbound`, nunca a liberada à mão; o membro
+   com a conta confirmada no sistema ou liberada naquela organização, `userPhoneConfirmed(scope)`):
+   cliente do tenant, depois membro do tenant (não banido); na
+   plataforma, usuário, e nunca `customer` de tenant. O cliente vem antes porque quem é da equipe e
+   também é cliente tem os dois cadastros com o mesmo número, e a conversa fica na ficha de cliente.
+   `linkCandidates` é a mesma consulta que o painel (C2) usa para os candidatos, ali sem o filtro de
+   confirmado: quem decide é a equipe. `wa_name` atualiza a cada mensagem recebida (no
    eco, não: o `PushName` é o do dono do número). LID que chega com telefone é gravado.
 3. **Conversa** (`INSERT ... ON CONFLICT DO UPDATE`, um comando, dentro de um savepoint): prévia e
    `last_message_at` só se a mensagem for a mais nova, `unread_count + 1`, `last_inbound_at =
@@ -146,10 +156,14 @@ Erros saem por `handleTenantError`.
 | `GET /api/inbox/conversations?tab&status&unread&channelId&tagIds&assignedTo&q&cursor&limit` | `inbox:read`; `tab=all` e `assignedTo` pedem `supervise` (403); `tagIds` pede `customer:read` | `listConversations` |
 | `GET /api/inbox/conversations/:id` | `inbox:read` | `getConversation`: `{ conversation, contact, link, window }` |
 | `GET /api/inbox/conversations/:id/messages?before&limit` | `inbox:read` | `listMessages`, da mais nova para a mais antiga |
+| `GET /api/inbox/conversations/:id/related` | `inbox:read` | `listRelatedConversations` (X1): `{ items }` com as **outras** conversas do mesmo contato (outros números), cada uma só `{ id, status, channel: { id, name, type }, lastMessageAt, createdAt }`, da mais recente à mais antiga (teto 50). A atual passa por `requireVisibleConversation` (fora do alcance: 404, igual a id inexistente) e cada outra por `visibleConversation(actor)`: a que a pessoa não vê não aparece nem é contada. Sem dono, prévia, contador, nome nem telefone. Contato sem outras conversas: `items` vazio |
+| `GET /api/inbox/conversations/:id/transfer-channels` | `inbox:reply` | `listTransferChannels` (X2): `{ items }` com os **outros** números do escopo, em ordem de nome, cada um `{ channel: { id, name, type }, eligible, reason }` (`reason`: `disconnected`, `assigned_to_other`, `window_closed` ou `null`). Fora o número da conversa, o de outro escopo e o desativado. A origem passa por `requireVisibleConversation` (404 igual a id inexistente). Não pede `channel:read` |
+| `POST /api/inbox/conversations/:id/transfer` `{ channelId, text, clientId }` | `inbox:reply`, 20/min (`inbox-transfer`) mais o limite de envio | `continueOnChannel` (X2): revalida a elegibilidade, acha ou cria a conversa do mesmo contato no outro número e envia o texto por ele (ver "Continuar por outro número"). `{ conversationId, message }`: 201, ou 200 com a mensagem `failed`. 400 `SAME_CHANNEL`; 404 origem ou número fora do alcance; 409 `CHANNEL_DISABLED`, `CHANNEL_NOT_CONNECTED`, `SESSION_WINDOW_CLOSED`, `ALREADY_ASSIGNED`. Auditoria `inbox.conversation_continued` (só ids) |
 | `POST /api/inbox/conversations/:id/messages` | `inbox:reply`, 60/min (anexo: 20/min) | JSON `text` (com `replyTo`) → `sendText`; JSON `template` → `sendTemplate`; `multipart/form-data` → `sendMedia`. 201 (`sent` ou `queued`), 200 com a mensagem `failed` |
 | `GET /api/inbox/conversations/:id/templates` | `inbox:reply` | `listConversationTemplates`: modelos aprovados do WABA do canal, já analisados |
 | `GET /api/inbox/media-out/:token` | **sem sessão**, token assinado | `openOutboundMedia` (só a Evolution chama; ver "Anexo de saída") |
 | `POST /api/inbox/messages/:id/retry` | `inbox:reply`, 60/min | `retryMessage` |
+| `PUT /api/inbox/messages/:id/favorite` | `inbox:reply`, 60/min | `setMessageFavorite` (`favorite.ts`): `{ favorite: boolean }`, idempotente; grava ou zera `is_favorite`, `favorited_at` e `favorited_by`; 404 fora da visibilidade; auditoria `inbox.message_favorited` e `inbox.message_unfavorited` (só ids); `notifyInbox` com `k = "status"` |
 | `GET /api/inbox/messages/:id/media` | `inbox:read` | `openMessageMedia` |
 | `POST /api/inbox/messages/:id/media/retry` | `inbox:read`, 20/min | `retryMessageMedia`: 202 |
 | `POST /api/inbox/conversations/:id/claim` | `inbox:reply` | `claimConversation` |
@@ -313,11 +327,37 @@ por dentro). `mode="platform"` é a C6: ver "Atendimento da plataforma (C6)".
 - **Lista** (`conversation-list.tsx`): abas Fila, Minhas e Todas (a última só com `supervise`), situação, não
   lidas, número (com mais de um), etiqueta (com `customer:read`), atendente (`supervise` + `assign`, só em "Todas"),
   busca com espera de 300 ms e rolagem infinita por cursor (`IntersectionObserver` e botão "Carregar mais").
+- **Filtro de número na URL (X1, `channel-filter.ts`, `use-inbox-path.ts`):** `?canal=<id do canal>`, nos dois escopos. A lista lê o parâmetro com
+  `useSearchParams`; só vale o id de um número da lista do escopo (`resolveChannelFilter`). Formato inválido, canal que não existe ou de outro
+  escopo (e a lista de números que falhou) caem em "todos", sem erro, e o parâmetro sai da URL (`replace`). Com o parâmetro e os números ainda
+  sendo lidos, a lista espera (`useConversations(filters, enabled)`). Trocar o número **empilha** o histórico (voltar desfaz a troca) e a URL
+  guarda **só** o id do canal (busca, situação, etiquetas e atendente seguem em estado local). Abrir conversa, voltar à lista e iniciar conversa
+  levam o filtro adiante por `useInboxPath()`.
+- **"Também neste contato" (X1, `related-conversations.tsx`):** seção do painel do contato, nos dois escopos, com as outras conversas do mesmo
+  contato (selo do número, situação e data; clicar abre a conversa, mantendo o filtro). Lê `GET .../conversations/:id/related`
+  (`useRelatedConversations`, chave sob `conversations` para qualquer releitura da lista reler também, ciclo de 60 s com o SSE). Carregando,
+  erro e lista vazia **não desenham nada** (a seção some). O slot `footer` recebe o botão "Continuar por outro número" (X2).
+- **"Continuar por outro número" (X2, `continue-on-channel.tsx`, `transfer-entry.ts`):** nos dois escopos, com duas entradas: a faixa "Janela de 24 horas encerrada" do composer (ao lado de
+  "Enviar modelo") e o `footer` de "Também neste contato". Os números vêm de `GET .../transfer-channels` (`useTransferChannels`, chave sob `conversations`); a tela **só mostra** o que o servidor
+  devolve. O botão aparece com número elegível, aparece **desabilitado com o motivo** quando só há número oficial com a janela fechada (aponta o modelo) e some nos demais casos, sem
+  `inbox:reply`, na sessão personificada e em `read_only`. O diálogo lista os números (o que não serve, desabilitado com o motivo), mostra o **nome do número** de saída e a frase "O contato vai
+  receber de outro número, e a conversa continua por lá", pede só o texto e, depois do envio (`useContinueOnChannel`, `clientId` reaproveitado ao tentar de novo o mesmo conteúdo), abre a conversa
+  de destino (`useInboxPath()` com `moveFilterTo`: o filtro `?canal=` ligado passa ao número de destino). Sem aviso de número não oficial (D-5).
 - **Conversa:** `message-thread` mostra da mais antiga para a mais nova, com separador por dia; ao rolar perto
   do topo busca a página anterior e restaura a posição; só rola ao fim se já estava no fim. `message-bubble` tem
   um renderizador por tipo; texto sempre como texto, links só `http(s)` com `rel="noopener noreferrer"`
-  (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar".
+  (`splitLinks`); mídia `pending` e `failed` com "Tentar de novo"; falha de envio com o motivo e "Reenviar". **Estrela (R3a):** selo de estrela
+  cheia na bolha da favorita (`MessageView.isFavorite`, para quem lê) e botão de estrela ao lado do "Responder" (só com `inbox:reply`; `PUT .../favorite` pela
+  API do escopo e releitura). Thread vazia com `last_message_at` mostra o aviso da conversa esvaziada (`emptiedByRetention`).
 - **Composer (C5):** além do texto, **anexo** (clipe e colar imagem; prévia, nome e tamanho, legenda no mesmo campo, sem legenda em áudio, 16 MB conferidos antes de subir), **citação** ("Responder" na bolha põe o chip "Respondendo ao contato / a você" acima do campo, com X; some ao enviar com sucesso e ao trocar de conversa) e **modelo** (`template-dialog.tsx`: aprovados do WABA, campos das variáveis, prévia pela mesma função do servidor, erro da API dentro do diálogo; botão no composer só em canal com `templates` e, com a janela fechada, o "Enviar modelo" da faixa). Anexo que falha volta ao composer com a legenda e reaproveita o `clientId`. A bolha "enviando" mostra a imagem local, o nome do arquivo ou o modelo. **Reenviar** vale para texto, anexo e modelo.
+- **Seletor de emoji (X3, `emoji-button.tsx`, `emoji-panel.tsx`):** botão de carinha no composer, ao lado do clipe e do modelo, nos dois escopos (não fala com a API). Abre um `Popover`
+  que **fica aberto para várias inserções**; fecha com Escape, clicando fora ou no botão, e o foco volta ao campo (`finalFocus`). O botão segue a regra do campo
+  (`blocked || send.isPending || audioAttached`: sessão personificada, sem `inbox:reply`, `read_only`, número desconectado, janela de 24 h fechada, envio em andamento, áudio anexado) e o
+  painel aberto fecha quando o campo bloqueia. O painel (`frimousse`: busca, lista por categoria em português, tom de pele) é um `React.lazy` baixado na primeira abertura; os dados vêm de `/emojibase`
+  (mesma origem; `tech/26-seguranca.md`). **Recentes:** os 16 últimos, por usuário (`bizu:emoji:recents:<id>`); **tom de pele** por usuário (`bizu:emoji:skin-tone:<id>`); valor corrompido ou
+  `localStorage` indisponível nunca quebra a tela (`src/lib/emoji/storage.ts`). A inserção (`insertAtCursor`) respeita o cursor e a seleção do `<textarea>` (que guarda a seleção ao perder o foco),
+  nunca parte um emoji (par substituto) nem passa de `maxLength` (então avisa por toast), e passa pelo mesmo `change` do texto digitado: contador, rascunho e envio veem o de sempre. Campo que nunca teve foco
+  insere no fim. A busca recebe o foco ao abrir (menos em aparelho de toque, `pointer: coarse`, para não abrir o teclado virtual); Setas e Enter escolhem. O botão leva `key={user?.id}`: recentes e tom de pele seguem a pessoa.
 - **Envio:** o texto vai como bolha "enviando" local e some quando a releitura traz a
   mensagem do servidor; erro devolve o texto ao campo, e o `clientId` é reaproveitado no reenvio depois de
   erro de rede. Um envio por vez. O campo é bloqueado, com a explicação, para: sessão personificada, sem
@@ -408,12 +448,14 @@ leitura do envio JSON ou `multipart`, resposta da mídia).
 |---|---|---|
 | `GET /api/admin/inbox/conversations?status&unread&channelId&q&cursor&limit` | plataforma | `listConversations` com `tab = all` fixo (a rota não tem `tab`, `tagIds` nem `assignedTo`; `platformConversationsQuerySchema`) |
 | `GET .../conversations/:id`, `.../messages`, `.../templates` | plataforma (`templates`: quem responde) | `getConversation`, `listMessages`, `listConversationTemplates` |
+| `GET .../conversations/:id/related` | plataforma | `listRelatedConversations` (X1), no escopo da plataforma: só conversas de `tenant_id` nulo; a de tenant responde 404 |
+| `GET .../conversations/:id/transfer-channels`, `POST .../conversations/:id/transfer` | quem responde | `listTransferChannels` e `continueOnChannel` (X2), no escopo da plataforma: só números de `tenant_id` nulo (o de organização responde 404), conversa sem dono; `admin-inbox-transfer` 20/min mais o limite de envio |
 | `GET .../unread` | plataforma | `unreadCounts` (`{ queue, mine }`: a plataforma só usa `queue`, o total com não lidas) |
 | `GET .../events` | plataforma | `streamInboxEvents` com o ator da plataforma: só avisos `s = null`; batimento, 15 min, 3 por pessoa, 503 sem `LISTEN` |
 | `GET .../messages/:id/media` | plataforma | `openMessageMedia` (a mídia da mensagem aponta para `/api/admin/inbox/messages/:id/media`: `inboxBase(scope)`) |
-| `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
+| `POST .../conversations/:id/messages` (JSON ou `multipart`), `POST .../messages/:id/retry`, `.../media/retry`, `PUT .../messages/:id/favorite`, `POST .../conversations/:id/status`, `.../read`, `POST .../conversations`, `PATCH .../contacts/:id`, `POST .../contacts/:id/link` | `platform_owner` e `platform_support` (`PLATFORM_REPLY_ROLES`) | `sendText`/`sendMedia`/`sendTemplate` (`queueMessage` + `dispatch`), `retryMessage`, `setMessageFavorite`, `setConversationStatus`, `markConversationRead`, `startPlatformConversation`, `updateContact`, `linkPlatformContact` |
 
-Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-queue` 60/min, `-media-retry` 20/min.
+Limites por pessoa: `admin-inbox-send` 60/min, `-upload` 20/min, `-start` 20/min, `-transfer` 20/min, `-queue` 60/min, `-media-retry` 20/min.
 `claim`, `assign`, `assignees`, `candidates` e `customer` **não existem** (404, teste de matriz).
 
 - **Ator** (`platform.ts`): `platformActor(user, ip)` monta o `InboxActor` com `scope = platform`, `permissions = []` e
@@ -482,6 +524,8 @@ cascata com o arquivo órfão.
 |---|---|---|
 | Excluir o cliente (`DELETE /api/customers/:id`, `deleteCustomer`) | Os contatos vinculados a ele saem com conversas, mensagens, `file` e objeto; o RLS do tenant limita tudo ao tenant da sessão (cliente de outro tenant é 404 e nada muda). Aviso `conversation` às telas abertas | `purgeCustomerContacts` |
 | Anonimizar a pessoa do portal (`lgpd.delete`) | Os cadastros dela (pela conta ou pelo e-mail, em todas as organizações) viram "Cliente removido" e os contatos vinculados a eles saem como acima | `purgeCustomerContacts` |
+| Autocadastro do portal com o número de uma ficha, confirmado pelo link na sessão de quem se cadastrou (`claim`, D-1) | A ficha que tinha o número é apagada por `deleteCustomerIn`, com **todos** os contatos vinculados, conversas, mensagens, `file` e objeto; a ficha nova nasce sem histórico. A liberação à mão nunca faz isso, e a ficha com conta no portal, ligada à equipe ou bloqueada nunca é apagada assim | `applyCustomerClaim` (`src/lib/phone/claim.ts`) |
+| Remover o membro (`removeMember`) ou anonimizar `user`, quando há **ficha de cliente ligada à pessoa** (`customer.user_id`, D-11) | A ficha ligada (naquela organização, ou em todas na anonimização) é apagada por `deleteCustomer`, e **só os contatos da ficha cujo `phone_key` é o do telefone confirmado da pessoa** saem com conversas, mensagens, `file` e objeto; os demais contatos da ficha só perdem o vínculo e a conversa fica. O que decide é a ligação da **ficha** (automática, pelo telefone confirmado, ou feita à mão pela equipe, `PUT /api/customers/:id/team-link`; as duas valem igual), nunca `chat_contact.user_id` | `purgeTeamCustomerContacts`, `countCustomerConversations` |
 | Anonimizar `user` (`lgpd.delete`, inclusive a exclusão pela plataforma) | As conversas que atendia já voltaram à fila (`releaseAssignments`); as mensagens que enviou ficam **sem autor** (`sender_user_id` nulo; o anexo, sem `file.created_by`) e as que encerrou sem `closed_by`; os contatos vinculados a ele, no tenant **e na plataforma**, só perdem o vínculo (SPEC): nenhuma conversa é apagada por esse vínculo, porque ele nasce do telefone que a pessoa declarou no cadastro, sem verificação (ver "Por que o vínculo com `user` não decide nada") | `detachUserFromInbox` |
 | Excluir a organização (`lgpd.delete`, `anonymizeTenant`) | Todos os contatos do tenant (com ou sem vínculo), conversas e mensagens; os `channel_event` do tenant (o `raw` tem telefone e texto) e a mídia `inbound/` que eles citam (o aviso pendente não deixa objeto órfão); todo `file` do tenant (já existia). Os canais ficam (sem avisos), com as credenciais cifradas e a instância no provedor: ver "Limites conhecidos" | `purgeTenantInbox`, `purgeTenantChannelEvents` |
 
@@ -497,18 +541,80 @@ cascata com o arquivo órfão.
   Quem se cadastra com o número de outra pessoa é vinculado sozinho à conversa dela com a plataforma (ou, se for membro, à
   conversa do tenant). Por isso a exportação da equipe não traz conversas e a anonimização de `user` só desfaz o vínculo:
   usar o vínculo entregaria a conversa de terceiros ao atacante, ou a apagaria a pedido dele. Para o **cliente**, a SPEC
-  exige exportar e apagar pelo vínculo, e o mesmo risco existe em escala menor: a pessoa do portal pode trocar o próprio
-  telefone (`/portal/conta` grava também `customer.phone`) para o de alguém que ainda não escreveu ao tenant; a primeira
-  mensagem dessa pessoa vira contato vinculado ao cadastro do atacante (a equipe vê o nome dele na conversa). Limite
-  conhecido; a correção é verificar o telefone ou registrar a origem do vínculo (`auto` × confirmado pela equipe) e só
-  exportar o confirmado (decisão do proprietário).
+  exige exportar e apagar pelo vínculo. O risco equivalente (a pessoa do portal trocar o próprio telefone para o de um
+  terceiro e receber a conversa dele) foi **fechado na pré-produção (T1)**: o vínculo automático só usa telefone
+  confirmado, e o número que a pessoa troca em `/portal/conta`, ou declara no cadastro, fica pendente até ser confirmado
+  (`tech/28`, "Telefone verificado e único"). A regra de não exportar nem apagar pelo vínculo com `user` continua.
 - **Retenção:** `channel_event` tratado sai depois de `CHANNEL_EVENT_RETENTION_DAYS` (padrão 30, de 1 a 365) no
-  `maintenance.prune`. Conversas e mensagens não têm prazo automático (o PRD deixa a retenção automática fora do
-  escopo): ficam enquanto o owner as mantiver, e saem com o cliente, a pessoa ou a organização. **Decisão pendente do
-  proprietário** se quiser um prazo (`lgpd.md`).
+  `maintenance.prune`. **Mensagens** (bloco R da pré-produção, `docs/specs/pre-producao/spec.md`) saem pela limpeza da R2
+  quando `MESSAGE_RETENTION_ENABLED=true`; **contatos e conversas** continuam sem prazo automático (saem com o cliente, a
+  pessoa ou a organização, `lgpd.md`). R1 (schema, variáveis e precedência) e R2 (limpeza, prévia, job e rotas) feitas:
+  - `message.is_favorite`, `favorited_at`, `favorited_by` (a favorita é da conversa, não de quem marcou; a anonimização da conta
+    zera só o autor), `retention_policy` e `message_retention_state` (só o proprietário da plataforma; `tech/07`).
+  - `src/lib/inbox/retention-policy.ts` (puro): linha da política, depois padrão do `.env` do tipo de canal, depois sem
+    limite; `0` é sem limite e `NULL` herda; retenção desligada, valor torto ou tipo sem variável **nunca apaga**; o piso de
+    idade (`MESSAGE_RETENTION_MIN_AGE_HOURS`, nunca abaixo de 24 h) vale nas três fases. `planRetention` devolve `run` (o que
+    uma limpeza pode aplicar, tudo nulo com a retenção desligada) e `retentionCutoffs` os instantes do piso e da idade.
+  - A conversa esvaziada **não ganha coluna**: o aviso "Mensagens antigas removidas pela política de retenção" nasce de a conversa
+    ter `last_message_at` e nenhuma mensagem. Por isso a limpeza (R2) **não pode** zerar `last_message_at`, `last_inbound_at`
+    (âncora da janela de 24 h) nem `last_message_direction`; só `last_message_preview`, que guarda o texto da última mensagem.
+  - O contrato inteiro para a R2 e a R3 está na SPEC, em "R1: o que foi feito"; o da R3b (rotas), em "R2: o que foi feito".
+  - **Limpeza (R2, `src/lib/inbox/retention.ts`)**: `runRetention({ tenantId | null, channelType }, { dryRun?, now?, config? })`.
+    Escopo = organização (ou plataforma) × tipo de canal (`message` → `conversation` → `channel.type`); os tetos valem para o
+    escopo inteiro, ranque `created_at DESC, id DESC`. Fases, nesta ordem, cada uma com `LIMIT batchLimit` (e `truncated`
+    quando sobra): **idade** (não favorita, `created_at < ageCutoff`, as mais velhas primeiro); **contagem** (não favorita,
+    ranque entre as não favoritas que a idade deixou `> maxMessages`, `created_at < floorAt`); **favoritas** (ranque entre as
+    favoritas `> maxFavorites`, `created_at < floorAt`: perdem a estrela e os carimbos, e só somem no ciclo seguinte). Quem
+    apaga lê só `plan.run`; `!plan.canPurge` não toca nada (nem o estado). A prévia e a execução escolhem as vítimas pelo
+    **mesmo código** (`selectVictims`); a execução apaga exatamente aquelas, e cada `DELETE`/`UPDATE` confere de novo o escopo,
+    o tipo, a estrela, o corte e, na contagem e nas favoritas, o ranque recalculado na sentença (`overCap`): uma estrela
+    marcada no meio do caminho, ou uma exclusão concorrente que traga a mensagem para dentro do teto, a salva. Roda em `withScope` (RLS do escopo)
+    **e** com `tenant_id` explícito (ou `IS NULL`) e o tipo de canal em toda sentença. Trava as conversas afetadas
+    (`FOR UPDATE`, por id) antes de apagar, a mesma ordem da ingestão e do envio. A mídia das apagadas (`file` dona ou apontada
+    por `file_id`, no escopo, que nenhuma mensagem que sobrou aponte) sai na transação e o objeto depois do commit, como
+    `purgeContacts`. A conversa esvaziada fica. `last_message_preview` sai sempre que a mensagem mais recente da conversa estava entre as
+    apagadas (esvaziada ou não; nunca recalculada de uma mais antiga); a conversa em que só saíram as antigas mantém a prévia. `notifyInbox` com `k: "message"` e só ids,
+    por conversa afetada. Depois do commit grava `message_retention_state` (upsert por escopo, `withPlatformData`).
+  - **Prévia** (`dryRun: true`): `plan.effective` (funciona com a retenção desligada), não altera nada nem grava o estado;
+    `messagesTotal`/`favoritesTotal` são o estado atual. O que ela conta bate com o que a execução apaga no mesmo estado (teste).
+  - **Job `inbox.retention`** (cron diário 04:45 UTC, fila `exclusive`, `singletonKey = "inbox.retention"`): desligada, não faz
+    nada; sem retry e com expiração de 6 h (nunca duas passadas juntas); percorre `listRetentionTargets()` (pares distintos `tenant_id` × tipo de canal das conversas, a plataforma com `null`);
+    escopo que falha vai a `logError` (sem texto de mensagem) e não impede os demais.
+  - **Rotas `/api/admin/retention/*`** (`src/api/admin-retention.ts`, `tech/22-admin.md`): política efetiva por organização e
+    tipo, gravar a linha (só o proprietário), prévia e última execução.
+  - **R3b (feita):** a tela no `/admin` (`TenantRetentionCard` na organização e `PlatformRetentionCard` em `/admin/configuracoes`, `src/components/admin/retention-*.tsx`, textos em `src/lib/inbox/retention-format.ts`), só sobre estas rotas e sem apagar nada; ver `tech/22-admin.md` e, na SPEC `pre-producao`, "R3b: o que foi feito" (decisões R3b-1 a R3b-7 e o roteiro manual com a retenção ligada em banco de teste).
+  - **R3a (feita):** a estrela (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, `favorite.ts`, selo e botão na bolha) e o aviso da conversa
+    esvaziada na thread (SPEC, "R3a: o que foi feito"). O teto de favoritas **não** recusa a marcação: quem rebaixa é a limpeza.
+
+## Continuar por outro número (X2)
+
+`conversation.channel_id` é imutável: trocar de número é **outra conversa**, com o mesmo `chat_contact`. `continueOnChannel` (`transfer-actions.ts`) faz isso em uma transação: lê a origem por
+`requireVisibleConversation`, calcula a elegibilidade (`eligibleTransferChannels`, `transfer.ts`, puro) sobre os números do escopo (`scopeWhere`) e as outras conversas do contato (só o número, se
+o ator a alcança e `last_inbound_at`), recusa o que não serve, acha ou cria a conversa de destino por `openConversation` (`contact-actions.ts`, o mesmo achar-ou-criar de "iniciar conversa" nos
+dois escopos) e grava a mensagem por `queueMessage`, que confere de novo, com a conversa travada, a visibilidade, o número conectado e a janela de 24 h. O provedor é chamado depois, por
+`dispatch`. A rota nunca confia na lista que a tela mostrou.
+
+- Elegível: número do mesmo escopo, diferente do atual, `connected`; com `sessionWindow24h`, só com a janela aberta **na conversa de destino** (sem conversa lá, fechada: só um modelo começa).
+- A conversa de destino fora do alcance do ator (de outro atendente) vira `assigned_to_other` na lista, **antes** da janela (nada dela é revelado além de existir), e 409 `ALREADY_ASSIGNED` no envio.
+- A conversa de origem não é tocada. A de destino segue as regras do envio: a nova nasce com quem a abriu como dono (tenant), a da fila é assumida, a encerrada reabre, a de outro (para quem
+  supervisiona) não troca de dono.
+- Idempotente: conversa única por contato e número, e `clientId` por conversa. O pedido repetido é reconhecido antes das recusas de estado (número que caiu ou janela que fechou depois do envio
+  não transformam a repetição em 409). Auditoria `inbox.conversation_continued` (alvo o destino; `fromConversationId`, `channelId`, `created`).
+- Limite conhecido: recusa do provedor deixa a conversa de destino criada, com a mensagem `failed`.
 
 ## Testes
 
+- `src/lib/emoji/*.test.ts` (X3): `insertAtCursor` (início, meio, fim, sobre seleção, emoji composto, par substituto, teto), recentes (sem repetição, teto 16, por usuário, corrompido, armazenamento indisponível), tom de pele (inválido, por usuário) e o script de cópia (`sync-emojibase.test.ts`, com pastas temporárias).
+- `tests/db/inbox-transfer.test.ts` (X2), com o provedor simulado, nos dois escopos: caminho feliz (conversa do mesmo contato no outro número, dono, auditoria só com ids, origem intocada),
+  `clientId` repetido e dois pedidos simultâneos (uma conversa, uma mensagem, um envio), destino que já existe (fila assumida, encerrada reaberta), recusa do provedor (200 `failed`), corpo
+  inválido, outra organização e id inexistente (404 igual), número de outra organização ou da plataforma (404), desconectado e desativado (409), o próprio número (400), sem `inbox:reply` (403), sem
+  sessão (401), origem de outro atendente (404 igual a inexistente), destino de outro atendente (409 `ALREADY_ASSIGNED` sem conteúdo; quem supervisiona envia e o dono não muda), janela de 24 h no
+  destino (fechada e aberta), a lista de números (motivos, campos, sem vazar dono nem janela) e os escopos que não se cruzam. `src/lib/inbox/transfer.test.ts` e
+  `src/components/inbox/transfer-entry.test.ts` cobrem a regra pura e o estado do botão. As rotas entram em `rbac.test.ts` e o `POST` em `impersonation.test.ts`.
+- `tests/db/inbox-related.test.ts` (X1): `GET .../related` nos dois escopos: o que vem (outras do mesmo contato, ordem, só os cinco campos),
+  contato sem outras, conversa de outro membro fora do alcance (não aparece, não conta, 404 igual a inexistente), outra organização e
+  inexistente 404, sem sessão 401, sem `inbox:read` 403, plataforma × tenant nos dois sentidos. `src/components/inbox/channel-filter.test.ts`:
+  parâmetro da URL (formato, canal fora da lista, lista ainda não lida) e o caminho que leva o filtro. A rota entra em `rbac.test.ts`.
 - `tests/db/rls.test.ts`: as cinco tabelas (inclusive `file`) nos três modos de `scopedPolicy()`;
   tenant não lê arquivo da plataforma; `channel_id` imutável; `restrict` do canal; cascade da
   organização.
@@ -576,8 +682,11 @@ Reunidos aqui; o detalhe de cada um está na seção da fase.
 | C7 | Excluir a organização não remove os **canais** (credenciais cifradas e a instância Evolution ou o número na Meta continuam; os avisos novos são `ignored` e saem pela retenção). Desconectar no provedor é ação do owner antes de excluir |
 | C7 | Depois de excluído o cliente, o `channel_event` que trouxe as mensagens dele ainda guarda o `raw` (telefone e texto) até o fim da retenção (padrão 30 dias). O `/admin` só reprocessa aviso `failed` ou `ignored`, então o que já foi gravado não volta; um aviso falho do mesmo número reprocessado depois recria o contato, como uma mensagem nova |
 | C7 | Exportação limitada às 20.000 mensagens mais recentes; o zip é montado em memória |
-| C7 | O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
+| C7 | **Fechado na pré-produção (T1):** o vínculo automático só usa telefone confirmado. Texto original: O vínculo com `customer` (e o com `user`) nasce do telefone, que não é verificado: a pessoa do portal que troca o próprio telefone para o de alguém que ainda não escreveu ao tenant recebe na exportação (e apaga na exclusão da conta) a conversa dessa pessoa. A conversa de usuário excluído fica na plataforma, sem vínculo |
 | C7 | Backup anterior à exclusão ainda contém as conversas: restaurar exige reaplicar as exclusões (`tech/14-deploy.md`) |
+| R2 | Reentrega pelo provedor de um aviso **mais velho que o piso** depois da limpeza recria a mensagem (a ingestão não a acha para deduplicar) e soma 1 em `unread_count`; as âncoras da conversa não recuam (`GREATEST`) e o próximo ciclo a leva de novo. O piso (72 h por padrão, nunca abaixo de 24 h) cobre as reentregas reais |
+| R2 | Apagar mensagem citada dispara o `SET NULL` de `reply_to_message_id` em respostas de conversas que a limpeza não travou; um aviso de status concorrente nessas linhas pode dar deadlock. O Postgres aborta uma das transações: se for a da limpeza, o escopo volta inteiro (nada apagado pela metade), vai ao log e o ciclo seguinte refaz |
+| R2 | A conversa encerrada antiga perde as mensagens e continua na lista (como na origem); conversa e contato não têm prazo |
 
 ## Desvios da SPEC (C7)
 

@@ -10,13 +10,15 @@ export function getUserDisplayName(user: AuthUser | null): string {
 
 export function getUserInitials(user: AuthUser | null): string {
   const name = user?.name.trim();
-  if (name) {
-    const parts = name.split(/\s+/);
-    if (parts.length >= 2) {
-      return `${parts[0]?.[0]}${parts.at(-1)?.[0]}`.toUpperCase();
-    }
-    return name.slice(0, 2).toUpperCase();
-  }
+  if (name) return nameInitials(name);
 
   return user?.email.slice(0, 2).toUpperCase() ?? "??";
+}
+
+/** As iniciais de um nome qualquer (membro, quem atende): reserva da foto de perfil. */
+export function nameInitials(name: string | null | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length >= 2) return `${parts[0]?.[0]}${parts.at(-1)?.[0]}`.toUpperCase();
+  return (parts[0] ?? "?").slice(0, 2).toUpperCase();
 }

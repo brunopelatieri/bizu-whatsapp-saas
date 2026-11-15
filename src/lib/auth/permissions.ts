@@ -54,6 +54,12 @@ export const statements = {
    * devolve a de outro; `supervise` vê todas. `supervise` sem `read` não tem efeito.
    */
   inbox: ["read", "reply", "assign", "supervise"],
+  /**
+   * Liberar à mão o telefone de um membro ou de um cliente quando o link de verificação não
+   * pôde ser enviado (`docs/specs/pre-producao/spec.md`, bloco T). Não prova a posse do
+   * número, por isso é só do owner: reservada, nunca entra em papel personalizado.
+   */
+  phone: ["confirm"],
 } as const;
 
 export type Resource = keyof typeof statements;
@@ -123,6 +129,7 @@ export const reservedPermissions: readonly Permission[] = [
   "role:delete",
   "billing:manage",
   "support:grant",
+  "phone:confirm",
 ];
 
 export const assignablePermissions = allPermissions.filter(

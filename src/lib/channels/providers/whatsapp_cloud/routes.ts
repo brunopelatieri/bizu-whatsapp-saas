@@ -13,8 +13,13 @@ import {
   listChannelTemplates,
   syncChannelTemplates,
 } from "@/lib/channels/providers/whatsapp_cloud/templates";
+import { setVerificationTemplate } from "@/lib/channels/providers/whatsapp_cloud/verification";
 import { type ChannelRouteKit, isProviderEnabled } from "@/lib/channels/registry";
-import { createCloudChannelSchema, listTemplatesQuerySchema } from "@/lib/schemas/channels";
+import {
+  createCloudChannelSchema,
+  listTemplatesQuerySchema,
+  verificationTemplateSchema,
+} from "@/lib/schemas/channels";
 
 /**
  * Rotas do WhatsApp Cloud, montadas por `buildChannelRoutes` (`src/api/channels.ts`) para o
@@ -81,6 +86,28 @@ export function cloudRoutes(kit: ChannelRouteKit) {
     kit.limit("channel-cloud-templates-sync", 5),
     validId,
     async (c) => c.json(await syncChannelTemplates(kit.scopeOf(c), id(c))),
+  );
+
+  /**
+   * O modelo que leva o link de verificação de telefone (SPEC `pre-producao`, T2b). Só modelo
+   * aprovado do WABA do canal, com o botão de URL apontando para o `APP_URL` deste servidor.
+   */
+  routes.put(
+    `${base}/:id/verification-template`,
+    canManage,
+    active,
+    writeLimit,
+    validId,
+    zValidator("json", verificationTemplateSchema, validationError),
+    async (c) =>
+      c.json(
+        await setVerificationTemplate(
+          kit.scopeOf(c),
+          id(c),
+          c.req.valid("json").template,
+          kit.actorOf(c),
+        ),
+      ),
   );
 
   return routes;

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type AuthEnv,
   createRequireAuth,
+  type PhoneGate,
   requireAuth,
   requirePlatform,
   type ResolvedSession,
@@ -20,6 +21,9 @@ const user: AuthUser = {
   activeTenant: null,
   impersonatedBy: null,
 };
+
+/** Sem banco aqui: o portão de telefone é injetado (o de verdade está em `tests/db/phone-gate.test.ts`). */
+const open: PhoneGate = async () => true;
 
 const SESSION_COOKIE = "bizu.session_token=token.assinatura";
 
@@ -45,7 +49,7 @@ function get(app: Hono<AuthEnv>, cookie?: string) {
 describe("requireAuth", () => {
   it("recusa requisição sem cookie de sessão, sem consultar o Auth", async () => {
     const resolve = vi.fn<ResolveSession>();
-    const response = await get(buildApp(createRequireAuth(resolve)));
+    const response = await get(buildApp(createRequireAuth(resolve, undefined, open)));
 
     expect(response.status).toBe(401);
     expect(resolve).not.toHaveBeenCalled();
@@ -53,7 +57,7 @@ describe("requireAuth", () => {
 
   it("ignora Authorization: Bearer e cookies de outro prefixo", async () => {
     const resolve = vi.fn<ResolveSession>();
-    const app = buildApp(createRequireAuth(resolve));
+    const app = buildApp(createRequireAuth(resolve, undefined, open));
 
     const bearer = await app.request("/private", {
       headers: { Authorization: "Bearer abc" },
@@ -66,7 +70,7 @@ describe("requireAuth", () => {
   });
 
   it("recusa sessão inválida", async () => {
-    const guard = createRequireAuth(async () => null);
+    const guard = createRequireAuth(async () => null, undefined, open);
     const response = await get(buildApp(guard), SESSION_COOKIE);
 
     expect(response.status).toBe(401);
@@ -74,9 +78,13 @@ describe("requireAuth", () => {
 
   it("falha fechada quando o Auth está indisponível", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const guard = createRequireAuth(async () => {
-      throw new Error("indisponível");
-    });
+    const guard = createRequireAuth(
+      async () => {
+        throw new Error("indisponível");
+      },
+      undefined,
+      open,
+    );
     const response = await get(buildApp(guard), SESSION_COOKIE);
 
     expect(response.status).toBe(503);
@@ -98,6 +106,7 @@ describe("requireAuth", () => {
     const guard = createRequireAuth(
       async () => resolved({ emailVerified: false }),
       () => false,
+      open,
     );
     const response = await get(buildApp(guard), SESSION_COOKIE);
 
@@ -107,7 +116,7 @@ describe("requireAuth", () => {
   it("libera a rota e expõe o usuário quando a sessão é válida", async () => {
     const resolve = vi.fn<ResolveSession>(async () => resolved());
     const response = await get(
-      buildApp(createRequireAuth(resolve)),
+      buildApp(createRequireAuth(resolve, undefined, open)),
       SESSION_COOKIE,
     );
 
@@ -117,7 +126,7 @@ describe("requireAuth", () => {
   });
 
   it("aceita o cookie com prefixo __Secure- de produção", async () => {
-    const guard = createRequireAuth(async () => resolved());
+    const guard = createRequireAuth(async () => resolved(), undefined, open);
     const response = await get(buildApp(guard), `__Secure-${SESSION_COOKIE}`);
 
     expect(response.status).toBe(200);
@@ -130,10 +139,79 @@ describe("requireAuth", () => {
   });
 });
 
+describe("requireAuth: telefone pendente (T3)", () => {
+  function app(guard: ReturnType<typeof createRequireAuth>) {
+    const routes = new Hono<AuthEnv>();
+    routes.get("/private", guard, (c) => c.json({ id: c.get("user").id }));
+    routes.get("/api/me/phone-verification", guard, (c) => c.json({ ok: true }));
+    routes.get("/api/me/phone-verification/", guard, (c) => c.json({ ok: true }));
+    routes.post("/api/me/phone-verification/confirm", guard, (c) => c.json({ ok: true }));
+    return routes;
+  }
+
+  const call = (routes: Hono<AuthEnv>, path: string, method = "GET") =>
+    routes.request(path, { method, headers: { Cookie: SESSION_COOKIE } });
+
+  it("o predicado recusa: 403 PHONE_UNVERIFIED, com a organização ativa da sessão", async () => {
+    const gate = vi.fn<PhoneGate>(async () => false);
+    const guard = createRequireAuth(
+      async () => ({ ...resolved(), activeOrganizationId: "org-a" }),
+      () => false,
+      gate,
+    );
+    const response = await call(app(guard), "/private");
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "PHONE_UNVERIFIED" });
+    expect(gate).toHaveBeenCalledWith(expect.objectContaining({ id: user.id }), "org-a");
+  });
+
+  it("o predicado aceita: segue", async () => {
+    const guard = createRequireAuth(async () => resolved(), () => false, async () => true);
+
+    expect((await call(app(guard), "/private")).status).toBe(200);
+  });
+
+  it("a lista do que passa não consulta o predicado; caminho parecido não entra nela", async () => {
+    const gate = vi.fn<PhoneGate>(async () => false);
+    const routes = app(createRequireAuth(async () => resolved(), () => false, gate));
+
+    expect((await call(routes, "/api/me/phone-verification")).status).toBe(200);
+    expect((await call(routes, "/api/me/phone-verification/confirm", "POST")).status).toBe(200);
+    expect(gate).not.toHaveBeenCalled();
+
+    expect((await call(routes, "/api/me/phone-verification/")).status).toBe(403);
+  });
+
+  it("o e-mail vem antes: sem e-mail verificado, nem o telefone é consultado", async () => {
+    const gate = vi.fn<PhoneGate>(async () => false);
+    const routes = app(
+      createRequireAuth(async () => resolved({ emailVerified: false }), () => true, gate),
+    );
+
+    for (const path of ["/private", "/api/me/phone-verification"]) {
+      const response = await call(routes, path);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ code: "EMAIL_NOT_VERIFIED" });
+    }
+    expect(gate).not.toHaveBeenCalled();
+  });
+
+  it("falha ao conferir o telefone é fechada (503)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const guard = createRequireAuth(async () => resolved(), () => false, async () => {
+      throw new Error("banco fora do ar");
+    });
+
+    expect((await call(app(guard), "/private")).status).toBe(503);
+    spy.mockRestore();
+  });
+});
+
 describe("requirePlatform", () => {
   function request(platformRole: PlatformRole, roles?: PlatformRole[]) {
     const app = new Hono<AuthEnv>();
-    const guard = createRequireAuth(async () => resolved({ platformRole }));
+    const guard = createRequireAuth(async () => resolved({ platformRole }), undefined, open);
     app.get("/admin", guard, requirePlatform(roles), (c) => c.text("ok"));
     return app.request("/admin", { headers: { Cookie: SESSION_COOKIE } });
   }

@@ -173,6 +173,22 @@ describe("rotas de equipe sobre o servidor Node", () => {
       expect((await request("DELETE", `/api/me/sessions/${anyId}`)).status).toBe(404);
     });
 
+    it("DELETE das trocas de telefone sem corpo chega à regra de negócio (204, nada aberto)", async () => {
+      expect((await request("DELETE", "/api/me/phone-change")).status).toBe(204);
+      expect((await request("DELETE", `/api/customers/${anyId}/phone-change`)).status).toBe(404);
+    });
+
+    it("foto de perfil sobre o servidor Node: envio multipart e DELETE sem corpo", async () => {
+      const form = new FormData();
+      const png = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.alloc(32, 1),
+      ]);
+      form.set("file", new File([new Uint8Array(png)], "foto.png", { type: "image/png" }));
+      expect((await request("POST", "/api/me/avatar", { body: form })).status).toBe(201);
+      expect((await request("DELETE", "/api/me/avatar")).status).toBe(204);
+    });
+
     it("POST /api/me/sessions/revoke-others sem corpo responde", async () => {
       expect((await request("POST", "/api/me/sessions/revoke-others")).status).toBe(200);
     });
@@ -287,6 +303,12 @@ describe("rotas de equipe sobre o servidor Node", () => {
 
     afterAll(() => setProvidersForTests(undefined));
 
+    it("POST /api/phone-verifications/:id/confirm sem corpo chega à regra de negócio", async () => {
+      const response = await request("POST", `/api/phone-verifications/${anyId}/confirm`);
+
+      expect(response.status).toBe(404);
+    });
+
     it.each(["reactivate", "pause", "portal"])(
       "POST /api/billing/%s sem corpo chega à regra de negócio",
       async (route) => {
@@ -303,6 +325,7 @@ describe("rotas de equipe sobre o servidor Node", () => {
       `/api/admin/channels/${anyId}/default`,
       `/api/admin/subscriptions/${anyId}/cancel`,
       `/api/admin/subscriptions/${anyId}/sync`,
+      `/api/admin/phone-verifications/${anyId}/confirm`,
     ])("POST %s sem corpo chega à regra de negócio", async (path) => {
       const response = await request("POST", path, {
         headers: { Cookie: platformCookie },

@@ -23,6 +23,61 @@
 
 ## Programas em planejamento
 
+- **Pré-produção** (`docs/specs/pre-producao/spec.md`, aprovada em 2026-11-11, em implementação):
+  telefone verificado por link no WhatsApp (Cloud, QR Code ou liberação manual) e único dentro
+  de cada grupo (owners no SaaS; equipe e clientes por organização), equipe que também é
+  cliente (`customer.user_id`), acesso bloqueado com telefone pendente, perfil do
+  owner e da equipe (foto, nome, e-mail, telefone, senha), retenção de mensagens, texto legal
+  com WhatsApp, avisos de exclusão, senha forte, bloqueio de login por tentativas, importação de
+  clientes, complementos do atendimento (continuar por outro canal, emoji, filtro na URL) e de
+  planos (uso, exceção por tenant). Decisões de produto fechadas. **Implementados:** bloco S
+  (senha forte: política no schema e no servidor, medidor nas telas) e bloco B (bloqueio de login
+  por tentativas, `login_throttle`, variáveis `LOGIN_*`) e as fases **T1** (estado de verificação do
+  telefone, unicidade por grupo, equipe que também é cliente, vínculo automático só com telefone
+  confirmado) e **T2a** (pedido de verificação, confirmação pelo link na sessão do cadastro,
+  liberação manual pelo owner e pelo proprietário da plataforma, com alcance pelo responsável do
+  pedido; `tech/28-crm-cadastro.md`) e **T2b** (job `phone.verify` com a cascata Cloud → QR Code →
+  manual pelos números do responsável do pedido, falha do webhook passando ao próximo número, D-12,
+  um link por número, reenvio com limite, modelo de verificação da Cloud com a URL conferida,
+  página `/verificar-telefone`, confirmação do lead do portal, e-mails ao responsável e a quem
+  perdeu a confirmação; sem tela de modelo, reenvio e filas, que são da T4). Ficou de fora da T2b e
+  o `claim` do portal (D-1), feito em 2026-11-14 (migration `0040`; a equipe não pede `claim`, decisão do proprietário). **Troca de telefone pelo pedido** implementada no servidor
+  (`…/phone-change` na equipe, no portal e na ficha pela equipe; `PATCH` e `/admin` passam pelo pedido; o
+  cadastro mantém o número antigo até a confirmação; migration `0038`), com as decisões TC-1 a TC-10 a
+  confirmar (as telas entraram na F2). **F1 do bloco F** implementada (API do perfil:
+  `PATCH /api/me` com o nome, foto em `POST`/`DELETE /api/me/avatar` e `GET /api/avatars/:userId`, variável
+  `AVATAR_MAX_KB`, `update-user` do Better Auth desligado, foto na exportação e na anonimização), com as decisões
+  F1-1 a F1-5 a confirmar. **F2 do bloco F e telas da troca de telefone** implementadas (2026-11-14): página "Perfil" em
+  `/app/perfil` e `/admin/perfil` (foto com recorte de 256 px, nome, e-mail, telefone, senha), foto em membros e em quem
+  atende, troca de telefone na ficha do cliente, em `/portal/conta` e em "Confirme seu WhatsApp", filas com
+  `purpose = change`; decisões F2-1 a F2-8 a confirmar (SPEC, "F2 e telas da troca: o que foi feito"). **Bloco R, fase R1** implementada (2026-11-14): migration `0039` com
+  todo o schema da retenção de mensagens (favorita em `message`, `retention_policy` e `message_retention_state`, só do proprietário da
+  plataforma), variáveis `MESSAGE_RETENTION_*` (desligada por padrão; ligada em `docker/.env.prod.example`) e o módulo puro
+  `src/lib/inbox/retention-policy.ts` (precedência e piso de idade), com as decisões R1-1 a R1-10 a confirmar. **Fase R2** implementada
+  (2026-11-14): limpeza `src/lib/inbox/retention.ts` (idade, contagem e favoritas acima do teto, por organização e tipo de canal, com piso,
+  lote, mídia e conversa esvaziada), prévia (`dryRun`), job diário `inbox.retention` e rotas `/api/admin/retention/*`; **com
+  `MESSAGE_RETENTION_ENABLED=true` apaga mensagem**. Decisões R2-1 a R2-10 a confirmar e revisão jurídica do texto de privacidade pendente.
+  **R3a** implementada
+  (2026-11-14): estrela na mensagem (`PUT /api/inbox/messages/:id/favorite` e a da plataforma, selo e botão na bolha, tempo real) e aviso da conversa
+  esvaziada, sem migration; decisões R3a-1 a R3a-5 a confirmar (SPEC, "R3a: o que foi feito").
+  **R3b** implementada (2026-11-14): tela de retenção no `/admin` (cartão na página da organização e cartão só de leitura da plataforma em
+  `/admin/configuracoes`: o que vale e de onde vem, três opções por limite, prévia, última limpeza e avisos de ligada e desligada), só sobre as rotas da R2,
+  sem migration; decisões R3b-1 a R3b-7 a confirmar, roteiro manual com a retenção ligada em banco de teste na SPEC ("R3b: o que foi feito"). **Bloco R completo.**
+  **Q1** implementada (2026-11-14): trava por organização e métrica (`pg_advisory_xact_lock`) na conferência e na gravação de `customers` e `members`
+  (`withinLimit`, `src/lib/billing/limits.ts`): cadastro pela equipe, "salvar como cliente", autocadastro do portal, convite e aceite; sem migration e sem
+  mudança de regra, mensagem ou código; decisões Q1-1 a Q1-5 a confirmar (SPEC, "Q1: o que foi feito"). **Bloco I, fases I1 e I2** implementadas (2026-11-14): leitura de planilha no navegador (`src/lib/spreadsheet/`, CSV e XLSX com `read-excel-file` `9.3.14`, modelo, colunas e tetos; decisões I1-1 a I1-7) e a rota `POST /api/customers/import` (lotes de 500, uma transação com instruções em conjunto sob a trava de `customers`, `withinLimitRoom`), `GET /api/customers/import/quota` e o diálogo em `/app/clientes` (decisões I2-1 a I2-10 a confirmar; SPEC, "I1: o que foi feito" e "I2: o que foi feito"). **I3** implementada (2026-11-14): importar pelo link do Google Planilhas (`POST /api/customers/import/google-sheets`, guarda de SSRF: o servidor monta o endereço com o id e o `gid`, segue redirecionamento só para `docs.google.com` e `doc-XX-XX-sheets.googleusercontent.com`, confere e fixa IPs públicos; decisões I3-1 a I3-8 a confirmar; SPEC, "I3: o que foi feito"). Q2 a Q4 seguem pendentes.
+  **Bloco X, fase X1** implementada (2026-11-14): filtro de número do atendimento na URL (`?canal=<id>`, só o id; id inválido, inexistente ou de outro escopo cai em "todos") e a seção "Também neste contato" no painel do contato (`GET /api/inbox/conversations/:id/related` e a da plataforma, só as conversas que a pessoa vê), sem migration; decisões X1-1 a X1-6 a confirmar (SPEC, "X1: o que foi feito"). **X2** implementada (2026-11-14): "Continuar por outro número" nos dois escopos (`GET .../conversations/:id/transfer-channels` e `POST .../conversations/:id/transfer`, `src/lib/inbox/transfer.ts` e `transfer-actions.ts`, botão na faixa da janela de 24 horas e em "Também neste contato"), sem migration; decisões X2-1 a X2-14 a confirmar (SPEC, "X2: o que foi feito"). **X3** implementada (2026-11-14): seletor de emoji no composer (`frimousse` `0.4.0` e `emojibase-data` `18.0.0`, dados em `public/emojibase/pt/` copiados por `npm run emoji:sync`, `popover` novo em `src/components/ui/`, `src/lib/emoji/`, recentes e tom de pele por usuário em `localStorage`), sem migration e sem mudar a CSP; decisões X3-1 a X3-7 a confirmar (SPEC, "X3: o que foi feito"). X2 e X4 seguem pendentes.
+  **T3** implementada (`PHONE_VERIFICATION_REQUIRED`, padrão `true`: 403 `PHONE_UNVERIFIED` em
+  `requireAuth` e `requirePortalAuth` com lista fechada do que passa, predicado por organização ativa,
+  tela "Confirme seu WhatsApp" em `/app`, `/admin` e `/portal`, aviso com a variável desligada,
+  promoção do primeiro proprietário com o telefone confirmado), com as decisões T3-1 a T3-9 a
+  confirmar pelo proprietário (SPEC, "T3: o que foi feito"). **T4 parcial**: telas das filas
+  de liberação em `/admin/usuarios` (aba "Telefones", só o proprietário), `/app/equipe` e `/app/clientes`, modelo de
+  verificação na tela do canal Cloud (a leitura do canal traz `verificationTemplate`) e acertos de texto da tela da
+  T3; roteiro manual com número real na SPEC. A ligação manual da ficha à equipe e o `claim` do portal saíram em 2026-11-14
+  (decisões TL e CL na SPEC); o `claim` pela equipe não será feito nesta forma (a tela da troca de telefone saiu na F2). Os blocos S, B, T, F, E, L e R
+  seguram o deploy.
+
 - **WhatsApp CRM** (`docs/specs/whatsapp-crm/plano.md`): PRDs e SPECs aprovados em 2026-11-09
   para `crm-cadastro` (etiquetas, campos adicionais, telefone), `whatsapp-canais` (Cloud API e
   Evolution Go) e `caixa-de-entrada` (chat e fila); decisões do proprietário no fim do plano.
@@ -65,7 +120,7 @@
   autoria e o vínculo (sem apagar conversa: o vínculo com `user` é telefone declarado); a exportação do portal ganha `conversas-whatsapp.json`; `CHANNEL_EVENT_RETENTION_DAYS`
   (padrão 30); editar papel tirando `inbox:reply` devolve as conversas à fila (`src/lib/inbox/privacy.ts`, `tech/30`, "LGPD (C7)").
   **Todas as fases C1 a C7 implementadas.** **Pendente:** smoke com Meta e Evolution reais (B0 simulada), o prazo de retenção de
-  conversas encerradas e a atualização de `/legal/privacidade` (decisões do proprietário, `lgpd.md`).
+  conversas encerradas (decisão do proprietário, `lgpd.md`). O texto de `/legal/privacidade` e `/legal/termos` já cita o WhatsApp (bloco L). O bloco E também está feito: remover o membro ou excluir a conta apaga a ficha de cliente ligada à própria pessoa (D-11, só os contatos do telefone confirmado dela), a equipe pode desfazer a ligação (`DELETE /api/customers/:id/team-link`) e, desde 2026-11-14, criá-la à mão (`PUT /api/customers/:id/team-link`, nunca a si mesmo; a D-11 vale igual) e os diálogos de exclusão avisam com a contagem de conversas (`tech/28`).
   **`crm-cadastro` completo (A1 a A4 implementadas)**: telefone obrigatório, e-mail opcional do
   cliente, etiquetas e campos adicionais do tenant e, na A4, da plataforma sobre as organizações
   (`organization_tag`, `organization_profile`, `/admin/configuracoes/etiquetas` e `/campos`, filtro e cartão em

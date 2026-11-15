@@ -9,6 +9,7 @@ import { type Page, useAdminQuery } from "@/components/admin/admin-api";
 import { type Channel, useChannels } from "@/components/channels/channels-api";
 import { errorText, invalidateInbox } from "@/components/inbox/inbox-api";
 import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
+import { useInboxPath } from "@/components/inbox/use-inbox-path";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,6 +57,7 @@ export function useStartConversation(onDone?: () => void, silent = false) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const scope = useInboxScope();
+  const pathOf = useInboxPath();
 
   return useMutation({
     mutationFn: (body: { channelId: string } & StartTarget) =>
@@ -66,7 +68,7 @@ export function useStartConversation(onDone?: () => void, silent = false) {
     onSuccess: async ({ conversation }) => {
       await invalidateInbox(queryClient, scope.key);
       onDone?.();
-      navigate(`${scope.route}/${conversation.id}`);
+      navigate(pathOf(conversation.id));
     },
     onError: (error) => {
       if (!silent) toast.error(errorText(error));

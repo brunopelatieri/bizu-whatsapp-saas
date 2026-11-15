@@ -8,10 +8,12 @@ import { usePortalAuth } from "@/providers/portal-auth-provider";
 /** Cliente de mais de um tenant escolhe onde entrar. O tenant fica só na sessão. */
 export function PortalChoosePage() {
   const navigate = useNavigate();
-  const { user, tenants, loading, switchTenant } = usePortalAuth();
+  const { user, tenants, loading, switchTenant, phoneBlocked } = usePortalAuth();
   const [pending, setPending] = useState<string | null>(null);
 
   if (loading) return <AuthSpinner />;
+  // A tela de confirmação, em `/portal`, também troca a organização em uso.
+  if (phoneBlocked) return <Navigate to="/portal" replace />;
   if (!user) return <Navigate to="/portal/login" replace />;
 
   const available = tenants.filter((tenant) => tenant.available);

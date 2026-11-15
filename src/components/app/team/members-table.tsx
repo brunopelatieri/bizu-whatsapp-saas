@@ -8,6 +8,7 @@ import {
 } from "@/components/app/team/team-api";
 import { Can, useCan } from "@/components/auth/can";
 import { StartConversationButton } from "@/components/inbox/new-conversation-dialog";
+import { UserAvatar } from "@/components/profile/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { isOwner, roleLabel } from "@/lib/auth/permissions";
+import { conversationsLabel, deletedVerb } from "@/lib/format/conversations";
 import { useAuth } from "@/providers/auth-provider";
 
 type MembersTableProps = { members: TeamMember[]; roles: RoleOption[] };
@@ -63,7 +65,12 @@ export function MembersTable({ members, roles }: MembersTableProps) {
           <TableBody>
             {members.map((member) => (
               <TableRow key={member.id}>
-                <TableCell className="font-medium">{member.name}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    <UserAvatar userId={member.userId} name={member.name} size="sm" />
+                    <span>{member.name}</span>
+                  </div>
+                </TableCell>
                 <TableCell className="break-all">{member.email}</TableCell>
                 <TableCell>
                   {can("member", "update") && canManage(member) ? (
@@ -114,7 +121,24 @@ export function MembersTable({ members, roles }: MembersTableProps) {
       <ConfirmDialog
         open={Boolean(removing)}
         title="Remover membro"
-        description={`${removing?.name} perde o acesso a esta organização na hora.`}
+        description={
+          <>
+            {removing?.name} perde o acesso a esta organização na hora.
+            {removing?.customerRecord ? (
+              <>
+                {" "}
+                <strong>
+                  A pessoa também é cliente desta organização: a ficha de cliente ligada a ela
+                  {removing.customerRecord.conversationCount > 0
+                    ? ` e ${conversationsLabel(removing.customerRecord.conversationCount)} de WhatsApp do número dela`
+                    : ""}{" "}
+                  {deletedVerb(1, removing.customerRecord.conversationCount)}, sem volta.
+                </strong>{" "}
+                Para manter a ficha, desfaça antes a ligação com a equipe, na página do cliente.
+              </>
+            ) : null}
+          </>
+        }
         confirmLabel="Remover"
         pending={remove.isPending}
         onConfirm={confirmRemoval}

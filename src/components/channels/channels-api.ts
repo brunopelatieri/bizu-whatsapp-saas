@@ -24,6 +24,8 @@ export type Channel = {
   qualityRating?: string | null;
   accessTokenHint?: string | null;
   webhookVerifiedAt?: string | null;
+  /** Modelo que leva o link de verificação de telefone; `null` sem modelo. */
+  verificationTemplate?: { name: string; language: string } | null;
   // QR Code
   connectedPhone?: string | null;
 };
@@ -60,7 +62,7 @@ export function useChannels(basePath: string = TENANT_CHANNELS_PATH) {
 
 type ChannelRequest = {
   path: string;
-  method: "POST" | "PATCH" | "DELETE";
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 };
 

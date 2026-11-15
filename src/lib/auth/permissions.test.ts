@@ -50,6 +50,8 @@ const specMatrix: Record<string, [owner: boolean, admin: boolean, member: boolea
   "inbox:reply": [true, true, true],
   "inbox:assign": [true, true, false],
   "inbox:supervise": [true, true, false],
+  // docs/specs/pre-producao/spec.md, bloco T: liberar telefone à mão é só do owner.
+  "phone:confirm": [true, false, false],
 };
 
 describe("catálogo de permissões", () => {

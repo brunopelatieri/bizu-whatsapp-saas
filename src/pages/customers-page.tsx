@@ -1,15 +1,17 @@
-import { Plus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { Pager } from "@/components/admin/pager";
 import { PageTitle, QueryState } from "@/components/admin/query-state";
 import { CustomerFormDialog } from "@/components/app/customers/customer-form-dialog";
+import { CustomerImportDialog } from "@/components/app/customers/import/customer-import-dialog";
 import { CustomerStatusBadge } from "@/components/app/customers/customer-status-badge";
 import {
   formatDateTime,
   useCustomers,
 } from "@/components/app/customers/customers-api";
 import { Can } from "@/components/auth/can";
+import { TenantPhoneReleaseCard } from "@/components/phone/phone-release-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -59,6 +61,7 @@ export function CustomersPage() {
   const [status, setStatus] = useState<CustomerStatus | undefined>();
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const tags = useTags();
   const query = useCustomers({ q, status, tags: tagFilter, page });
@@ -71,10 +74,16 @@ export function CustomersPage() {
           description="Clientes e leads desta organização, e quem tem acesso ao portal."
         />
         <Can resource="customer" action="create">
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="size-4" />
-            Novo cliente
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setImporting(true)}>
+              <Upload className="size-4" />
+              Importar planilha
+            </Button>
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              Novo cliente
+            </Button>
+          </div>
         </Can>
       </div>
 
@@ -237,7 +246,12 @@ export function CustomersPage() {
         ) : null}
       </QueryState>
 
+      <Can resource="phone" action="confirm">
+        <TenantPhoneReleaseCard subject="customer" />
+      </Can>
+
       <CustomerFormDialog open={creating} onClose={() => setCreating(false)} />
+      {importing ? <CustomerImportDialog onClose={() => setImporting(false)} /> : null}
     </div>
   );
 }

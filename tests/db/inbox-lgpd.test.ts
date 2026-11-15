@@ -215,6 +215,10 @@ describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
       { direction: "out", senderUserId: person.id },
     );
     await bypass((tx) => tx`update conversation set closed_by = ${person.id} where id = ${attended.id}`);
+    // Mensagem que ela favoritou (bloco R): a estrela é da conversa, só o autor da marca sai.
+    await bypass(
+      (tx) => tx`update message set is_favorite = true, favorited_at = now(), favorited_by = ${person.id} where id = ${sent.id}`,
+    );
 
     // Como contato: no tenant (vínculo de membro) e na plataforma.
     const asMember = await conversationWithMedia(tenantScope(tenantA), channelA, { userId: person.id });
@@ -225,6 +229,9 @@ describe("anonimizar a pessoa da equipe (lgpd.delete)", () => {
     expect(await runDeletion("user", person.id, person.id)).toBe("executed");
 
     expect(await count("message where id = $1 and sender_user_id is null", sent.id)).toBe(1);
+    expect(
+      await count("message where id = $1 and is_favorite and favorited_by is null", sent.id),
+    ).toBe(1);
     expect(
       await count(
         "conversation where id = $1 and closed_by is null and assigned_user_id is null",

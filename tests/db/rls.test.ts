@@ -591,8 +591,13 @@ describe("RLS do CRM da plataforma (tabelas reais)", () => {
     await owner.end();
   });
 
-  it("só as duas tabelas da plataforma usam platformOnlyPolicy, com RLS forçado", async () => {
-    expect(platformOnlyTables).toEqual(["organization_profile", "organization_tag"]);
+  it("só as tabelas da plataforma usam platformOnlyPolicy, com RLS forçado", async () => {
+    expect(platformOnlyTables).toEqual([
+      "message_retention_state",
+      "organization_profile",
+      "organization_tag",
+      "retention_policy",
+    ]);
 
     for (const name of platformOnlyTables) {
       const [row] = await owner<{ relrowsecurity: boolean; relforcerowsecurity: boolean }[]>`

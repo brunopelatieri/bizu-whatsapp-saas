@@ -4,9 +4,10 @@ import {
   type ReactNode,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
 } from "react";
-import { apiFetch } from "@/lib/api/client";
+import { ApiError, apiFetch, PHONE_UNVERIFIED_EVENT } from "@/lib/api/client";
 import { authClient, toAuthActionError } from "@/lib/auth/client";
 import type { BillingSummary } from "@/lib/billing/summary";
 import {
@@ -46,6 +47,14 @@ type AuthContextValue = {
   /** Documentos legais com versão nova a aceitar (`ConsentGate`). */
   consentRequired: MeResponse["consentRequired"];
   /**
+   * Há sessão, mas a API recusa tudo até o WhatsApp valer na organização ativa
+   * (`PHONE_VERIFICATION_REQUIRED=true`, 403 `PHONE_UNVERIFIED`): `ProtectedRoute` mostra só
+   * "Confirme seu WhatsApp".
+   */
+  phoneBlocked: boolean;
+  /** Telefone pendente com a exigência desligada: as áreas mostram um aviso. */
+  phonePending: boolean;
+  /**
    * Lança `AuthActionError`, com o `code` do Better Auth. Devolve
    * `twoFactor: true` quando a senha passou, mas a sessão ainda depende do desafio em `/2fa`.
    */
@@ -84,6 +93,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
   const me = account.data;
+  // Vale também com dados antigos em mãos: o número pode ter mudado de dono no meio da sessão.
+  const phoneBlocked =
+    Boolean(userId) &&
+    account.error instanceof ApiError &&
+    account.error.code === "PHONE_UNVERIFIED";
+
+  // Uma chamada qualquer recusada pelo telefone relê `/api/me`, e a área troca de tela.
+  useEffect(() => {
+    const reload = (event: Event) => {
+      if ((event as CustomEvent<{ area?: string }>).detail?.area !== "team") return;
+      // Sem cancelar a busca em andamento: várias recusas seguidas não a refazem a cada uma.
+      void queryClient.invalidateQueries({ queryKey: ["me"] }, { cancelRefetch: false });
+    };
+    window.addEventListener(PHONE_UNVERIFIED_EVENT, reload);
+    return () => window.removeEventListener(PHONE_UNVERIFIED_EVENT, reload);
+  }, [queryClient]);
 
   const signIn = useCallback(async ({ email, password }: LoginInput) => {
     const { data, error } = await authClient.signIn.email({ email, password });
@@ -160,6 +185,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       limits: me?.limits ?? NO_LIMITS,
       security: me?.security ?? NO_REQUIREMENTS,
       consentRequired: me?.consentRequired ?? NO_CONSENT,
+      phoneBlocked,
+      phonePending: me?.phonePending ?? false,
       accountLoading: Boolean(data) && account.isPending,
       // Com dados em mãos, uma releitura que falha não derruba a tela.
       accountError: me ? null : account.error,
@@ -174,6 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     data,
     me,
     isPending,
+    phoneBlocked,
     account.isPending,
     account.error,
     signIn,

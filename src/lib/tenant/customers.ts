@@ -1,5 +1,4 @@
 import { and, count, desc, eq, ilike, ne, or, type SQL, sql } from "drizzle-orm";
-import { logError } from "@/api/log";
 import { type Tx, withTenant } from "@/db/rls";
 import { customer } from "@/db/schema";
 import { isUniqueViolation, violatedConstraint } from "@/db/errors";
@@ -7,7 +6,7 @@ import { escapeLike } from "@/lib/admin/tenants";
 import { auditInTransaction } from "@/lib/audit";
 import { getPortalAuth } from "@/lib/auth/portal";
 import type { PortalLinkContext } from "@/lib/auth/portal-emails";
-import { assertWithinLimit } from "@/lib/billing/limits";
+import { withinLimit } from "@/lib/billing/limits";
 import {
   dropOrphanPortalUser,
   ensurePortalUser,
@@ -27,11 +26,27 @@ import {
 } from "@/lib/crm/custom-fields";
 import { replaceCustomerTags, tagsOfCustomers, type CustomerTagView } from "@/lib/crm/tags";
 import { type CustomFieldValues, mergeCustomFields } from "@/lib/crm/values";
-import { purgeCustomerContacts } from "@/lib/inbox/privacy";
+import { countCustomerConversations } from "@/lib/inbox/privacy";
 import { phoneErrorMessage } from "@/lib/phone/br";
-import { getStorage } from "@/lib/storage";
 import { InvalidPhoneError, phoneValues } from "@/lib/phone/columns";
+import { requestPhoneVerificationSend } from "@/lib/phone/dispatch";
+import {
+  cancelCustomerPhoneChange,
+  customerPhoneChange,
+  type NewPhone,
+  openCustomerPhoneChange,
+  type PhoneChangeOpened,
+} from "@/lib/phone/requests";
+import { type PhoneVerifiedVia, verifiedPhone } from "@/lib/phone/verification";
+import { CUSTOMER_NOT_FOUND } from "@/lib/tenant/customer-constants";
+import { afterCustomerDeleted, deleteCustomerIn } from "@/lib/tenant/customer-deletion";
 import { notFound, phoneInUse, TenantRuleError } from "@/lib/tenant/errors";
+import {
+  isTeamCustomer,
+  matchingTeamMember,
+  type TeamLink,
+  teamRolesOf,
+} from "@/lib/tenant/team-customer";
 
 /** Quem age e de onde, para a auditoria. */
 export type CustomerActor = {
@@ -43,7 +58,8 @@ export type CustomerActor = {
 
 type CustomerRow = typeof customer.$inferSelect;
 
-const NOT_FOUND = "Cliente não encontrado.";
+export { CUSTOMER_NOT_FOUND };
+const NOT_FOUND = CUSTOMER_NOT_FOUND;
 const EMAIL_TAKEN = new TenantRuleError(
   409,
   "CUSTOMER_EMAIL_TAKEN",
@@ -51,6 +67,14 @@ const EMAIL_TAKEN = new TenantRuleError(
 );
 
 const PHONE_INDEX = "customer_tenant_phone_key_idx";
+const TEAM_INDEX = "customer_tenant_user_idx";
+
+/** Duas fichas nascendo ao mesmo tempo para a mesma pessoa da equipe: a segunda tenta de novo. */
+const TEAM_LINK_RACE = new TenantRuleError(
+  409,
+  "CUSTOMER_CONFLICT",
+  "Outro cadastro foi criado ao mesmo tempo. Tente de novo.",
+);
 
 /** Colunas de telefone calculadas no servidor; número recusado vira 400 `INVALID_PHONE`. */
 function phoneOf(raw: string) {
@@ -96,24 +120,43 @@ async function assertPhoneFree(
 /** O índice único é a rede de segurança da corrida: o 23505 vira o mesmo 409, sem detalhes. */
 function translateUnique(error: unknown): never {
   if (isUniqueViolation(error)) {
-    throw violatedConstraint(error) === PHONE_INDEX ? phoneInUse() : EMAIL_TAKEN;
+    const constraint = violatedConstraint(error);
+    if (constraint === TEAM_INDEX) throw TEAM_LINK_RACE;
+    throw constraint === PHONE_INDEX ? phoneInUse() : EMAIL_TAKEN;
   }
   throw error;
 }
 
-/** `emailVerified` e os demais dados de `portal_user` são globais e não saem daqui. */
-function toCustomer({
-  portalUserId,
-  tenantId: _tenantId,
-  phoneKey: _phoneKey,
-  ...row
-}: CustomerRow, tags: CustomerTagView[] = []) {
-  return { ...row, tags, hasPortalAccess: portalUserId !== null };
+/**
+ * `emailVerified` e os demais dados de `portal_user` são globais e não saem daqui. `team` é a
+ * pessoa da equipe que também é este cliente, com o papel atual dela (`null` se não é, ou se
+ * já saiu da equipe).
+ */
+function toCustomer(
+  { portalUserId, tenantId: _tenantId, phoneKey: _phoneKey, userId, ...row }: CustomerRow,
+  tags: CustomerTagView[] = [],
+  roles: Map<string, string> = new Map(),
+) {
+  const role = userId ? roles.get(userId) : undefined;
+  const team: TeamLink | null = userId && role ? { userId, role } : null;
+
+  return {
+    ...row,
+    tags,
+    team,
+    phoneVerified: row.phoneVerifiedAt !== null,
+    hasPortalAccess: portalUserId !== null,
+  };
 }
 
 function byId(tenantId: string, customerId: string) {
   return and(eq(customer.id, customerId), eq(customer.tenantId, tenantId));
 }
+
+export { byId as byCustomerId };
+
+// A exclusão da ficha mora em `customer-deletion.ts` (o `claim` a usa sem importar este arquivo).
+export { afterCustomerDeleted, deleteCustomerIn };
 
 export function listCustomers(tenantId: string, query: CustomersQuery) {
   const term = query.q ? `%${escapeLike(query.q)}%` : null;
@@ -139,6 +182,8 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
     );
   }
 
+  if (query.team) filters.push(isTeamCustomer);
+
   const where = and(...filters);
 
   return withTenant(tenantId, async (tx) => {
@@ -152,9 +197,10 @@ export function listCustomers(tenantId: string, query: CustomersQuery) {
       .offset((query.page - 1) * CUSTOMER_PAGE_SIZE);
 
     const tags = await tagsOfCustomers(tx, rows.map(({ id }) => id));
+    const roles = await teamRolesOf(tx, tenantId, rows.map(({ userId }) => userId));
 
     return {
-      items: rows.map((row) => toCustomer(row, tags.get(row.id))),
+      items: rows.map((row) => toCustomer(row, tags.get(row.id), roles)),
       total: total?.total ?? 0,
       pageSize: CUSTOMER_PAGE_SIZE,
     };
@@ -166,12 +212,24 @@ export async function getCustomer(tenantId: string, customerId: string) {
     const [row] = await tx.select().from(customer).where(byId(tenantId, customerId));
     if (!row) return null;
 
-    return { row, tags: await tagsOfCustomers(tx, [row.id]) };
+    return {
+      row,
+      tags: await tagsOfCustomers(tx, [row.id]),
+      roles: await teamRolesOf(tx, tenantId, [row.userId]),
+      phoneChange: await customerPhoneChange(tx, row.id),
+      conversationCount: await countCustomerConversations(tx, row.id),
+    };
   });
 
   if (!found) throw notFound(NOT_FOUND);
 
-  return toCustomer(found.row, found.tags.get(found.row.id));
+  // A troca de número em andamento: a ficha (e `phone`) segue com o número antigo até ela fechar.
+  return {
+    ...toCustomer(found.row, found.tags.get(found.row.id), found.roles),
+    phoneChange: found.phoneChange,
+    // As conversas que a exclusão da ficha apaga (o diálogo da tela avisa com este número).
+    conversationCount: found.conversationCount,
+  };
 }
 
 /**
@@ -182,13 +240,20 @@ export async function createCustomer(
   tenantId: string,
   input: CustomerInput,
   actor: CustomerActor,
-  options: { afterCreate?: (tx: Tx, customerId: string) => Promise<void> } = {},
+  options: {
+    afterCreate?: (tx: Tx, customerId: string) => Promise<void>;
+    /**
+     * Como o telefone foi confirmado. Padrão `team`: quem cadastra é a equipe, e o número que
+     * ela informa vale. `inbound`: o cliente nasceu de um contato que escreveu por esse número.
+     */
+    phoneVerifiedVia?: Extract<PhoneVerifiedVia, "team" | "inbound">;
+  } = {},
 ) {
-  await assertWithinLimit(tenantId, "customers");
-  const phone = phoneOf(input.phone);
-
   try {
-    return await withTenant(tenantId, async (tx) => {
+    // Limite e gravação na mesma transação, sob a trava de `customers` (`withinLimit`).
+    return await withinLimit(tenantId, "customers", {}, async (tx) => {
+      // Depois do limite, como antes: plano cheio responde 403 antes de um telefone inválido.
+      const phone = phoneOf(input.phone);
       await assertPhoneFree(tx, tenantId, phone.phoneKey, actor);
 
       const { tagIds, customFields, ...fields } = input;
@@ -200,9 +265,21 @@ export async function createCustomer(
         assertRequiredFilled(resolved.defs, values);
       }
 
+      // Quem é da equipe também pode ser cliente da organização: a ficha nasce ligada à conta
+      // dele quando o número é o telefone confirmado do membro (`team-customer.ts`). O e-mail
+      // da ficha é texto de quem cadastra e nunca liga sozinho.
+      const userId = await matchingTeamMember(tx, tenantId, phone.phoneKey);
+
       const [created] = await tx
         .insert(customer)
-        .values({ ...fields, ...phone, tenantId, customFields: values })
+        .values({
+          ...fields,
+          ...phone,
+          ...verifiedPhone(options.phoneVerifiedVia ?? "team"),
+          userId,
+          tenantId,
+          customFields: values,
+        })
         .returning();
       if (!created) throw new Error("cliente não criado");
 
@@ -216,10 +293,20 @@ export async function createCustomer(
         metadata: { status: created.status },
         ip: actor.ip,
       });
+      if (userId) {
+        await auditInTransaction(tx, "customer.team_linked", {
+          actor: { id: actor.userId },
+          tenantId,
+          target: { type: "customer", id: created.id },
+          metadata: { userId, via: "created" },
+          ip: actor.ip,
+        });
+      }
 
       return toCustomer(
         created,
         (await tagsOfCustomers(tx, [created.id])).get(created.id),
+        await teamRolesOf(tx, tenantId, [created.userId]),
       );
     });
   } catch (error) {
@@ -230,6 +317,10 @@ export async function createCustomer(
 /**
  * Trocar o e-mail desfaz o vínculo com o portal: o endereço antigo perde o acesso, e o novo
  * só entra depois de um convite. Sair de `active` corta o acesso na hora.
+ *
+ * **Outro telefone não é gravado aqui:** abre a troca pelo pedido (P1), e a ficha segue com o número
+ * antigo até o link do número novo ser confirmado na sessão do portal da ficha ou o owner liberar.
+ * O mesmo número escrito de outro jeito (mesma `phone_key`) é gravado direto.
  */
 export async function updateCustomer(
   tenantId: string,
@@ -238,6 +329,7 @@ export async function updateCustomer(
   actor: CustomerActor,
 ) {
   let unlinkedUserId: string | null = null;
+  let opened: PhoneChangeOpened | null = null;
   const phone = patch.phone === undefined ? null : phoneOf(patch.phone);
 
   try {
@@ -258,7 +350,9 @@ export async function updateCustomer(
       if (!phone && !current.phoneKey) {
         throw new TenantRuleError(400, "PHONE_REQUIRED", "Informe o telefone do cliente.");
       }
-      if (phone && phone.phoneKey !== current.phoneKey) {
+      const phoneChanged = phone !== null && phone.phoneKey !== current.phoneKey;
+      if (phone && phoneChanged) {
+        // A equipe pode saber que o número é de outro cliente (vê a lista): 409 já no pedido.
         await assertPhoneFree(tx, tenantId, phone.phoneKey, actor, customerId);
       }
 
@@ -269,7 +363,8 @@ export async function updateCustomer(
       const status =
         patch.status ?? (emailChanged ? fallbackStatus : current.status);
 
-      const { tagIds, customFields: _customFields, ...fields } = patch;
+      // O telefone sai do `...fields`: ele só muda pelo pedido de troca (ou na mesma `phone_key`, abaixo).
+      const { tagIds, customFields: _customFields, phone: _phone, ...fields } = patch;
       // Merge por chave no mesmo `UPDATE`: `null` remove, ausente não muda. `required` vale
       // sobre o estado final, e só quando o corpo trouxe `customFields`.
       let customFieldsSet = {};
@@ -286,7 +381,7 @@ export async function updateCustomer(
         .update(customer)
         .set({
           ...fields,
-          ...(phone ?? {}),
+          ...(phone && !phoneChanged ? phone : {}),
           ...customFieldsSet,
           status,
           ...(emailChanged
@@ -298,6 +393,12 @@ export async function updateCustomer(
       if (!row) throw notFound(NOT_FOUND);
 
       if (tagIds) await replaceCustomerTags(tx, tenantId, customerId, tagIds);
+      if (phone && phoneChanged) {
+        opened = await openCustomerPhoneChange(tx, tenantId, customerId, phone, {
+          type: "user",
+          id: actor.userId,
+        });
+      }
 
       if (current.portalUserId && (emailChanged || status !== "active")) {
         await leavePortalTenant(tx, current.portalUserId, tenantId);
@@ -308,20 +409,92 @@ export async function updateCustomer(
         actor: { id: actor.userId },
         tenantId,
         target: { type: "customer", id: customerId },
-        metadata: { status, emailChanged },
+        metadata: { status, emailChanged, phoneChange: phoneChanged },
         ip: actor.ip,
       });
 
-      return toCustomer(row, (await tagsOfCustomers(tx, [row.id])).get(row.id));
+      return {
+        ...toCustomer(
+          row,
+          (await tagsOfCustomers(tx, [row.id])).get(row.id),
+          await teamRolesOf(tx, tenantId, [row.userId]),
+        ),
+        phoneChange: await customerPhoneChange(tx, row.id),
+      };
     });
 
     if (unlinkedUserId) await dropOrphanPortalUser(unlinkedUserId);
+    await sendChangeLink(customerId, opened);
 
     return updated;
   } catch (error) {
     return translateUnique(error);
   }
 }
+
+/** Depois do commit: o link da troca de número da ficha (o job decide se ela tem como confirmar). */
+async function sendChangeLink(customerId: string, opened: PhoneChangeOpened | null) {
+  if (!opened) return;
+  await requestPhoneVerificationSend(
+    opened.requestId,
+    { type: "customer", id: customerId },
+    opened.reason,
+  );
+}
+
+/**
+ * `POST /api/customers/:id/phone-change`: a equipe pede a troca do número da ficha. O número novo
+ * já de outro cliente é 409 aqui (a equipe pode saber, como no cadastro). A ficha não muda: o link
+ * vai ao número novo e só confirma na sessão do portal da própria ficha; ficha sem conta no portal
+ * vai para a liberação do owner (`phone:confirm`), que vale como `manual` (não atrai conversas nem
+ * liga a ficha à pessoa da equipe com o número). Assim um colaborador não passa a ficha de um
+ * cliente para um número dele. Pedir de novo o mesmo número reenvia o link.
+ */
+export async function requestCustomerPhoneChange(
+  tenantId: string,
+  customerId: string,
+  raw: string,
+  actor: CustomerActor,
+) {
+  const phone: NewPhone = phoneOf(raw);
+
+  const opened = await withTenant(tenantId, async (tx) => {
+    const [current] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(byId(tenantId, customerId))
+      .for("update");
+    if (!current) throw notFound(NOT_FOUND);
+
+    await assertPhoneFree(tx, tenantId, phone.phoneKey, actor, customerId);
+    return openCustomerPhoneChange(tx, tenantId, customerId, phone, {
+      type: "user",
+      id: actor.userId,
+    });
+  });
+
+  await sendChangeLink(customerId, opened);
+  return opened;
+}
+
+/** `DELETE /api/customers/:id/phone-change`: desiste da troca aberta (a ficha não tinha mudado). */
+export async function cancelCustomerPhoneChangeByTeam(
+  tenantId: string,
+  customerId: string,
+  actor: CustomerActor,
+) {
+  await withTenant(tenantId, async (tx) => {
+    const [current] = await tx
+      .select({ id: customer.id })
+      .from(customer)
+      .where(byId(tenantId, customerId))
+      .for("update");
+    if (!current) throw notFound(NOT_FOUND);
+
+    await cancelCustomerPhoneChange(tx, tenantId, customerId, { type: "user", id: actor.userId });
+  });
+}
+
 
 /**
  * Apaga o cliente. As conversas de WhatsApp com ele saem junto (contatos vinculados, mensagens e
@@ -333,42 +506,11 @@ export async function deleteCustomer(
   customerId: string,
   actor: CustomerActor,
 ) {
-  const { portalUserId, storageKeys } = await withTenant(tenantId, async (tx) => {
-    const [found] = await tx
-      .select({ id: customer.id })
-      .from(customer)
-      .where(byId(tenantId, customerId))
-      .for("update");
-    if (!found) throw notFound(NOT_FOUND);
+  const deleted = await withTenant(tenantId, (tx) =>
+    deleteCustomerIn(tx, tenantId, customerId, { actor: { id: actor.userId }, ip: actor.ip }),
+  );
 
-    const inbox = await purgeCustomerContacts(tx, [found.id]);
-    const [removed] = await tx
-      .delete(customer)
-      .where(byId(tenantId, customerId))
-      .returning({ portalUserId: customer.portalUserId });
-    if (!removed) throw notFound(NOT_FOUND);
-
-    if (removed.portalUserId) {
-      await leavePortalTenant(tx, removed.portalUserId, tenantId);
-    }
-
-    await auditInTransaction(tx, "customer.deleted", {
-      actor: { id: actor.userId },
-      tenantId,
-      target: { type: "customer", id: customerId },
-      ip: actor.ip,
-    });
-
-    return { portalUserId: removed.portalUserId, storageKeys: inbox.storageKeys };
-  });
-
-  for (const key of storageKeys) {
-    await getStorage()
-      .delete(key)
-      .catch((error) => logError("Falha ao apagar a mídia do cliente excluído", error));
-  }
-
-  if (portalUserId) await dropOrphanPortalUser(portalUserId);
+  await afterCustomerDeleted(deleted);
 }
 
 /**

@@ -45,6 +45,10 @@ export const messagesQuerySchema = z.object({
 });
 export type MessagesQuery = z.infer<typeof messagesQuerySchema>;
 
+/** `PUT /api/inbox/messages/:id/favorite`: liga ou desliga a estrela da mensagem (idempotente). */
+export const favoriteMessageSchema = z.object({ favorite: z.boolean("Informe se é favorita.") });
+export type FavoriteMessageInput = z.infer<typeof favoriteMessageSchema>;
+
 /** Gerado pela tela a cada envio: repetir o envio com o mesmo id devolve a mesma mensagem. */
 export const clientIdSchema = z
   .string()
@@ -104,6 +108,23 @@ export const sendMediaFormSchema = z.object({
   clientId: clientIdSchema,
 });
 export type SendMediaFormInput = z.infer<typeof sendMediaFormSchema>;
+
+/**
+ * "Continuar por outro número" (X2): o número de saída e a primeira mensagem, só texto. `clientId` como
+ * no envio: repetir o pedido (dois cliques, queda de rede) devolve a mesma mensagem, sem enviar de novo.
+ */
+export const transferConversationSchema = z
+  .object({
+    channelId: z.uuid("Número inválido."),
+    text: z
+      .string()
+      .trim()
+      .min(1, "Escreva a mensagem.")
+      .max(MESSAGE_TEXT_MAX, "Mensagem muito longa."),
+    clientId: clientIdSchema,
+  })
+  .strict();
+export type TransferConversationInput = z.infer<typeof transferConversationSchema>;
 
 export const assignSchema = z.object({
   /** `null` devolve à fila. */

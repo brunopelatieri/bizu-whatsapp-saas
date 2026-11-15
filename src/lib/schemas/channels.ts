@@ -155,3 +155,13 @@ export type QrChannelErrorCode =
   | ChannelErrorCode
   | "CHANNEL_ALREADY_CONNECTED"
   | "UNSUPPORTED_FOR_CHANNEL";
+
+/** O modelo aprovado da Cloud que leva o link de verificação, ou `null` para tirar. */
+export const verificationTemplateSchema = z.object({
+  template: z
+    .object({
+      name: z.string().trim().min(1).max(512),
+      language: z.string().trim().min(2).max(15),
+    })
+    .nullable(),
+});

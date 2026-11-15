@@ -52,6 +52,9 @@
 | React Hook Form | Formularios performaticos |
 | Zod | Validacao compartilhavel front/back |
 | `@hookform/resolvers` | Integracao React Hook Form + Zod |
+| `read-excel-file` (`9.3.14`, versao fixada) | Leitura de `.xlsx` na importacao de clientes (bloco I), so no navegador e em import dinamico (`read-excel-file/browser`); descompacta e le o XML num Web Worker. Unica biblioteca de planilha do projeto |
+| `frimousse` (`0.4.0`, versao fixada) | Seletor de emoji do atendimento (bloco X, X3), componentes sem estilo da Liveblocks (MIT, sem dependencias; `react` como peer). Carregado so na primeira abertura do painel (`React.lazy`); os dados vem de `/emojibase`, nunca de CDN |
+| `emojibase-data` (`18.0.0`, versao fixada, **dev**) | Dados de emoji (MIT). So alimenta `scripts/sync-emojibase.mjs`, que copia `pt/data.json` e `pt/messages.json` para `public/emojibase/`; os arquivos copiados sao versionados. Traz `emojibase` (peer, tambem dev) |
 
 ### Backend / API / Banco
 

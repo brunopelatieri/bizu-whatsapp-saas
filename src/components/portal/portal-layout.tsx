@@ -4,6 +4,10 @@ import { AuthSpinner } from "@/components/auth/auth-shell";
 import { SiteLogo } from "@/components/layout/site-logo";
 import { ConsentDialog } from "@/components/legal/consent-dialog";
 import { PortalNoAccess } from "@/components/portal/portal-no-access";
+import {
+  PortalPhoneGate,
+  PortalPhonePendingBanner,
+} from "@/components/phone/phone-verification-panel";
 import { Button } from "@/components/ui/button";
 import { portalNav } from "@/lib/constants/portal-nav";
 import { cn } from "@/lib/utils";
@@ -21,11 +25,15 @@ export function PortalLayout() {
     consentRequired,
     loading,
     accountError,
+    phoneBlocked,
     refresh,
     signOut,
   } = usePortalAuth();
 
   if (loading) return <AuthSpinner />;
+
+  // A API recusa tudo até a ficha da organização em uso ter o WhatsApp confirmado.
+  if (phoneBlocked) return <PortalPhoneGate />;
 
   if (accountError) {
     return (
@@ -104,6 +112,7 @@ export function PortalLayout() {
           ))}
         </nav>
       </header>
+      <PortalPhonePendingBanner />
 
       <main className="mx-auto w-full max-w-4xl flex-1 p-4 sm:p-6">
         <Outlet />

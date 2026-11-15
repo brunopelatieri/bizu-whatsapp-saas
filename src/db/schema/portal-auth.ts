@@ -10,7 +10,8 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { phoneRequired } from "../phone-check";
+import { phoneVerifiedVia } from "../../lib/phone/verification";
+import { accountPhoneViaGlobal, phoneRequired, phoneVerifiedConsistent } from "../phone-check";
 import { organization } from "./tenant";
 
 /**
@@ -41,11 +42,16 @@ export const portalUser = pgTable("portal_user", {
   phone: text("phone"),
   phoneNormalized: text("phone_normalized"),
   phoneKey: text("phone_key"),
+  // Quando e como o número atual foi confirmado; nulos = só declarado (`phone/verification.ts`).
+  phoneVerifiedAt: timestamptz("phone_verified_at"),
+  phoneVerifiedVia: text("phone_verified_via", { enum: phoneVerifiedVia }),
   locale: text("locale"),
   ...timestamps,
 }, (table) => [
   index("portal_user_phone_key_idx").on(table.phoneKey),
   check("portal_user_phone_required", phoneRequired),
+  check("portal_user_phone_verified_consistent", phoneVerifiedConsistent),
+  check("portal_user_phone_via_global", accountPhoneViaGlobal),
 ]);
 
 export const portalSession = pgTable(

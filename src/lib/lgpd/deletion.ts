@@ -19,6 +19,7 @@ import {
   organizationProfile,
   organizationRole,
   organizationTag,
+  phoneTenantVouch,
   portalAccount,
   portalSession,
   portalTwoFactor,
@@ -36,6 +37,12 @@ import type {
   DeletionSubjectType,
 } from "@/db/schema/lgpd";
 import { type AuditAction, auditInTransaction } from "@/lib/audit";
+import {
+  deletePortalClaimsOf,
+  deleteVerificationsOf,
+  releaseTenantPhoneResponsibility,
+} from "@/lib/phone/requests";
+import { UNVERIFIED_PHONE } from "@/lib/phone/verification";
 import { appLink } from "@/lib/auth/links";
 import { getPortalAuth } from "@/lib/auth/portal";
 import { cancelSubscriptionForDeletion } from "@/lib/billing/checkout";
@@ -51,9 +58,12 @@ import {
   purgeCustomerContacts,
   purgeTenantInbox,
 } from "@/lib/inbox/privacy";
+import { deleteAvatarsOf } from "@/lib/profile/avatar";
 import { getStorage } from "@/lib/storage";
 import { TenantRuleError, notFound } from "@/lib/tenant/errors";
 import { soleOwnerTenants } from "@/lib/tenant/ownership";
+import { deleteAccountCustomers } from "@/lib/tenant/team-customer-removal";
+import { dropOrphanPortalUser } from "@/lib/portal/access";
 
 /**
  * Exclusão de dados pessoais com carência (`deletion_request`). Pedir agenda; cancelar desfaz;
@@ -727,7 +737,11 @@ export async function listPendingDeletions(
   };
 }
 
-type Anonymized = { storageKeys: string[] };
+type Anonymized = {
+  storageKeys: string[];
+  /** Identidades do portal que ficaram sem ficha (D-11): caem depois do commit. */
+  portalUserIds?: string[];
+};
 
 async function exportKeysOf(tx: Tx, type: "user" | "portal_user", id: string) {
   const rows = await tx
@@ -743,6 +757,10 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   const [person] = await tx.select({ email: user.email }).from(user).where(eq(user.id, id));
   if (!person) return { storageKeys: [] };
 
+  // D-11: as fichas de cliente ligadas à própria pessoa, em todas as organizações, saem com ela.
+  // Antes de zerar o telefone: o número confirmado decide quais contatos saem com a ficha.
+  const ownCustomers = await deleteAccountCustomers(tx, id);
+
   await tx
     .update(user)
     .set({
@@ -752,6 +770,7 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
       phone: null,
       phoneNormalized: null,
       phoneKey: null,
+      ...UNVERIFIED_PHONE,
       locale: null,
       emailVerified: false,
       twoFactorEnabled: false,
@@ -771,10 +790,26 @@ async function anonymizeUser(tx: Tx, id: string): Promise<Anonymized> {
   await releaseAssignments(tx, id);
   // Caixa de entrada: mensagens e anexos sem autor; contatos ligados a ela só perdem o vínculo.
   await detachUserFromInbox(tx, id);
+  // Pedidos de verificação de telefone da conta e o que as organizações atestaram sobre o
+  // número dela: o número saiu, e a linha de `user` fica (o `cascade` não dispara).
+  await deleteVerificationsOf(tx, "user", [id]);
+  await tx.delete(phoneTenantVouch).where(eq(phoneTenantVouch.userId, id));
+  // A linha de `user` fica (anonimizada), então o `set null` da FK não dispara: a ficha de
+  // cliente que a pessoa tinha em cada organização deixa de apontar para ela aqui.
+  await tx.update(customer).set({ userId: null }).where(eq(customer.userId, id));
   await tx.delete(invitation).where(eq(invitation.email, person.email));
   await tx.delete(emailMessages).where(eq(emailMessages.toHash, hashEmail(person.email)));
+  // A foto de perfil (bloco F): o registro sai aqui e o objeto depois do commit.
+  const avatarKeys = await deleteAvatarsOf(tx, [id]);
 
-  return { storageKeys: await exportKeysOf(tx, "user", id) };
+  return {
+    storageKeys: [
+      ...ownCustomers.storageKeys,
+      ...avatarKeys,
+      ...(await exportKeysOf(tx, "user", id)),
+    ],
+    portalUserIds: ownCustomers.portalUserIds,
+  };
 }
 
 const anonymizedCustomer = {
@@ -784,6 +819,8 @@ const anonymizedCustomer = {
   // Libera o número para outro cadastro; o `CHECK` aceita porque o e-mail vira `deleted+...`.
   phoneNormalized: null,
   phoneKey: null,
+  ...UNVERIFIED_PHONE,
+  userId: null,
   document: null,
   notes: null,
   // Valor de campo adicional é dado pessoal em potencial.
@@ -810,6 +847,13 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
     tx,
     customers.map((row) => row.id),
   );
+  await deleteVerificationsOf(
+    tx,
+    "customer",
+    customers.map((row) => row.id),
+  );
+  // O `claim` aberto da pessoa (autocadastro com o número de outra ficha) guarda nome e e-mail dela.
+  await deletePortalClaimsOf(tx, [id]);
 
   await tx
     .update(portalUser)
@@ -820,6 +864,7 @@ async function anonymizePortalUser(tx: Tx, id: string): Promise<Anonymized> {
       phone: null,
       phoneNormalized: null,
       phoneKey: null,
+      ...UNVERIFIED_PHONE,
       locale: null,
       emailVerified: false,
       twoFactorEnabled: false,
@@ -865,6 +910,10 @@ async function anonymizeTenant(tx: Tx, id: string, now: Date): Promise<Anonymize
   await tx.delete(organizationTag).where(eq(organizationTag.organizationId, id));
   await tx.delete(organizationProfile).where(eq(organizationProfile.organizationId, id));
   await tx.update(customer).set(anonymizedCustomer).where(eq(customer.tenantId, id));
+  // A organização deixa de responder pelo telefone da equipe: as liberações dela caem, os
+  // pedidos dela saem, e quem segue sem o número confirmado ganha o pedido da plataforma. A
+  // linha da organização fica (anonimizada), então o `cascade` não faria isso.
+  await releaseTenantPhoneResponsibility(tx, id);
   // Caixa de entrada: todos os contatos (com ou sem cliente), conversas e mensagens; e os avisos
   // de canal, cujo `raw` tem telefone e texto. A mídia das mensagens é `file` do tenant (abaixo).
   const inbox = await purgeTenantInbox(tx, id);
@@ -902,7 +951,7 @@ export async function executeDeletion(
   requestId: string,
   now = new Date(),
 ): Promise<DeletionOutcome> {
-  const { outcome, storageKeys } = await withPlatformScope("lgpd", async (tx) => {
+  const { outcome, storageKeys, portalUserIds } = await withPlatformScope("lgpd", async (tx) => {
     const [request] = await tx
       .select()
       .from(deletionRequest)
@@ -910,7 +959,7 @@ export async function executeDeletion(
       .for("update");
 
     if (request?.status !== "pending" || request.scheduledFor > now) {
-      return { outcome: "skipped" as const, storageKeys: [] as string[] };
+      return { outcome: "skipped" as const, storageKeys: [] as string[], portalUserIds: [] as string[] };
     }
 
     // Dono único de organização ativa que surgiu durante a carência: não deixa órfã.
@@ -922,7 +971,7 @@ export async function executeDeletion(
           .update(deletionRequest)
           .set({ status: "failed" })
           .where(eq(deletionRequest.id, request.id));
-        return { outcome: "failed" as const, storageKeys: [] as string[] };
+        return { outcome: "failed" as const, storageKeys: [] as string[], portalUserIds: [] as string[] };
       }
     }
 
@@ -944,13 +993,22 @@ export async function executeDeletion(
       target: { type: request.subjectType, id: request.subjectId },
     });
 
-    return { outcome: "executed" as const, storageKeys: result.storageKeys };
+    return {
+      outcome: "executed" as const,
+      storageKeys: result.storageKeys,
+      portalUserIds: result.portalUserIds ?? [],
+    };
   });
 
   for (const key of storageKeys) {
     await getStorage()
       .delete(key)
       .catch((error) => logError("Falha ao apagar arquivo na exclusão", error));
+  }
+  for (const portalUserId of portalUserIds) {
+    await dropOrphanPortalUser(portalUserId).catch((error: unknown) =>
+      logError("Falha ao remover a identidade do portal sem ficha", error),
+    );
   }
 
   return outcome;

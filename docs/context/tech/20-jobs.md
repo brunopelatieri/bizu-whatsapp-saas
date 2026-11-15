@@ -78,7 +78,11 @@ recusar a subida.
 | `channel.inbound` | webhooks de canal | 5x, backoff de 30 s a 1 h | `exclusive`, `singletonKey = channel_event.id`; aplica o aviso gravado (`processChannelEvent`), baixando antes a mídia citada por `mediaUrl` (só de origem em `EVOLUTION_MEDIA_ORIGINS`; 403/404 fecham o aviso como `failed` sem retry); na última tentativa o aviso vira `failed`; dead letter `channel.inbound.dead` (14 dias) |
 | `inbox.media` | mensagem recebida pela Cloud com mídia (`media_status = pending`), enfileirada depois do commit do aviso | 4x, backoff de 1 min a 1 h | `exclusive`, `singletonKey = message.id`; `fetchMedia` fora da transação, tipo conferido pelo conteúdo, `file` + `ready`; recusa do provedor ou última tentativa marca `failed`; dead letter `inbox.media.dead` (`tech/30-caixa-de-entrada.md`) |
 | `inbox.sweep` | cron `*/5 * * * *` | 1x | Mensagem enviada `queued` há mais de 2 min (o provedor não respondeu no prazo) vira `failed` com `UNKNOWN_RESULT`; atravessa os tenants (`withPlatformScope("inbox.sweep")`); dead letter `inbox.sweep.dead` |
+| `inbox.retention` | cron diário 04:45 UTC | sem retry (expira em 6 h) | Limpeza de mensagens (bloco R, `runRetentionCycle` em `src/lib/inbox/retention.ts`): com `MESSAGE_RETENTION_ENABLED=false` não faz nada; senão percorre cada organização × tipo de canal com conversa (e a plataforma), nas fases idade, contagem e favoritas acima do teto, com `MESSAGE_RETENTION_BATCH_LIMIT` por fase. Fila `exclusive` e `singletonKey = "inbox.retention"` no agendamento: no máximo um job vivo. Escopo que falha só vai a `logError` (sem texto de mensagem) e não derruba os outros. Sem retry e com expiração de 6 h: um job repetido ou expirado abriria uma segunda passada com a primeira ainda apagando; a falha ao listar os escopos espera o dia seguinte. Saída: só contagens (`scopes`, `ran`, `failed`, `truncated`). Dead letter `inbox.retention.dead` (`tech/30-caixa-de-entrada.md`) |
+| `phone.verify` | abertura de pedido de verificação de telefone (cadastro, convite, autocadastro e troca no portal), "Reenviar" e o aviso `failed` do link | 2x, 30 s (só erro de banco: a falha do provedor é tratada no job, que passa ao próximo canal) | política `singleton`, `singletonKey` = `user:<id>` ou `customer:<id>`: um job ativo por cadastro, os outros esperam (um link por número). Payload `{ requestId, reason, afterChannelId?, failedMessageId? }`, **sem o token** (cada tentativa gera o seu). Cascata, D-12 e limites em `tech/28-crm-cadastro.md` (`deliverPhoneVerification`, `src/lib/phone/delivery.ts`); quem só enfileira usa `src/lib/phone/dispatch.ts`. Dead letter `phone.verify.dead` |
 | `channel.health` | cron a cada 15 min | 1x | `probe` de cada canal não desativado, grava o estado, avisa os owners na queda e devolve à fila avisos `pending` há mais de 10 min (`tech/29-canais-whatsapp.md`) |
+
+`scheduleDefinitions` aceita `singletonKey` (vai às opções de `boss.schedule`); hoje só `inbox.retention` o usa.
 
 Detalhes das filas de cobrança em `tech/24-billing-cobranca.md`. As de LGPD entram na fase 10: acrescente em `queueDefinitions` (a
 dead letter `<fila>.dead` antes da fila), em `scheduleDefinitions` se tiver cron, e o
@@ -110,7 +114,10 @@ enfileirar → worker → `sent`, supressão, retries esgotados → `failed` + `
 `maintenance.prune` e `checkReady`. `tests/db/job-consumers.test.ts` sobe instâncias reais do pg-boss
 como `bizu_app` e confere contagem e aviso. `tests/db/billing.test.ts` chama `runBillingTrial(now, { tenantIds })`
 diretamente, com relógio e tenants controlados, como `billing-lifecycle.test.ts` nos outros jobs de
-cobrança; `billing-queue.test.ts` confere filas, crons e a política `exclusive` no pg-boss real. Unitários sem banco: `src/jobs/email.test.ts`,
+cobrança; `billing-queue.test.ts` confere filas, crons e a política `exclusive` no pg-boss real.
+`tests/db/setup.ts` (`setupFiles` do `test:db`) desliga a fila `phone.verify` em todos os arquivos
+(`setPhoneVerifyQueueForTests`); `tests/db/phone-delivery.test.ts` instala a própria e chama
+`deliverPhoneVerification` direto. Unitários sem banco: `src/jobs/email.test.ts`,
 `src/jobs/consumers.test.ts`, `src/api/ready.test.ts`.
 
 ## Filas da fase 10
@@ -120,6 +127,6 @@ cobrança; `billing-queue.test.ts` confere filas, crons e a política `exclusive
 | `lgpd.export` | `POST /api/me/export`, `/api/portal/me/export` | 3x, backoff | `exclusive`, `singletonKey` = `data_export.id`; na última tentativa o pedido vira `failed`; dead letter `lgpd.export.dead` |
 | `lgpd.delete` | cron diário 05:00 UTC | 3x | executa `deletion_request` vencidas, cada uma em transação (inclusive as conversas da caixa de entrada e os `channel_event` do tenant, `src/lib/inbox/privacy.ts`); objetos do armazenamento saem depois do commit; dead letter `lgpd.delete.dead` |
 
-`maintenance.prune` (cron diário 04:30) agora cobre `payment_event` tratado (90 dias), `channel_event` tratado (`CHANNEL_EVENT_RETENTION_DAYS`, padrão 30), sessões e verificações vencidas das duas instâncias, exportações vencidas, `audit_log` além de `audit_retention_days`, `email_message` (180 dias) e buckets de rate limit. Tabela em `docs/context/lgpd.md`.
+`maintenance.prune` (cron diário 04:30) agora cobre `payment_event` tratado (90 dias), `channel_event` tratado (`CHANNEL_EVENT_RETENTION_DAYS`, padrão 30), sessões e verificações vencidas das duas instâncias, exportações vencidas, `audit_log` além de `audit_retention_days`, `email_message` (180 dias), buckets de rate limit e os pedidos de verificação de telefone (`prunePhoneVerifications`: encerrados há mais de 30 dias, órfãos, link vencido de volta à fila, liberações de organização sem membro ou de número antigo). Tabela em `docs/context/lgpd.md`.
 
 Quem só **enfileira** (`JOBS_MODE=off|worker` no web) precisa que as filas já existam: o worker as cria ao subir (`registerQueues`).

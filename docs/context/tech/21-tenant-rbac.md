@@ -67,6 +67,29 @@ do plugin em `tests/db/rbac.test.ts`.
 personalizado) valem para os números de WhatsApp (`docs/specs/whatsapp-canais/spec.md`); as rotas
 `/api/channels/*` entram com a etapa B1 e a matriz `tests/db/rbac.test.ts` as cobre então.
 
+`phone:confirm` (liberar à mão o telefone de membros e clientes, `tech/28`) é **reservada**: só o
+owner tem, e não entra em papel personalizado. Protege `GET /api/phone-verifications` e
+`POST /api/phone-verifications/:id/confirm`. O que o owner libera vale **só na organização**
+(`phone_tenant_vouch`), e ele não libera o próprio telefone nem o de quem é owner de alguma
+organização. Sair da equipe ou virar owner mexe nos pedidos e nas liberações: `removeMember`
+chama `phoneAfterMemberLeft`, e a troca de papel e a criação de organização chamam
+`routeVerificationToPlatform`.
+
+**`removeMember` e a ficha de cliente da própria pessoa (D-11):** além de apagar `member`, apaga, na mesma
+transação, a ficha de cliente **ligada à pessoa** (`customer.user_id`) **naquela organização** e o conteúdo dela
+(contatos do telefone confirmado da pessoa, conversas, mensagens, arquivos); os outros contatos da ficha só perdem o
+vínculo. Nenhuma outra ficha é tocada, e trocar o papel não apaga nada. A equipe mantém a ficha desfazendo a ligação
+antes (`DELETE /api/customers/:id/team-link`, `customer:update`). Ligar à mão também é `customer:update`
+(`PUT /api/customers/:id/team-link`, só a membros desta organização com o telefone confirmado no sistema, nunca a si
+mesmo, fora da personificação), e
+a ligação feita à mão é apagada com a pessoa exatamente como a automática.
+
+**`phone:confirm` e o `claim` (D-1):** a liberação à mão nunca fecha um `claim` (409 `CLAIM_LINK_ONLY`): sem prova de
+posse, o owner não apaga a ficha de ninguém por ela. Não existe `claim` pedido pela equipe (decisão do proprietário de
+2026-11-14): `customer:create` com número de outra ficha recebe 409 `PHONE_IN_USE`. `GET /api/team` devolve `customerRecord` por
+membro só a quem tem `member:delete`, para o diálogo de remoção avisar (`tech/28-crm-cadastro.md`, "Ficha de
+quem é da equipe: o que a remoção apaga").
+
 `inbox:read`, `inbox:reply`, `inbox:assign` e `inbox:supervise` são da caixa de entrada
 (`docs/specs/caixa-de-entrada/spec.md`, `tech/30-caixa-de-entrada.md`): owner e admin têm as quatro,
 membro `read` e `reply`; todas atribuíveis a papel personalizado; `supervise` sem `read` não tem
@@ -126,7 +149,7 @@ Eventos: `auth.email_verified`, `auth.password_reset`, `tenant.created`, `tenant
 `tag.deleted`, `custom_field.created`, `custom_field.updated`, `custom_field.archived`,
 `custom_field.deleted` (só ids e `key`; valor de campo nunca), `inbox.conversation_claimed`,
 `inbox.conversation_assigned`, `inbox.conversation_released`, `inbox.conversation_closed`,
-`inbox.conversation_reopened`, `inbox.contact_linked`, `inbox.contact_saved_as_customer` (só ids;
+`inbox.conversation_reopened`, `inbox.contact_linked`, `inbox.contact_saved_as_customer`, `inbox.conversation_continued` (X2), `inbox.message_favorited`, `inbox.message_unfavorited` (só ids;
 texto e telefone nunca). Na plataforma os mesmos eventos levam o prefixo `admin.` (`admin.tag_created|updated|deleted`, `admin.custom_field_created|updated|archived|deleted`) e `admin.tenant_profile_updated`, com `actor_type = platform` e **sem `tenant_id`**: nunca aparecem em `/app/auditoria`. Ações do próprio cliente gravam
 `actor_type = portal_user`: `portal.signed_up`, `portal.profile_updated`, `portal.password_set`.
 
@@ -135,8 +158,10 @@ Evento sem tenant só aparece com `withPlatformScope`. Ainda não há tela de le
 ## Limites
 
 `src/lib/auth/constants.ts`: 20 papéis por tenant e convite de 48 h, tetos fixos do plugin. O limite
-de **assentos** vem do plano: convidar e aceitar passam por `assertWithinLimit(tenantId, "members")`
-e respondem 403 `PLAN_LIMIT_REACHED` (`tech/23-billing-planos.md`). Quantas organizações o dono
+de **assentos** vem do plano: convidar e aceitar passam por `withinLimit(tenantId, "members", …)`
+(conferência e gravação do convite ou do membro sob `pg_advisory_xact_lock` por organização e métrica,
+Q1) e respondem 403 `PLAN_LIMIT_REACHED` (`tech/23-billing-planos.md`). Reenvio, cancelamento e remoção
+não tomam a trava. Quantas organizações o dono
 pode ter também vem do plano (`limits.organizations`, `src/lib/billing/organizations.ts`), conferido
 com lock por pessoa em `POST /api/tenant`, o único caminho de criação.
 

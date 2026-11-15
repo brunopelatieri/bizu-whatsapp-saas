@@ -40,7 +40,7 @@ function signUp(body: Record<string, unknown>) {
     body: {
       name: "Pessoa Nova",
       email: newEmail(),
-      password: "senha-forte-123",
+      password: "Senha-forte-123",
       acceptTerms: true,
       termsVersion: LEGAL_VERSIONS.terms,
       ...body,
@@ -85,19 +85,32 @@ describe("cadastro de conta (/api/auth/sign-up/email)", () => {
     });
   });
 
-  it("fixo e celular antigo são aceitos; estrangeiro também", async () => {
-    for (const [phone, normalized] of [
-      ["(11) 3456-7890", "551134567890"],
-      ["(11) 9876-5432", "551198765432"],
-      ["+1 415 555 2671", "14155552671"],
-    ] as const) {
+  it("a conta da equipe só aceita número que recebe WhatsApp: fixo e celular antigo são recusados", async () => {
+    for (const phone of ["(11) 3456-7890", "(11) 9876-5432"]) {
       const email = newEmail();
-      expect((await signUp({ email, phone })).status).toBe(200);
-      expect((await phoneOfUser(email))?.phone_normalized).toBe(normalized);
+      const response = await signUp({ email, phone });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Informe um celular com WhatsApp." });
+      expect(await phoneOfUser(email)).toBeUndefined();
     }
+
+    const email = newEmail();
+    expect((await signUp({ email, phone: "+1 415 555 2671" })).status).toBe(200);
+    expect((await phoneOfUser(email))?.phone_normalized).toBe("14155552671");
   });
 
-  it("o telefone da conta não precisa ser único: dois membros dividem o número", async () => {
+  it("o telefone do cadastro nasce só declarado, sem confirmação", async () => {
+    const email = newEmail();
+    expect((await signUp({ email, phone: ACCOUNT_PHONE })).status).toBe(200);
+
+    const [row] = await owner<{ at: Date | null; via: string | null }[]>`
+      select phone_verified_at as at, phone_verified_via as via from "user" where email = ${email}
+    `;
+    expect(row).toEqual({ at: null, via: null });
+  });
+
+  it("dois cadastros podem declarar o mesmo número: só o confirmado conta na unicidade", async () => {
     const [a, b] = [newEmail(), newEmail()];
     expect((await signUp({ email: a, phone: ACCOUNT_PHONE })).status).toBe(200);
     expect((await signUp({ email: b, phone: ACCOUNT_PHONE })).status).toBe(200);
@@ -108,7 +121,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
   it("sem o contexto do cadastro, falha fechada e não cria conta", async () => {
     const email = newEmail();
     const result = await getAuth()
-      .api.signUpEmail({ body: { name: "Direto", email, password: "senha-forte-123" } })
+      .api.signUpEmail({ body: { name: "Direto", email, password: "Senha-forte-123" } })
       .catch((error: unknown) => error);
 
     expect(result).toBeInstanceOf(Error);
@@ -125,7 +138,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
             body: {
               name: "Direto",
               email,
-              password: "senha-forte-123",
+              password: "Senha-forte-123",
               // `input: false`: o corpo não decide.
               ...({ phone: "(21) 91111-2222", phoneNormalized: "5521911112222" } as object),
             },
@@ -145,7 +158,7 @@ describe("Better Auth chamado direto, fora da rota de cadastro", () => {
       { subjectType: "user", termsVersion: LEGAL_VERSIONS.terms, phone: "(10) 98765-4321" },
       () =>
         getAuth()
-          .api.signUpEmail({ body: { name: "Direto", email, password: "senha-forte-123" } })
+          .api.signUpEmail({ body: { name: "Direto", email, password: "Senha-forte-123" } })
           .catch((error: unknown) => error),
     );
 
@@ -169,7 +182,7 @@ describe("autocadastro do portal", () => {
         name: "Cliente Auto",
         email,
         phone: "(11) 91234-5678",
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         org: tenant.slug,
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,
@@ -213,7 +226,7 @@ describe("autocadastro do portal", () => {
       body: {
         name: "Sem Fone",
         email,
-        password: "senha-forte-123",
+        password: "Senha-forte-123",
         org: tenant.slug,
         acceptTerms: true,
         termsVersion: LEGAL_VERSIONS.terms,

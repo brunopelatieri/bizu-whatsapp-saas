@@ -155,7 +155,7 @@ describe("portal: isolamento", () => {
         body: {
           name: "Pessoa",
           email,
-          password: "senha-forte-123",
+          password: "Senha-forte-123",
           phone: "11987654321",
           acceptTerms: true,
           termsVersion: "2026-11",
@@ -265,11 +265,11 @@ describe("portal: isolamento", () => {
 
       await call("POST", "/api/portal/auth-ext/set-password", {
         cookie: await inviteAndEnter(ownerB, mail, second.id, email),
-        body: { newPassword: "senha-do-portal-1" },
+        body: { newPassword: "Senha-do-portal-1" },
       });
 
       const signedIn = await call("POST", "/api/portal/auth/sign-in/email", {
-        body: { email, password: "senha-do-portal-1" },
+        body: { email, password: "Senha-do-portal-1" },
       });
       const fresh = sessionCookies(signedIn);
 
@@ -321,12 +321,21 @@ describe("portal: isolamento", () => {
       expect(inBCustomer.name).toBe("Júlia em B");
       expect(inBCustomer.phone).not.toBe("11 90000-0000");
 
+      // Em A o nome muda na hora; o número novo vira a troca pendente da ficha de A (bloco T).
       const inA = await call("GET", `/api/customers/${customerA}`, {
         cookie: ownerA.cookie,
       });
-      expect(await inA.json()).toMatchObject({
-        customer: { name: "Júlia Nova", phone: "11 90000-0000" },
+      const { customer: inACustomer } = (await inA.json()) as {
+        customer: { name: string; phone: string; phoneChange: { phoneHint: string } | null };
+      };
+      expect(inACustomer.name).toBe("Júlia Nova");
+      expect(inACustomer.phone).not.toBe("11 90000-0000");
+      expect(inACustomer.phoneChange).toMatchObject({ phoneHint: "0000" });
+
+      const inBAgain = await call("GET", `/api/customers/${customerB}`, {
+        cookie: ownerB.cookie,
       });
+      expect(await inBAgain.json()).toMatchObject({ customer: { phoneChange: null } });
     });
 
     it("tenant suspenso fecha o portal", async () => {

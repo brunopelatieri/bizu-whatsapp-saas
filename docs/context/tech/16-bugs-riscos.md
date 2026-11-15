@@ -227,6 +227,39 @@ usada no cadastro, respondia 403 `EMAIL_NOT_VERIFIED` se a conta era nova e 401 
 Corrigido com `hideUnverified` (`src/api/auth-ext.ts`), o mesmo do portal, que devolve o 401 do
 Better Auth byte a byte. A tela de login passou a oferecer o reenvio sempre, sem depender do erro.
 
+### RISK-014 — Autocadastro do portal ainda deixa inferir que o número é de um cliente (risco residual)
+
+Com o `claim` (D-1, `tech/28-crm-cadastro.md`), o autocadastro com o número de uma ficha que já existe aparece no portal
+como uma ficha pendente comum, e o link segue o mesmo envio do autocadastro comum (Cloud, depois QR Code). Sobram dois
+sinais para quem se cadastra com o número de outra pessoa (cada tentativa custa um e-mail novo confirmado):
+
+- a organização some do painel quando o `claim` vence (`PHONE_VERIFICATION_TTL_MINUTES`), enquanto o lead comum fica;
+- quando a ficha que tem o número é protegida (conta no portal, ligada à equipe ou bloqueada), o `claim` nem abre e a
+  organização nunca aparece, como antes do `claim`.
+
+Igualar exigiria inventar regra: manter o `claim` (e o `payload`) além do prazo, ou mostrar um pedido que não existe.
+Nenhum dos dois foi feito. O sinal "aguardando liberação" em organização só com QR Code deixou de existir em
+2026-11-14, quando o `claim` passou a usar o QR Code.
+
+### RISK-015 — Pool de conexões travado por seção que segura uma e pede outra (corrigido, 2026-11-14)
+
+O pool de runtime é um só, de 10 conexões (`src/db/index.ts`), e o Better Auth usa o mesmo. `createOrganizationWithinLimit`
+(`src/lib/billing/organizations.ts`, anterior à trava de limites da Q1) abre uma transação de plataforma, toma um lock por pessoa e
+chama o `createOrganization` do Better Auth **lá dentro**, que pede uma segunda conexão. Com 10 criações simultâneas, da mesma
+pessoa (as outras esperando o lock, cada uma com uma conexão) ou de pessoas diferentes, as 10 conexões ficavam presas em
+transações que esperavam o Better Auth, e o Better Auth ficava na fila do pool, que o `postgres.js` não limita no tempo: nada
+liberava, e todo o acesso ao banco do processo parava até reiniciar. A trava de `members` da Q1 (`withinLimit` com
+`createInvitation` e `acceptInvitation` dentro) tinha o mesmo desenho e foi corrigida junto.
+
+Correção: `nestedSection` (`src/db/nested-section.ts`), um semáforo em memória com teto de `floor(POOL_MAX / 3)` = 3 seções ao
+mesmo tempo, com a fila de pedidos **sem** conexão; `withinLimitNested` não abre transação quando a métrica não tem limite.
+Cada seção segura 1 conexão e o código de dentro usa até 2, então no pior caso 9 de 10. Testes em `tests/db/pool-saturation.test.ts`
+(14 pedidos simultâneos, mais que as conexões). O pool não foi aumentado: o teto é que garante a vivacidade.
+
+Risco que sobra: o teto é por **processo**. Com várias instâncias, cada uma tem o seu pool e o seu teto, então não há travamento
+entre elas; o limite de conexões do Postgres é a soma dos pools. Código novo que segure uma conexão e peça outra volta ao problema
+se não passar por `nestedSection` (regra em `.claude/rules/api-hono.md`).
+
 ### RISK-007 — Pré-sequestro no autocadastro do portal (risco aceito)
 
 É o RISK-006 no portal, só em tenant com `portal_self_signup` ligado. Quem cadastra o e-mail de

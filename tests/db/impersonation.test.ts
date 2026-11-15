@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { waitForBackgroundTasks } from "@/lib/auth/background";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
 import { setEmailProviderForTests } from "@/lib/email/send";
+import { setSheetFetchDepsForTests } from "@/lib/spreadsheet/google-sheets-fetch.server";
 import { makePlatformUser } from "./billing-helpers";
 import { applyCookies, PASSWORD } from "./security-helpers";
 import {
@@ -225,6 +226,51 @@ describe("personificação", () => {
       });
     });
 
+    it("a importação de clientes segue o cadastro: permitida na personificação e com o impersonator_id", async () => {
+      await grant();
+      const cookie = await enterAs(tenantOwner);
+
+      const response = await call("POST", "/api/customers/import", {
+        cookie,
+        body: { rows: [{ sourceRow: 2, phone: "11987654399", name: "Importado pelo suporte", tags: [] }] },
+      });
+      expect(response.status).toBe(200);
+      expect(((await response.json()) as { counts: { created: number } }).counts.created).toBe(1);
+
+      const [row] = await auditRows("customer.imported");
+      expect(row).toMatchObject({ actor_id: tenantOwner.id, impersonator_id: support.id });
+    });
+
+    it("a busca do Google Planilhas segue a importação: permitida na personificação, sem auditoria própria", async () => {
+      await grant();
+      const cookie = await enterAs(tenantOwner);
+      const csv = ["telefone", "11987654398", ""].join(String.fromCharCode(10));
+      setSheetFetchDepsForTests({
+        resolve: async () => [{ address: "142.250.219.225", family: 4 }],
+        transport: async () => ({
+          status: 200,
+          header: (name) => (name.toLowerCase() === "content-type" ? "text/csv" : undefined),
+          body: (async function* () {
+            yield new TextEncoder().encode(csv);
+          })(),
+          close: () => undefined,
+        }),
+        totalTimeoutMs: 5_000,
+        connectTimeoutMs: 1_000,
+        maxBytes: 1024,
+      });
+      try {
+        const response = await call("POST", "/api/customers/import/google-sheets", {
+          cookie,
+          body: { url: "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcd/edit" },
+        });
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe(csv);
+      } finally {
+        setSheetFetchDepsForTests(undefined);
+      }
+    });
+
     it("a sessão termina junto com o consentimento", async () => {
       const grantId = await grant();
       const soon = new Date(Date.now() + 10 * 60 * 1000);
@@ -411,6 +457,11 @@ describe("personificação", () => {
       for (const [method, path, body] of [
         ["POST", "/api/admin/crm/tags", { name: "x" }],
         ["PUT", `/api/admin/tenants/${tenantId}/profile`, { tagIds: [] }],
+        [
+          "PUT",
+          `/api/admin/retention/tenants/${tenantId}/whatsapp_cloud`,
+          { maxMessages: 1, retentionDays: 1, maxFavorites: 1 },
+        ],
       ] as const) {
         const response = await call(method, path, { cookie, body });
 
@@ -553,6 +604,8 @@ describe("personificação", () => {
       ["DELETE", `/api/team/invitations/${anyId}`],
       ["PATCH", `/api/team/members/${anyId}`],
       ["DELETE", `/api/team/members/${anyId}`],
+      ["DELETE", `/api/customers/${anyId}/team-link`],
+      ["PUT", `/api/customers/${anyId}/team-link`],
       ["POST", "/api/roles"],
       ["PATCH", `/api/roles/${anyId}`],
       ["DELETE", `/api/roles/${anyId}`],
@@ -576,10 +629,21 @@ describe("personificação", () => {
       ["POST", `/api/inbox/messages/${anyId}/media/retry`],
       ["POST", `/api/inbox/conversations/${anyId}/messages`],
       ["POST", `/api/inbox/messages/${anyId}/retry`],
+      ["PUT", `/api/inbox/messages/${anyId}/favorite`],
       ["POST", "/api/inbox/conversations"],
+      ["POST", `/api/inbox/conversations/${anyId}/transfer`],
       ["PATCH", `/api/inbox/contacts/${anyId}`],
       ["POST", `/api/inbox/contacts/${anyId}/link`],
       ["POST", `/api/inbox/contacts/${anyId}/customer`],
+      // Verificação de telefone: a sessão de suporte não confirma nem libera o número de ninguém.
+      ["POST", "/api/me/phone-verification/confirm"],
+      ["POST", `/api/phone-verifications/${anyId}/confirm`],
+      // Troca de telefone e perfil da própria conta (bloco T e F1).
+      ["POST", "/api/me/phone-change"],
+      ["DELETE", "/api/me/phone-change"],
+      ["PATCH", "/api/me"],
+      ["POST", "/api/me/avatar"],
+      ["DELETE", "/api/me/avatar"],
     ])("%s %s responde IMPERSONATION_BLOCKED e audita", async (method, path) => {
       const response = await call(method, path, {
         cookie,
@@ -636,7 +700,7 @@ describe("personificação", () => {
           cookie,
           body: {
             currentPassword: PASSWORD,
-            newPassword: "senha-trocada-456",
+            newPassword: "Senha-trocada-456",
           },
         });
 
@@ -647,7 +711,7 @@ describe("personificação", () => {
     it("a senha continua a mesma depois da tentativa", async () => {
       await call("POST", "/api/auth/change-password", {
         cookie,
-        body: { currentPassword: PASSWORD, newPassword: "senha-trocada-456" },
+        body: { currentPassword: PASSWORD, newPassword: "Senha-trocada-456" },
       });
 
       const signIn = await call("POST", "/api/auth/sign-in/email", {

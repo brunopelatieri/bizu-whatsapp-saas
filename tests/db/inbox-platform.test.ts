@@ -174,11 +174,14 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
     return seeded;
   }
 
-  /** Usuário (da plataforma ou de tenant) com um telefone conhecido, para vincular e iniciar conversa. */
-  async function userWithPhone(phone = uniquePhone()) {
+  /**
+   * Usuário (da plataforma ou de tenant) com um telefone conhecido, para vincular e iniciar
+   * conversa. Confirmado por padrão; `verified: false` é o número só declarado no cadastro.
+   */
+  async function userWithPhone(phone = uniquePhone(), verified = true) {
     const user = await createUser(owner);
     const values = phoneValues(phone);
-    await owner`update "user" set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized}, phone_key = ${values.phoneKey} where id = ${user.id}`;
+    await owner`update "user" set phone = ${values.phone}, phone_normalized = ${values.phoneNormalized}, phone_key = ${values.phoneKey}, phone_verified_at = ${verified ? new Date() : null}, phone_verified_via = ${verified ? "manual" : null} where id = ${user.id}`;
     createdUsers.push(user.id);
     phoneKeys.push(values.phoneKey);
     return { user, ...values, normalized: values.phoneNormalized };
@@ -259,6 +262,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["GET", `${BASE}/conversations/${conversationId}`],
         ["GET", `${BASE}/conversations/${conversationId}/messages`],
         ["GET", `${BASE}/conversations/${conversationId}/templates`],
+        ["GET", `${BASE}/conversations/${conversationId}/related`],
         ["GET", `${BASE}/unread`],
         ["GET", `${BASE}/events`],
         ["GET", `${BASE}/messages/${messageId}/media`],
@@ -266,6 +270,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["POST", `${BASE}/conversations/${conversationId}/read`],
         ["POST", `${BASE}/conversations/${conversationId}/messages`, { type: "text", text: "oi", clientId: "abcdefgh1" }],
         ["POST", `${BASE}/messages/${messageId}/retry`],
+        ["PUT", `${BASE}/messages/${messageId}/favorite`, { favorite: true }],
         ["POST", `${BASE}/messages/${messageId}/media/retry`],
         ["POST", `${BASE}/conversations`, { channelId: cloudId, phone: "11987654321" }],
         ["PATCH", `${BASE}/contacts/${contactId}`, { name: "X" }],
@@ -357,6 +362,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
       const probes = [
         ["GET", `${BASE}/conversations/${tenantThread.id}`],
         ["GET", `${BASE}/conversations/${tenantThread.id}/messages`],
+        ["GET", `${BASE}/conversations/${tenantThread.id}/related`],
         ["GET", `${BASE}/messages/${tenantMessage.id}/media`],
         ["POST", `${BASE}/conversations/${tenantThread.id}/status`, { status: "closed" }],
         ["POST", `${BASE}/conversations/${tenantThread.id}/read`],
@@ -491,6 +497,12 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
       const again = await call("POST", `${BASE}/conversations`, { cookie: as("platformOwner"), body: { channelId: cloudId, userId: user.id } });
       expect(again.status).toBe(200);
       expect(((await bodyOf(again)).conversation as Item).id).toBe(created.id);
+
+      // Usuário com o telefone só declarado no cadastro: a conversa abre, sem vínculo.
+      const declared = await userWithPhone(uniquePhone(), false);
+      const pending = await call("POST", `${BASE}/conversations`, { cookie: as("support"), body: { channelId: qrId, userId: declared.user.id } });
+      expect(pending.status).toBe(201);
+      expect(((await bodyOf(pending)).conversation as Item).contact.identified).toBe(false);
 
       const typed = uniquePhone();
       phoneKeys.push(phoneValues(typed).phoneKey);
@@ -727,6 +739,7 @@ describe("/api/admin/inbox: atendimento da plataforma", () => {
         ["GET", `${BASE}/conversations`, undefined],
         ["POST", `${BASE}/conversations/${thread.id}/messages`, { type: "text", text: "oi", clientId: id() }],
         ["POST", `${BASE}/conversations/${thread.id}/status`, { status: "closed" }],
+        ["PUT", `${BASE}/messages/${randomUUID()}/favorite`, { favorite: true }],
         ["POST", `${BASE}/conversations`, { channelId: cloudId, phone: "11987654321" }],
       ] as const;
       for (const [method, path, body] of attempts) {

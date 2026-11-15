@@ -4,11 +4,14 @@ import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
+import { ContinueOnChannelButton } from "@/components/inbox/continue-on-channel";
+import { EmojiButton } from "@/components/inbox/emoji-button";
 import { formatFileSize } from "@/components/inbox/format";
 import {
   type ConversationResponse,
@@ -24,6 +27,7 @@ import { useInboxCan, useInboxScope } from "@/components/inbox/inbox-scope";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { can as channelCan } from "@/lib/channels/capabilities";
+import { insertAtCursor } from "@/lib/emoji/insert-at-cursor";
 import { MAX_OUTBOUND_MEDIA_BYTES, OUTBOUND_MIME } from "@/lib/inbox/constants";
 import { previewOf } from "@/lib/inbox/preview";
 import { MEDIA_CAPTION_MAX, MESSAGE_TEXT_MAX } from "@/lib/schemas/inbox";
@@ -115,6 +119,11 @@ export function Composer({
   const [preview, setPreview] = useState<string | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // O campo de mensagem: o seletor de emoji lê o cursor dele e o foco volta para ele ao fechar.
+  const field = useRef<HTMLTextAreaElement>(null);
+  // Onde o cursor fica depois de inserir um emoji (aplicado depois da renderização, `useLayoutEffect`).
+  const pendingCursor = useRef<number | null>(null);
+  const fieldTouched = useRef(false);
   // O texto de agora, para o callback de erro (a closure do envio guarda o de antes de limpar o campo).
   const latest = useRef(text);
   // Do envio que falhou: reenviar o MESMO conteúdo reaproveita o id e não duplica no servidor;
@@ -145,6 +154,35 @@ export function Composer({
     if (value) drafts.set(draftKey, value);
     else drafts.delete(draftKey);
   }
+
+  /**
+   * Emoji do seletor (X3): entra na posição do cursor ou sobre a seleção do campo, mesmo com o foco no
+   * painel (o `<textarea>` guarda a seleção ao perder o foco). Passa pelo mesmo `change` do digitado,
+   * então o contador, o rascunho e o envio veem o texto de sempre. Além do teto do campo, não insere.
+   */
+  function insertEmoji(emoji: string) {
+    const element = field.current;
+    // Campo que nunca teve foco (rascunho recuperado, por exemplo) não tem cursor de verdade: vai ao fim.
+    const selection = fieldTouched.current
+      ? { start: element?.selectionStart, end: element?.selectionEnd }
+      : undefined;
+    const next = insertAtCursor(latest.current, emoji, selection, limit);
+    if (!next) {
+      toast.error("A mensagem chegou ao limite de caracteres.");
+      return;
+    }
+    pendingCursor.current = next.cursor;
+    change(next.value);
+  }
+
+  // Devolve o cursor ao ponto depois do emoji: o campo controlado o levaria ao fim ao trocar o valor.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: o texto é o gatilho
+  useLayoutEffect(() => {
+    const cursor = pendingCursor.current;
+    if (cursor === null) return;
+    pendingCursor.current = null;
+    field.current?.setSelectionRange(cursor, cursor);
+  }, [text]);
 
   function pick(file: File | undefined) {
     if (!file) return;
@@ -306,6 +344,8 @@ export function Composer({
               Enviar modelo
             </Button>
           ) : null}
+          {/* X2: seguir a conversa por outro número do escopo; só aparece se o servidor oferecer um. */}
+          <ContinueOnChannelButton conversationId={conversationId} />
         </div>
       ) : null}
 
@@ -391,7 +431,18 @@ export function Composer({
             <LayoutTemplate />
           </Button>
         ) : null}
+        <EmojiButton
+          key={user?.id}
+          disabled={blocked || send.isPending || audioAttached}
+          userId={user?.id}
+          field={field}
+          onPick={insertEmoji}
+        />
         <Textarea
+          ref={field}
+          onFocus={() => {
+            fieldTouched.current = true;
+          }}
           value={text}
           onChange={(event) => change(event.target.value)}
           onKeyDown={onKeyDown}

@@ -30,6 +30,15 @@ portal_two_factor         o mesmo no portal, sem rotas abertas
 impersonation_grant       consentimento do owner: expires_at, revoked_at, used_by (RLS)
 tenant_payment_credential encrypted_secret bytea, key_version, sem tela (RLS)
 rate_limit_bucket         key em hash, window_start, count (RATE_LIMIT_STORE=postgres)
+login_throttle            falhas de login por e-mail (HMAC), janela e locked_until (LOGIN_*; sem RLS)
+phone_verification        pedido de confirmação de telefone: um aberto por (cadastro, responsável,
+                          purpose); purpose signup, change (troca: número novo no pedido, uma
+                          aberta por cadastro) ou claim (0040: autocadastro do portal com o número
+                          de outra ficha; payload com nome e e-mail só enquanto aberto, um aberto
+                          por pessoa do portal e organização); tenant_id nulo = plataforma; token só em hash
+                          (scopedPolicy, RLS forçado)
+phone_tenant_vouch        liberação de uma organização para a conta de um membro, por
+                          (user_id, tenant_id), presa à phone_key (tenantPolicy, RLS forçado)
 session                   token unique, user_id, expires_at, impersonated_by,
                           impersonation_expires_at, active_organization_id
 account                   provider_id = credential guarda a senha
@@ -113,7 +122,7 @@ await withPlatformScope("motivo", (tx) => tx.select().from(auditLog));
 Para tabelas que servem o tenant (`/app`) e a plataforma (`/admin`) com o mesmo schema
 (WhatsApp CRM, `docs/specs/whatsapp-crm/plano.md`, decisões T1 a T3). Usam `scopedPolicy()`: `tag`,
 `custom_field`, `audit_log` (o evento da plataforma, sem `tenant_id`, grava em `withPlatformData`),
-as tabelas de canal, as da caixa de entrada e `file`;
+as tabelas de canal, as da caixa de entrada, `file` e `phone_verification`;
 usam `platformOnlyPolicy()`: `organization_tag` e `organization_profile` (A4, anotação da plataforma
 sobre a organização; o owner nunca as alcança).
 
@@ -206,6 +215,20 @@ Detalhes em `tech/29-canais-whatsapp.md`.
 `scopedPolicy()` e torna `file.tenant_id` anulável: o Drizzle Kit pergunta, sem TTY, se a política foi
 renomeada; a migration foi gerada em duas passadas (criar a nova, depois apagar a antiga) e unida.
 Detalhes em `tech/30-caixa-de-entrada.md`.
+
+### Retenção de mensagens (bloco R, migration `0039_retencao_mensagens`)
+
+`message` ganha `is_favorite` (padrão `false`), `favorited_at` e `favorited_by` (`set null`), com `CHECK` de que o carimbo só
+existe com a estrela, e três índices: `message_favorite_idx` (parcial, `(conversation_id, created_at) WHERE is_favorite`),
+`message_tenant_created_idx` (`(tenant_id, created_at)`, para a varredura por idade) e `message_favorited_by_idx` (parcial, para o
+`set null`). O `(conversation_id, created_at)` que a SPEC pedia já existe (`message_conversation_created_idx`, decrescente).
+`retention_policy` (PK `(tenant_id, channel_type)`, `max_messages`, `retention_days` e `max_favorites` inteiros nulos com `CHECK >= 0`,
+`updated_by` `set null`) e `message_retention_state` (`last_run_at`, `last_result` jsonb objeto; único por `(tenant_id, channel_type)`
+e, com `tenant_id` nulo, por `channel_type`) têm `tenant_id`, mas usam **`platformOnlyPolicy()`** + `FORCE`: o dado é da
+plataforma **sobre** o tenant, e o tenant não lê nem grava (`withTenant` devolve vazio; o `bizu_app` cru também). Leitura e escrita:
+`withPlatformData` (e `withPlatformScope`, que atravessa tudo, no job). `channel_type` não tem `CHECK` no banco (como `channel.type`):
+um tipo de canal novo não exige migration. `tests/db/retention-schema.test.ts`; o inventário de `tests/db/rls.test.ts` passou a listar
+quatro tabelas só da plataforma.
 
 ## Tabelas da fase 10
 

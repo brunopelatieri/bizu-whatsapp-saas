@@ -1,6 +1,8 @@
 import type postgres from "postgres";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { waitForBackgroundTasks } from "@/lib/auth/background";
+import { getPortalAuth } from "@/lib/auth/portal";
+import { setPortalPassword } from "@/lib/portal/profile";
 import { createMemoryProvider } from "@/lib/email/providers/memory";
 import { setEmailProviderForTests } from "@/lib/email/send";
 import {
@@ -29,7 +31,17 @@ import { phoneRow } from "./phone-helpers";
  * único, resposta uniforme e quem pode entrar. Isolamento em `portal-isolation.test.ts`.
  */
 
-const PASSWORD = "senha-do-portal-1";
+const PASSWORD = "Senha-do-portal-1";
+
+/** Dez ou mais caracteres, cada uma sem uma das regras da política. */
+const WEAK = [
+  "senha-do-portal-1",
+  "SENHA-DO-PORTAL-1",
+  "Senha-do-portal-x",
+  "SenhaDoPortal1",
+  "Senha-do-\u0007portal-1",
+  `Aa1!${"x".repeat(125)}`,
+];
 const mail = createMemoryProvider();
 
 describe("portal: autenticação", () => {
@@ -369,7 +381,7 @@ describe("portal: autenticação", () => {
 
       const refused = await call("POST", "/api/portal/auth-ext/set-password", {
         cookie,
-        body: { newPassword: "outra-senha-forte-2" },
+        body: { newPassword: "Outra-senha-forte-2" },
       });
       expect(refused.status).toBe(403);
       expect(await refused.json()).toMatchObject({
@@ -379,7 +391,7 @@ describe("portal: autenticação", () => {
       const wrong = await call("POST", "/api/portal/auth-ext/set-password", {
         cookie,
         body: {
-          newPassword: "outra-senha-forte-2",
+          newPassword: "Outra-senha-forte-2",
           currentPassword: "senha-errada-123",
         },
       });
@@ -387,7 +399,7 @@ describe("portal: autenticação", () => {
 
       const changed = await call("POST", "/api/portal/auth-ext/set-password", {
         cookie,
-        body: { newPassword: "outra-senha-forte-2", currentPassword: PASSWORD },
+        body: { newPassword: "Outra-senha-forte-2", currentPassword: PASSWORD },
       });
       expect(changed.status).toBe(200);
 
@@ -395,16 +407,76 @@ describe("portal: autenticação", () => {
       expect((await call("GET", "/api/portal/me", { cookie: other })).status).toBe(401);
     });
 
-    it("senha curta é recusada", async () => {
+    it("senha curta ou fora da política é recusada", async () => {
+      const { id, email } = await createCustomer(tenantOwner);
+      const cookie = await inviteAndEnter(tenantOwner, mail, id, email);
+
+      for (const newPassword of ["curta", ...WEAK]) {
+        const response = await call("POST", "/api/portal/auth-ext/set-password", {
+          cookie,
+          body: { newPassword },
+        });
+
+        expect(response.status).toBe(400);
+      }
+
+      expect(await owner`
+        select 1 from portal_account a join portal_user u on u.id = a.user_id
+        where u.email = ${email} and a.provider_id = 'credential'
+      `).toHaveLength(0);
+    });
+
+    it("setPortalPassword recusa a fraca mesmo sem o Zod da rota", async () => {
+      const { id, email } = await createCustomer(tenantOwner);
+      await inviteAndEnter(tenantOwner, mail, id, email);
+      const [row] = await owner`
+        select u.id as user_id, u.name, s.id as session_id, s.created_at
+        from portal_user u join portal_session s on s.user_id = u.id
+        where u.email = ${email}
+      `;
+      const actor = {
+        user: { id: row?.user_id as string, email, name: row?.name as string },
+        session: { id: row?.session_id as string, createdAt: row?.created_at as Date },
+      };
+
+      for (const newPassword of WEAK) {
+        await expect(setPortalPassword(actor, { newPassword })).rejects.toMatchObject({
+          status: 400,
+          code: "PASSWORD_POLICY",
+        });
+      }
+
+      expect(await owner`
+        select 1 from portal_account where user_id = ${actor.user.id}
+      `).toHaveLength(0);
+    });
+
+    it("grava a senha normalizada e o login normaliza igual", async () => {
       const { id, email } = await createCustomer(tenantOwner);
       const cookie = await inviteAndEnter(tenantOwner, mail, id, email);
 
       const response = await call("POST", "/api/portal/auth-ext/set-password", {
         cookie,
-        body: { newPassword: "curta" },
+        body: { newPassword: "  Señha do portal 1!  " },
       });
+      expect(response.status).toBe(200);
 
-      expect(response.status).toBe(400);
+      expect((await signIn(email, "Señha do portal 1!")).status).toBe(200);
+      expect((await signIn(email, " Señha do portal 1!\t")).status).toBe(200);
+    });
+
+    it("login não cobra complexidade de senha antiga", async () => {
+      const { email } = await enterWithPassword();
+      const { password } = await getPortalAuth().$context;
+      const old = "senhaantiga";
+
+      await owner`
+        update portal_account set password = ${await password.hash(old)}
+        where provider_id = 'credential'
+          and user_id = (select id from portal_user where email = ${email})
+      `;
+
+      expect((await signIn(email, old)).status).toBe(200);
     });
   });
 
@@ -437,6 +509,37 @@ describe("portal: autenticação", () => {
         where id = ${tenant.id}
       `;
     }
+
+    it("senha fraca é recusada na rota e direto na instância", async () => {
+      await allowSelfSignup(true);
+      const email = customerEmail();
+
+      for (const password of WEAK) {
+        const response = await call("POST", "/api/portal/auth-ext/sign-up", {
+          body: {
+            name: "Pessoa Lead",
+            email,
+            password,
+            org: tenant.slug,
+            phone: "11987654321",
+            acceptTerms: true,
+            termsVersion: "2026-11",
+          },
+        });
+        expect(response.status).toBe(400);
+
+        // Sem o Zod da rota: é o hook da instância que recusa.
+        await expect(
+          getPortalAuth().api.signUpEmail({
+            body: { name: "Pessoa Lead", email, password },
+          }),
+        ).rejects.toMatchObject({ body: { code: "PASSWORD_POLICY" } });
+      }
+
+      await waitForBackgroundTasks();
+      expect(await owner`select 1 from portal_user where email = ${email}`).toHaveLength(0);
+      await allowSelfSignup(false);
+    });
 
     it("desligado por padrão: responde igual e não cria nada", async () => {
       const email = customerEmail();

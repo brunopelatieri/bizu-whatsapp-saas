@@ -14,7 +14,8 @@ export const portalTokenSchema = z.object({
   org: slugSchema.optional(),
 });
 
-export const portalSignupSchema = signupSchema.extend({ org: slugSchema });
+// O cliente pode ter fixo; só a conta da equipe exige WhatsApp.
+export const portalSignupSchema = signupSchema.extend({ org: slugSchema, phone: phoneSchema });
 export type PortalSignupInput = z.infer<typeof portalSignupSchema>;
 
 export const portalProfileSchema = z.object({

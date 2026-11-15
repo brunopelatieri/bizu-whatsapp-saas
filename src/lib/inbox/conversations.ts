@@ -1,6 +1,6 @@
 import { and, desc, eq, gt, ilike, isNull, like, ne, or, type SQL, sql } from "drizzle-orm";
 import { type Scope, type Tx, withScope } from "@/db/rls";
-import { chatContact, conversation, customer, message, user } from "@/db/schema";
+import { channel, chatContact, conversation, customer, message, user } from "@/db/schema";
 import { escapeLike } from "@/lib/admin/tenants";
 import { type CustomerTagView, tagsOfCustomers } from "@/lib/crm/tags";
 import { linkCandidates, providerPhone } from "@/lib/inbox/contacts";
@@ -20,6 +20,8 @@ import {
 import { type InboxActor, readsCustomers, visibleConversation } from "@/lib/inbox/visibility";
 import { sessionWindow } from "@/lib/inbox/window";
 import { normalizePhone } from "@/lib/phone/br";
+import type { ChannelType } from "@/lib/channels/types";
+import type { ConversationStatus } from "@/lib/inbox/constants";
 import type { ConversationsQuery, MessagesQuery } from "@/lib/schemas/inbox";
 import { notFound, TenantRuleError } from "@/lib/tenant/errors";
 
@@ -272,6 +274,70 @@ export async function getConversation(actor: InboxActor, conversationId: string)
       contact: contactView(contact, displayNameOf(row, actor)),
       link: await linkOf(tx, actor, contact),
       window: sessionWindow(row.channelType, row.lastInboundAt),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Outras conversas do mesmo contato (X1, "Também neste contato")
+// ---------------------------------------------------------------------------
+
+/** Teto defensivo: o plano limita os números, e há no máximo uma conversa por contato e número. */
+const RELATED_MAX = 50;
+
+/**
+ * Uma conversa do mesmo contato em outro número. Só o que a seção mostra: número, situação e data.
+ * Nada de dono, prévia nem contador: quem vê a conversa atual não ganha, por aqui, dado de outra.
+ */
+export type RelatedConversation = {
+  id: string;
+  status: ConversationStatus;
+  channel: { id: string; name: string; type: ChannelType };
+  lastMessageAt: Date | null;
+  createdAt: Date;
+};
+
+/**
+ * As outras conversas do contato da conversa `conversationId`. A atual precisa estar no alcance do
+ * ator (senão 404, igual a id inexistente) e cada outra passa pelo mesmo `visibleConversation`: a
+ * que a pessoa não pode ver não aparece nem é contada. Sem nenhuma outra, `items` vem vazio.
+ */
+export async function listRelatedConversations(actor: InboxActor, conversationId: string) {
+  return withScope(actor.scope, async (tx) => {
+    const current = await requireVisibleConversation(tx, actor, conversationId);
+
+    const rows = await tx
+      .select({
+        id: conversation.id,
+        status: conversation.status,
+        channelId: channel.id,
+        channelName: channel.name,
+        channelType: channel.type,
+        lastMessageAt: conversation.lastMessageAt,
+        createdAt: conversation.createdAt,
+      })
+      .from(conversation)
+      .innerJoin(channel, eq(channel.id, conversation.channelId))
+      .where(
+        and(
+          eq(conversation.contactId, current.contactId),
+          ne(conversation.id, current.id),
+          visibleConversation(actor),
+        ),
+      )
+      .orderBy(sql`${conversation.lastMessageAt} desc nulls last`, desc(conversation.id))
+      .limit(RELATED_MAX);
+
+    return {
+      items: rows.map(
+        (row): RelatedConversation => ({
+          id: row.id,
+          status: row.status,
+          channel: { id: row.channelId, name: row.channelName, type: row.channelType },
+          lastMessageAt: row.lastMessageAt,
+          createdAt: row.createdAt,
+        }),
+      ),
     };
   });
 }

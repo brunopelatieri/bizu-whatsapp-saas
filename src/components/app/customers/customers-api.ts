@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api/client";
 import type { CustomerStatus } from "@/lib/tenant/customer-constants";
 import { useAuth } from "@/providers/auth-provider";
 import type { TagRef } from "@/components/crm/tags-api";
+import type { PhoneChange } from "@/components/phone/phone-change-api";
 
 export type Customer = {
   id: string;
@@ -21,7 +22,15 @@ export type Customer = {
   invitedAt: string | null;
   lastLoginAt: string | null;
   hasPortalAccess: boolean;
+  /** O telefone atual foi confirmado (pela equipe, por link ou por quem escreveu). */
+  phoneVerified: boolean;
+  /** A pessoa da equipe que também é este cliente, com o papel atual dela. */
+  team: { userId: string; role: string } | null;
+  /** Conversas de WhatsApp que a exclusão da ficha apaga; só o detalhe (`GET /api/customers/:id`) traz. */
+  conversationCount?: number;
   createdAt: string;
+  /** A troca de número em aberto; só `GET /api/customers/:id` e o `PATCH` a trazem. A ficha segue com `phone` até ela fechar. */
+  phoneChange?: PhoneChange | null;
 };
 
 type CustomerPage = { items: Customer[]; total: number; pageSize: number };
@@ -63,7 +72,7 @@ export function useCustomer(id: string) {
 
 type CustomerRequest = {
   path: string;
-  method: "POST" | "PATCH" | "DELETE";
+  method: "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
 };
 

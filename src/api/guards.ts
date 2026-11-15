@@ -11,23 +11,26 @@ export const MINUTE = 60 * 1000;
 /** Vem antes de `requireAuth`: cada sessão validada consulta o banco. */
 export const authRateLimit = rateLimit({ name: "auth", limit: 60, windowMs: MINUTE });
 
-const limitJsonBody = bodyLimit({
-  maxSize: 16 * 1024,
-  onError: (c) => c.json({ error: "Requisição muito grande." }, 413),
-});
-
 /**
- * Sem `Content-Length` nem `Transfer-Encoding`, a requisição HTTP/1.1 não tem corpo e não há
- * o que limitar. Pular aqui importa no `npm run dev`: lá o `Request` vem de outra classe, e o
- * `bodyLimit`, ao embrulhar um corpo vazio, quebrava todo `DELETE` sem corpo com 500.
+ * Limite de corpo de uma rota JSON. Sem `Content-Length` nem `Transfer-Encoding`, a requisição
+ * HTTP/1.1 não tem corpo e não há o que limitar. Pular aqui importa no `npm run dev`: lá o
+ * `Request` vem de outra classe, e o `bodyLimit`, ao embrulhar um corpo vazio, quebrava todo
+ * `DELETE` sem corpo com 500.
  */
-export const jsonBodyLimit = createMiddleware(async (c, next) => {
-  if (!c.req.header("content-length") && !c.req.header("transfer-encoding")) {
-    return next();
-  }
+export function jsonBodyLimitOf(maxSize: number, message = "Requisição muito grande.") {
+  const limit = bodyLimit({ maxSize, onError: (c) => c.json({ error: message }, 413) });
 
-  return limitJsonBody(c, next);
-});
+  return createMiddleware(async (c, next) => {
+    if (!c.req.header("content-length") && !c.req.header("transfer-encoding")) {
+      return next();
+    }
+
+    return limit(c, next);
+  });
+}
+
+/** O padrão das rotas JSON: 16 KB. A importação de clientes tem o próprio teto (`customer-import.ts`). */
+export const jsonBodyLimit = jsonBodyLimitOf(16 * 1024);
 
 /**
  * Recusa `Origin` de outro site. O Better Auth só faz isso quando a requisição traz

@@ -120,7 +120,10 @@ describe("schemas do portal", () => {
   it("senha nova segue o mínimo de 10", () => {
     expect(setPasswordSchema.safeParse({ newPassword: "curta" }).success).toBe(false);
     expect(
-      setPasswordSchema.safeParse({ newPassword: "senha-com-dez" }).success,
+      setPasswordSchema.safeParse({ newPassword: "senha-sem-maiuscula-1" }).success,
+    ).toBe(false);
+    expect(
+      setPasswordSchema.safeParse({ newPassword: "Senha-com-dez-1" }).success,
     ).toBe(true);
   });
 });

@@ -2,7 +2,7 @@
 
 - **Escopo:** Área do proprietário da plataforma: rotas `/admin/**`, API `/api/admin/*`, papéis, suspensão, usuários, planos e configurações.
 - **Specs relacionadas:** `docs/specs/saas-foundation/spec-rotas-api.md`, `spec-tenant-rbac.md`, `spec-billing.md`
-- **Paths do código:** `src/api/admin.ts`, `src/api/admin-channels.ts`, `src/api/admin-channel-events.ts`, `src/api/admin-inbox.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`
+- **Paths do código:** `src/api/admin.ts`, `src/api/admin-channels.ts`, `src/api/admin-channel-events.ts`, `src/api/admin-inbox.ts`, `src/api/admin-retention.ts`, `src/lib/admin/` (`tenants.ts`, `users.ts`, `plans.ts`, `org-links.ts`, `people.ts`, `deletion.ts`), `src/lib/schemas/admin.ts`, `src/lib/constants/admin-nav.ts`, `src/components/admin/`, `src/pages/admin/`, `src/routes/admin/`, `tests/db/admin.test.ts`, `tests/db/admin-catalogo.test.ts`, `tests/db/admin-deletion.test.ts`, `tests/db/admin-retention.test.ts`
 
 ## Acesso
 
@@ -50,6 +50,10 @@ o botão "Conversar" da lista de usuários.
 | `POST /api/admin/webhooks/:id/reprocess` | owner | só `failed` ou `ignored` e verificado; 409 `NOT_REPROCESSABLE` |
 | `GET /api/admin/channel-events?status&page` | plataforma | `channel_event` de todos os escopos, sem `raw` nem `dedupe_key`; rotas em `src/api/admin-channel-events.ts`, sub-router com a própria cadeia de guardas, montado antes de `adminRoutes` (`tech/29-canais-whatsapp.md`) |
 | `/api/admin/channels/*` | leitura: plataforma; escrita: owner | números de WhatsApp **da plataforma** (`tenant_id` nulo): as mesmas rotas de `/api/channels`, montadas por `buildChannelRoutes` em `src/api/admin-channels.ts` (sub-router com a própria cadeia, antes de `adminRoutes`); sem limite de plano; `blockMutationsWhileImpersonating`; auditoria `channel.*` com `actor_type = platform`; a lista traz `providers[tipo].missing` (nomes de variáveis). Ver `tech/29-canais-whatsapp.md` |
+| `GET /api/admin/retention/tenants/:id` | plataforma | retenção de mensagens da organização (bloco R): `{ scopes: RetentionView[] }`, um por tipo de canal, com a linha (`policy`), os padrões do `.env`, o efetivo, `sources`, piso, lote, se está ligada e a última execução (`lastRun`). 404 para organização inexistente ou excluída. Sub-router `src/api/admin-retention.ts`, com a própria cadeia, montado antes de `adminRoutes`. Contrato em "R2: o que foi feito" da SPEC `pre-producao` |
+| `PUT /api/admin/retention/tenants/:id/:channelType` `{ maxMessages, retentionDays, maxFavorites }` | owner | grava a linha de `retention_policy` (os três obrigatórios; `null` herda, `0` sem limite, tetos de `RETENTION_LIMIT_MAX`); `blockWhileImpersonating`; audita `admin.retention_policy_updated` **sem `tenant_id`**, só com o tipo e os números; responde `{ scope }` |
+| `GET /api/admin/retention/tenants/:id/:channelType/preview` | plataforma | `{ preview: RetentionRunResult }`: o que a limpeza faria agora pela política efetiva, mesmo desligada; não apaga nem grava |
+| `GET /api/admin/retention/platform`, `GET /api/admin/retention/platform/:channelType/preview` | plataforma | o mesmo para o escopo da plataforma (só os padrões do `.env`; sem escrita) |
 | `POST /api/admin/channel-events/:id/reprocess` | owner | só `failed` ou `ignored`; 409 `NOT_REPROCESSABLE`; `blockWhileImpersonating`; reenfileira `channel.inbound`; audita `admin.channel_event_reprocessed` |
 | `GET`, `POST /api/admin/plans` | leitura plataforma; escrita owner | 409 `SLUG_TAKEN` |
 | `PATCH /api/admin/plans/:id` | owner | parcial, o `slug` não muda; 409 `PLAN_HAS_PRICES` ao marcar gratuito com preço ativo; reativar preço de plano gratuito é 409 `FREE_PLAN_NO_PRICE`; audita `admin.plan_updated` com `fields`. `active: false` é "arquivar" (botão na lista e no detalhe) |
@@ -69,7 +73,8 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | Rota | Arquivo |
 |---|---|
 | `/admin` | `pages/admin/overview-page.tsx` |
-| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx` |
+| `/admin/tenants`, `/admin/tenants/:id` | `tenants-page.tsx` (filtro `?plan=` e `?tags=`, chips de etiqueta), `tenant-detail-page.tsx` (cartão "Etiquetas e campos": `components/admin/tenant-annotation-card.tsx`, editável só por `platform_owner`; "Editar": `components/admin/edit-tenant-dialog.tsx`; excluir e cancelar exclusão com `components/admin/delete-dialog.tsx`); cobrança manual em `components/admin/manual-billing-card.tsx`; cartão "Retenção de mensagens" (`TenantRetentionCard`, `components/admin/retention-card.tsx`, bloco R, R3b; ver "Retenção de mensagens" abaixo) |
+| `/admin/perfil` | `pages/profile-page.tsx` (rota `routes/admin/profile.tsx`): a página "Perfil" da própria conta, o mesmo componente de `/app/perfil` (`tech/08-auth.md`, "Perfil da própria conta"); no menu do usuário |
 | `/admin/usuarios` | `users-page.tsx`; o nome leva ao detalhe |
 | `/admin/usuarios/:id`, `/admin/usuarios/portal/:id` | `user-detail-page.tsx`, `portal-user-detail-page.tsx` (rotas `routes/admin/user.tsx`, `portal-user.tsx`) |
 | `/admin/planos`, `/admin/planos/:id` | `plans-page.tsx`, `plan-detail-page.tsx`: arquivar/reativar em botão, "Excluir plano" (desabilitado com uso, pede arquivar) e excluir preço, ambos com `confirm-dialog.tsx` |
@@ -78,7 +83,7 @@ tenant levam o `tenant_id`. Tabelas de tenant são lidas com `withPlatformScope(
 | `/admin/configuracoes/etiquetas`, `/admin/configuracoes/campos` | `routes/admin/crm-tags.tsx`, `crm-fields.tsx`: `TagManager` e `CustomFieldManager` com a API da plataforma por props (suporte só lê); links em `/admin/configuracoes` |
 | `/admin/configuracoes/canais` | `routes/admin/channels.tsx`: `ChannelManager` de `src/components/channels/` com `basePath = /api/admin/channels` (suporte só lê) e o aviso das variáveis que faltam no servidor; link em `/admin/configuracoes` e item "Canais" no menu |
 | `/admin/auditoria` | `routes/admin/audit.tsx`: log global, por ação, nome da organização (`tenantQ`, `ilike` em `organization.name`) e pessoa |
-| `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte |
+| `/admin/configuracoes` | `settings-page.tsx`, inclusive a política de acesso do suporte e o cartão "Retenção de mensagens da plataforma" (`PlatformRetentionCard`, só leitura) |
 | `/admin/configuracoes/seguranca` | `routes/admin/security.tsx`: 2FA de quem administra |
 
 Reaproveitam o shell de `/app`: `AppSidebar`, `AppNav` e `AppTopbar` recebem o menu
@@ -86,6 +91,28 @@ Reaproveitam o shell de `/app`: `AppSidebar`, `AppNav` e `AppTopbar` recebem o m
 escrita só aparece para `platform_owner` (`useIsPlatformOwner`). Listagem que cita organização usa `components/admin/org-list.tsx` (nome com link, "+N") sobre `lib/admin/org-links.ts`, que lê `member`, `customer` e `subscription` com função de janela em `withPlatformScope`: uma consulta por página, sem N+1. O menu do usuário mostra
 "Administração" para quem tem papel de plataforma. Formulários validam com os schemas de
 `src/lib/schemas/admin.ts`; `limits` vazio vira `null` (ilimitado).
+
+## Retenção de mensagens (bloco R, R3b)
+
+Tela sobre `/api/admin/retention/*` (acima), sem rota de servidor própria e **sem apagar nada**: a prévia é `GET` e a limpeza é só o job diário
+`inbox.retention`, com `MESSAGE_RETENTION_ENABLED=true`.
+
+- **Onde:** `TenantRetentionCard` em `/admin/tenants/:id` (um bloco por tipo de canal; some na organização `deleted`, só leitura em `deleting`) e
+  `PlatformRetentionCard` em `/admin/configuracoes` (os padrões do `.env` da plataforma, só leitura, até para o proprietário).
+- **Peças:** `components/admin/retention-card.tsx` (busca com `useAdminQuery`, grava com `useAdminMutation`, prévia sob demanda),
+  `retention-scope.tsx` (apresentação, sem hooks de dados; testável com `renderToStaticMarkup`) e `src/lib/inbox/retention-format.ts` (módulo puro: modos
+  de cada limite, rascunho ↔ corpo do `PUT`, rótulos de origem, resumos da prévia e da última limpeza, aviso de estado). Nome do tipo de canal vem de
+  `CHANNEL_KINDS`; a tela não escreve nome de módulo.
+- **Cada limite tem três opções distintas:** "Herdar o padrão do sistema (X)" (`null`), "Sem limite" (`0`) e "Definir um valor" (1 até
+  `RETENTION_LIMIT_MAX`; vazio e `0` são recusados na tela). Mostra o que vale (`effective`) e de onde vem (`sources`: "fixado para esta organização",
+  "padrão do sistema", "nenhum limite definido"), o piso de idade e a última limpeza ("Nunca rodou." ou as contagens).
+- **Confirmação ao salvar:** com a retenção ligada, a política que aperta algum limite (número onde não havia, ou menor que o que vale hoje,
+  inclusive ao herdar um padrão mais baixo) abre um diálogo com cada limite, de quanto para quanto (`saveConfirmation`). Desligada, ou só
+  afrouxando, salva direto.
+- **Avisos:** retenção desligada, "a política fica gravada, mas nenhuma mensagem é apagada"; ligada, "roda uma vez por dia e apaga sem volta; favorita e
+  mensagem mais nova que o piso não saem". A prévia diz que não apaga e que usa a política **gravada**, não o que está digitado.
+- Só `platform_owner` vê o formulário; o suporte lê e vê a prévia (o `PUT` direto é 403). Roteiro manual com a retenção ligada em banco de teste:
+  SPEC `pre-producao`, "R3b: o que foi feito".
 
 ## Personificação
 
@@ -97,7 +124,12 @@ responde 403 e avisa os owners. A política se edita em `/admin/configuracoes` e
 
 ## Usuários do portal
 
-`/admin/usuarios` tem duas abas. Clientes e leads são outra identidade (`portal_user`):
+`/admin/usuarios` tem uma terceira aba, **"Telefones"** (`?scope=telefones`, T4), só para o proprietário: a fila de
+liberação à mão de `GET /api/admin/phone-verifications` (owners, equipe da plataforma e contas sem organização), com
+a contagem de pendentes e o botão "Liberar" com confirmação (`POST …/:id/confirm`); o pedido de troca de número (`purpose = change`) aparece marcado "Troca de número", com o número novo. O suporte não vê a aba: a rota
+é `ownerOnly`. Componentes em `src/components/phone/` (`tech/28-crm-cadastro.md`, "Telas da liberação à mão").
+
+Além dela, `/admin/usuarios` tem duas abas. Clientes e leads são outra identidade (`portal_user`):
 `GET /api/admin/users?scope=portal` traz as organizações (nome e status do vínculo) e as sessões em aberto, e
 `POST /api/admin/portal-users/:id/revoke-sessions`, só do proprietário, derruba as sessões. Não
 há banimento: o acesso é de cada tenant, por `customer.status`. O overview conta os clientes
